@@ -1224,6 +1224,7 @@
       subtableClose: "閉じる",
       subtableAddRow: "＋ 行追加",
       subtableAutoWidth: "自動調整",
+      subtableReloadLayout: "レイアウト再取得",
       subtableOpen: "開く",
       subtableRemoveRow: "削除",
       subtableSave: "保存",
@@ -1308,6 +1309,8 @@
       toastLayoutPresetDeleted: "レイアウトを削除しました",
       toastLayoutPresetRenamed: "レイアウト名を変更しました",
       toastLayoutPresetDuplicated: "レイアウトを複製しました",
+      toastSubtableLayoutReloaded: "サブテーブルのレイアウトを再取得しました",
+      toastSubtableLayoutReloadFailed: "サブテーブルのレイアウト再取得に失敗しました",
       errorUnsupportedFilter: "この一覧には一時的なフィルター/ソートが含まれているため、Excelモードを起動できません。ビューを標準状態に戻してから再試行してください。",
       overlayUnsupportedPage: "この画面では Excel Overlay を利用できません。一覧/詳細画面で利用できます。"
     },
@@ -1348,6 +1351,7 @@
       subtableClose: "Close",
       subtableAddRow: "+ Add row",
       subtableAutoWidth: "Auto width",
+      subtableReloadLayout: "Reload layout",
       subtableOpen: "Open",
       subtableRemoveRow: "Delete",
       subtableSave: "Save",
@@ -1432,6 +1436,8 @@
       toastLayoutPresetDeleted: "Layout deleted",
       toastLayoutPresetRenamed: "Layout renamed",
       toastLayoutPresetDuplicated: "Layout duplicated",
+      toastSubtableLayoutReloaded: "Subtable layout reloaded",
+      toastSubtableLayoutReloadFailed: "Failed to reload subtable layout",
       errorUnsupportedFilter: "This list has ad-hoc filters/sorting that cannot be replayed in Excel mode. Clear the filter and try again.",
       overlayUnsupportedPage: "Excel Overlay is only available on list/detail pages."
     }
@@ -1739,6 +1745,8 @@
       this.overlayLayoutPresetCache = null;
       this.overlayLayoutState = null;
       this.subtableWidthPrefCache = null;
+      this.detailFormLayout = null;
+      this.detailSubtableLayoutOrderCache = new Map();
       this.viewKey = 'default';
       this.viewName = '';
       this.viewId = '';
@@ -2374,6 +2382,7 @@
             needApp: Boolean(options?.needApp),
             needViews: Boolean(options?.needViews),
             needFields: Boolean(options?.needFields),
+            forceFieldsRefresh: Boolean(options?.forceFieldsRefresh),
             trigger: String(options?.trigger || 'overlay_open'),
             source: String(options?.source || 'overlay'),
             logGroup: String(options?.logGroup || 'overlay')
@@ -3153,6 +3162,8 @@
       if (addBtn) addBtn.textContent = resolveText(this.language, 'subtableAddRow');
       const autoBtn = panel.querySelector('[data-subtable-action="autowidth"]');
       if (autoBtn) autoBtn.textContent = resolveText(this.language, 'subtableAutoWidth');
+      const reloadBtn = panel.querySelector('[data-subtable-action="reload-layout"]');
+      if (reloadBtn) reloadBtn.textContent = resolveText(this.language, 'subtableReloadLayout');
       const cancelBtn = panel.querySelector('[data-subtable-action="cancel"]');
       if (cancelBtn) cancelBtn.textContent = resolveText(this.language, 'subtableCancel');
       const saveBtn = panel.querySelector('[data-subtable-action="save"]');
@@ -3266,7 +3277,8 @@
       const metadataRes = await this.getMetadataBundle({
         needApp: true,
         needViews: this.isListMode(),
-        needFields: true
+        needFields: true,
+        forceFieldsRefresh: true
       });
       const metadataBundle = metadataRes?.bundle && typeof metadataRes.bundle === 'object'
         ? metadataRes.bundle
@@ -4217,7 +4229,93 @@
       const key = String(recordId || '').trim();
       const code = String(fieldCode || '').trim();
       if (!key || !code) return { editable: false, reason: 'unknown_field' };
-      return this.permissionService.getCellPermission(key, code);
+      const field = this.fieldMap.get(code);
+      if (!field) return { editable: false, reason: 'unknown_field' };
+      return this.getFieldPermissionInfo(key, field);
+    }
+
+    getFieldPermissionInfo(recordId, field, options = {}) {
+      const key = String(recordId || '').trim();
+      if (!key || !field || typeof field !== 'object') {
+        return { editable: false, reason: 'unknown_field' };
+      }
+      const code = String(field.code || '').trim();
+      const useService = options.localOnly !== true && code && this.fieldMap.get(code) === field;
+      if (useService) {
+        return this.permissionService.getCellPermission(key, code);
+      }
+      if (this.permissionService.isSystemField(field)) {
+        return { editable: false, reason: 'system_field' };
+      }
+      if (this.isSubtableField(field)) {
+        return { editable: false, reason: 'field_readonly' };
+      }
+      if (this.permissionService.isLookupField(field) || field.lookupAuto) {
+        return { editable: false, reason: 'lookup_readonly' };
+      }
+      if (!this.permissionService.isFieldTypeEditable(field)) {
+        return { editable: false, reason: 'field_readonly' };
+      }
+      if (!this.isOverlayEditable()) {
+        return { editable: false, reason: 'app_readonly' };
+      }
+      if (!this.permissionService.canEditRecord(key)) {
+        return { editable: false, reason: 'record_readonly' };
+      }
+      return { editable: true, reason: null };
+    }
+
+    resolveFieldInteraction(field, permission, options = {}) {
+      const editable = Boolean(permission?.editable);
+      const allowReadonlyModal = Boolean(options.allowReadonlyModal);
+      if (this.isRichTextField(field)) {
+        return { kind: 'modal-view', canOpen: true, readOnly: true };
+      }
+      if (this.isMultiLineField(field)) {
+        if (editable) {
+          return { kind: 'modal-edit', canOpen: true, readOnly: false };
+        }
+        return { kind: 'modal-view', canOpen: allowReadonlyModal, readOnly: true };
+      }
+      if (this.permissionService.isLookupField(field) || field?.lookupAuto) {
+        return { kind: 'readonly', canOpen: false, readOnly: true };
+      }
+      if (this.isChoiceField(field)) {
+        return { kind: editable ? 'inline-choice' : 'readonly', canOpen: false, readOnly: !editable };
+      }
+      if (this.isMultiChoiceField(field)) {
+        return { kind: editable ? 'inline-multi-choice' : 'readonly', canOpen: false, readOnly: !editable };
+      }
+      if (this.permissionService.isFieldTypeEditable(field)) {
+        return { kind: editable ? 'inline-edit' : 'readonly', canOpen: false, readOnly: !editable };
+      }
+      return { kind: 'readonly', canOpen: false, readOnly: true };
+    }
+
+    isSubtableDisplayableField(field) {
+      if (!field || !field.code || !field.type) return false;
+      if (this.isSubtableField(field)) return false;
+      if (this.permissionService.isSystemField(field)) return false;
+      return true;
+    }
+
+    formatSubtableCellDisplayValue(field, value) {
+      if (Array.isArray(value)) {
+        if (value.every((item) => typeof item === 'string')) {
+          return value.join(', ');
+        }
+        const labels = value
+          .map((item) => {
+            if (!item || typeof item !== 'object') return String(item ?? '');
+            return String(item.name || item.code || item.label || '').trim();
+          })
+          .filter(Boolean);
+        if (labels.length) return labels.join(', ');
+      } else if (value && typeof value === 'object') {
+        const label = String(value.name || value.code || value.label || '').trim();
+        if (label) return label;
+      }
+      return this.formatCellDisplayValue(field, value);
     }
 
     async loadEffectiveRecordAcl() {
@@ -4429,16 +4527,18 @@
 
     getSubtableColumnWidthRange(type) {
       const t = String(type || '').toUpperCase();
-      if (t === 'NUMBER' || t === 'DATE') {
-        return { min: 120, max: 160, base: 132 };
+      if (t === 'NUMBER') return { min: 100, max: 120, base: 110 };
+      if (t === 'CALC') return { min: 100, max: 140, base: 120 };
+      if (t === 'DATE') return { min: 120, max: 140, base: 130 };
+      if (t === 'DROP_DOWN' || t === 'RADIO_BUTTON') return { min: 160, max: 200, base: 180 };
+      if (t === 'CHECK_BOX' || t === 'MULTI_SELECT') return { min: 180, max: 240, base: 210 };
+      if (t === 'USER_SELECT' || t === 'ORGANIZATION_SELECT' || t === 'GROUP_SELECT') {
+        return { min: 180, max: 220, base: 200 };
       }
-      if (t === 'DROP_DOWN' || t === 'RADIO_BUTTON') {
-        return { min: 160, max: 260, base: 180 };
-      }
-      if (t === 'MULTI_LINE_TEXT') {
-        return { min: 240, max: 360, base: 280 };
-      }
-      return { min: 160, max: 320, base: 190 };
+      if (t === 'MULTI_LINE_TEXT' || t === 'RICH_TEXT') return { min: 220, max: 280, base: 248 };
+      if (t === 'LOOKUP') return { min: 180, max: 220, base: 200 };
+      if (t === 'LINK') return { min: 180, max: 220, base: 200 };
+      return { min: 180, max: 220, base: 196 };
     }
 
     normalizeSubtableColumnWidth(width, type) {
@@ -4458,6 +4558,156 @@
       return width + 28;
     }
 
+    getSubtableLabelWidth(field) {
+      const label = String(field?.label || field?.code || '').trim();
+      if (!label) return 0;
+      return this.estimateSubtableCellWidth(label) + 20;
+    }
+
+    getOrderedSubtableChildFields(field) {
+      const childFields = Array.isArray(field?.subtable?.fields) ? field.subtable.fields : [];
+      return childFields.filter((child) => this.isSubtableDisplayableField(child));
+    }
+
+    logLayoutCacheTrace(label, details = {}) {
+      void label;
+      void details;
+    }
+
+    async loadDetailFormLayout(forceRefresh = false, trigger = 'subtable_modal_open') {
+      const appId = String(this.appId || this.detailAppId || '').trim();
+      if (!forceRefresh && Array.isArray(this.detailFormLayout)) {
+        this.logLayoutCacheTrace('LAYOUT CACHE HIT: memory', {
+          appId,
+          trigger,
+          source: 'overlay-instance',
+          forceRefresh
+        });
+        return this.detailFormLayout;
+      }
+      if (!appId) {
+        this.detailFormLayout = [];
+        return this.detailFormLayout;
+      }
+      try {
+        const response = await this.postFn('EXCEL_GET_FORM_LAYOUT', {
+          appId,
+          trigger,
+          forceRefresh: Boolean(forceRefresh)
+        });
+        this.detailFormLayout = Array.isArray(response?.layout) ? response.layout : [];
+      } catch (_err) {
+        this.detailFormLayout = [];
+      }
+      return this.detailFormLayout;
+    }
+
+    findSubtableLayoutNode(nodes, subtableCode) {
+      const targetCode = String(subtableCode || '').trim();
+      if (!targetCode) return null;
+      const stack = Array.isArray(nodes) ? nodes.slice() : [nodes];
+      while (stack.length) {
+        const node = stack.shift();
+        if (!node || typeof node !== 'object') continue;
+        const type = String(node.type || '').toUpperCase();
+        if (type === 'SUBTABLE' && String(node.code || '').trim() === targetCode) {
+          return node;
+        }
+        if (Array.isArray(node.layout)) stack.push(...node.layout);
+        if (Array.isArray(node.fields)) stack.push(...node.fields);
+        if (Array.isArray(node.tabs)) {
+          node.tabs.forEach((tab) => {
+            if (Array.isArray(tab?.layout)) stack.push(...tab.layout);
+            if (Array.isArray(tab?.fields)) stack.push(...tab.fields);
+          });
+        }
+      }
+      return null;
+    }
+
+    collectLayoutFieldCodes(nodes, out = [], seen = new Set()) {
+      const list = Array.isArray(nodes) ? nodes : [nodes];
+      list.forEach((node) => {
+        if (!node || typeof node !== 'object') return;
+        const type = String(node.type || '').toUpperCase();
+        const code = String(node.code || '').trim();
+        if (
+          code
+          && type !== 'ROW'
+          && type !== 'GROUP'
+          && type !== 'SUBTABLE'
+          && type !== 'LABEL'
+          && type !== 'SPACER'
+          && type !== 'HR'
+          && !seen.has(code)
+        ) {
+          seen.add(code);
+          out.push(code);
+        }
+        if (Array.isArray(node.layout)) this.collectLayoutFieldCodes(node.layout, out, seen);
+        if (Array.isArray(node.fields)) this.collectLayoutFieldCodes(node.fields, out, seen);
+        if (Array.isArray(node.tabs)) {
+          node.tabs.forEach((tab) => {
+            if (Array.isArray(tab?.layout)) this.collectLayoutFieldCodes(tab.layout, out, seen);
+            if (Array.isArray(tab?.fields)) this.collectLayoutFieldCodes(tab.fields, out, seen);
+          });
+        }
+      });
+      return out;
+    }
+
+    async getDetailSubtableLayoutFieldOrder(subtableFieldCode, forceRefresh = false, trigger = 'subtable_modal_open') {
+      const code = String(subtableFieldCode || '').trim();
+      if (!code) return [];
+      if (!forceRefresh && this.detailSubtableLayoutOrderCache.has(code)) {
+        return this.detailSubtableLayoutOrderCache.get(code).slice();
+      }
+      const layout = await this.loadDetailFormLayout(forceRefresh, trigger);
+      const subtableNode = this.findSubtableLayoutNode(layout, code);
+      const orderedCodes = subtableNode?.fields
+        ? this.collectLayoutFieldCodes(subtableNode.fields, [], new Set())
+        : [];
+      this.detailSubtableLayoutOrderCache.set(code, orderedCodes);
+      return orderedCodes.slice();
+    }
+
+    async refreshSubtableLayoutFieldOrder(subtableFieldCode) {
+      const code = String(subtableFieldCode || '').trim();
+      if (!code) throw new Error('subtableFieldCode is required');
+      const previousLayout = Array.isArray(this.detailFormLayout) ? this.detailFormLayout : null;
+      const previousOrder = this.detailSubtableLayoutOrderCache.has(code)
+        ? this.detailSubtableLayoutOrderCache.get(code).slice()
+        : null;
+      this.detailFormLayout = null;
+      this.detailSubtableLayoutOrderCache.delete(code);
+      const orderedCodes = await this.getDetailSubtableLayoutFieldOrder(code, true, 'subtable_layout_manual_refresh');
+      if (orderedCodes.length) return orderedCodes;
+      if (Array.isArray(previousLayout)) {
+        this.detailFormLayout = previousLayout;
+      }
+      if (Array.isArray(previousOrder) && previousOrder.length) {
+        this.detailSubtableLayoutOrderCache.set(code, previousOrder);
+      }
+      throw new Error('subtable layout order not found');
+    }
+
+    async getSubtableEditorChildFields(field) {
+      const childFields = this.getOrderedSubtableChildFields(field);
+      if (!childFields.length) return childFields;
+      const orderedCodes = await this.getDetailSubtableLayoutFieldOrder(field?.code, false, 'subtable_modal_open');
+      if (!orderedCodes.length) return childFields;
+      const orderMap = new Map(orderedCodes.map((code, index) => [String(code || '').trim(), index]));
+      return childFields
+        .map((child, index) => ({ child, index }))
+        .sort((a, b) => {
+          const aOrder = orderMap.has(a.child.code) ? orderMap.get(a.child.code) : Number.MAX_SAFE_INTEGER;
+          const bOrder = orderMap.has(b.child.code) ? orderMap.get(b.child.code) : Number.MAX_SAFE_INTEGER;
+          if (aOrder !== bOrder) return aOrder - bOrder;
+          return a.index - b.index;
+        })
+        .map((entry) => entry.child);
+    }
+
     computeSubtableAutoWidths(childFields, editorRows) {
       const rows = Array.isArray(editorRows) ? editorRows : [];
       const next = {};
@@ -4465,10 +4715,10 @@
         const code = String(child?.code || '').trim();
         if (!code) return;
         const range = this.getSubtableColumnWidthRange(child.type);
-        let width = Math.max(range.base, this.estimateSubtableCellWidth(child.label || child.code));
+        let width = Math.max(range.base, this.getSubtableLabelWidth(child));
         rows.slice(0, 80).forEach((item) => {
           const raw = item?.value?.[code]?.value ?? '';
-          width = Math.max(width, this.estimateSubtableCellWidth(raw));
+          width = Math.max(width, this.estimateSubtableCellWidth(this.formatSubtableCellDisplayValue(child, raw)));
         });
         next[code] = this.normalizeSubtableColumnWidth(width, child.type);
       });
@@ -5926,8 +6176,24 @@
       if (!choices.length) return;
 
       this.closeMultiChoicePicker();
-      const draftValues = new Set(this.normalizeMultiValue(row.values[field.code], field));
+      this.openMultiChoicePickerForValues(field, input, this.normalizeMultiValue(row.values[field.code], field), (nextValues) => {
+        this.applyEditorValueChange(String(row.id || ''), field, nextValues, {
+          historyType: 'cell-edit',
+          pushHistory: true,
+          applyFilters: true
+        });
+      }, { rowIndex, colIndex });
+    }
 
+    openMultiChoicePickerForValues(field, input, currentValues, onApply, options = {}) {
+      if (!this.root || !input || !field || !this.isMultiChoiceField(field)) return;
+      const choices = Array.from(new Set((Array.isArray(field.choices) ? field.choices : [])
+        .map((choice) => String(choice || '').trim())
+        .filter(Boolean)));
+      if (!choices.length) return;
+
+      this.closeMultiChoicePicker();
+      const draftValues = new Set(this.normalizeMultiValue(currentValues, field));
       const panel = document.createElement('div');
       panel.className = 'pb-overlay__choice-panel pb-overlay__choice-panel--multi';
       panel.setAttribute('role', 'dialog');
@@ -5982,11 +6248,9 @@
       applyBtn.textContent = resolveText(this.language, 'multiChoiceApply');
       applyBtn.addEventListener('click', () => {
         const nextValues = choices.filter((choice) => draftValues.has(choice));
-        this.applyEditorValueChange(String(row.id || ''), field, nextValues, {
-          historyType: 'cell-edit',
-          pushHistory: true,
-          applyFilters: true
-        });
+        if (typeof onApply === 'function') {
+          onApply(nextValues);
+        }
         this.closeMultiChoicePicker(true);
       });
       actions.appendChild(clearBtn);
@@ -6009,7 +6273,12 @@
           } catch (_e) { /* noop */ }
         });
       }
-      this.multiChoicePicker = { panel, input, rowIndex, colIndex };
+      this.multiChoicePicker = {
+        panel,
+        input,
+        rowIndex: Number.isFinite(options.rowIndex) ? options.rowIndex : null,
+        colIndex: Number.isFinite(options.colIndex) ? options.colIndex : null
+      };
       if (this.bodyScroll) {
         this.bodyScroll.addEventListener('scroll', this.boundMultiChoicePickerScrollHandler, { passive: true });
       }
@@ -6045,6 +6314,7 @@
       }
     }
 
+<<<<<<< Updated upstream
     openMultilineEditor(rowIndex, colIndex, anchorInput = null) {
       if (!this.root) return;
       const row = this.getVisibleRowAt(rowIndex);
@@ -6057,6 +6327,18 @@
         this.notifyViewOnlyBlocked();
         return;
       }
+=======
+    openFieldValueModal(field, options = {}) {
+      if (!this.root || !field) return;
+      const readOnly = options.readOnly !== false;
+      const richTextViewer = this.isRichTextField(field);
+      const titleText = richTextViewer
+        ? String(options.title || field.label || field.code || '')
+        : String(options.title || `${resolveText(this.language, 'multilineTitle')}: ${field.label || field.code}`);
+      const initialValue = options.value ?? '';
+      const anchorInput = options.anchorInput || null;
+      const onSave = typeof options.onSave === 'function' ? options.onSave : null;
+>>>>>>> Stashed changes
 
       this.closeMultilineEditor();
       this.closeRadioPicker();
@@ -6073,7 +6355,7 @@
       head.className = 'pb-overlay__multiline-head';
       const title = document.createElement('div');
       title.className = 'pb-overlay__multiline-title';
-      title.textContent = `${resolveText(this.language, 'multilineTitle')}: ${field.label || field.code}`;
+      title.textContent = titleText;
       const closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.className = 'pb-overlay__multiline-close';
@@ -6086,10 +6368,26 @@
 
       const body = document.createElement('div');
       body.className = 'pb-overlay__multiline-body';
+<<<<<<< Updated upstream
       const textarea = document.createElement('textarea');
       textarea.className = 'pb-overlay__multiline-input';
       textarea.value = String(row.values[field.code] ?? '');
       body.appendChild(textarea);
+=======
+      let textarea = null;
+      if (richTextViewer) {
+        const viewer = document.createElement('div');
+        viewer.className = 'pb-overlay__multiline-viewer';
+        viewer.textContent = this.extractReadableTextFromRichText(initialValue);
+        body.appendChild(viewer);
+      } else {
+        textarea = document.createElement('textarea');
+        textarea.className = 'pb-overlay__multiline-input';
+        textarea.value = String(initialValue);
+        textarea.readOnly = readOnly;
+        body.appendChild(textarea);
+      }
+>>>>>>> Stashed changes
 
       const footer = document.createElement('div');
       footer.className = 'pb-overlay__multiline-foot';
@@ -6098,6 +6396,7 @@
       cancelBtn.className = 'pb-overlay__btn';
       cancelBtn.textContent = resolveText(this.language, 'multilineCancel');
       cancelBtn.addEventListener('click', () => this.closeMultilineEditor(true));
+<<<<<<< Updated upstream
       const saveBtn = document.createElement('button');
       saveBtn.type = 'button';
       saveBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
@@ -6110,8 +6409,22 @@
         });
         this.closeMultilineEditor(true);
       });
+=======
+>>>>>>> Stashed changes
       footer.appendChild(cancelBtn);
-      footer.appendChild(saveBtn);
+      if (!richTextViewer) {
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
+        saveBtn.textContent = resolveText(this.language, 'multilineSave');
+        saveBtn.disabled = readOnly || !onSave;
+        saveBtn.addEventListener('click', () => {
+          if (readOnly || !onSave || !textarea) return;
+          onSave(textarea.value ?? '');
+          this.closeMultilineEditor(true);
+        });
+        footer.appendChild(saveBtn);
+      }
 
       layer.addEventListener('click', () => this.closeMultilineEditor(true));
       panel.appendChild(head);
@@ -6123,6 +6436,7 @@
         layer,
         panel,
         textarea,
+<<<<<<< Updated upstream
         anchorInput: anchorInput || this.getInput(rowIndex, colIndex)
       };
       requestAnimationFrame(() => {
@@ -6130,6 +6444,63 @@
           textarea.focus();
           textarea.setSelectionRange(textarea.value.length, textarea.value.length);
         } catch (_e) { /* noop */ }
+=======
+        readOnly,
+        anchorInput
+      };
+      requestAnimationFrame(() => {
+        try {
+          if (textarea) {
+            textarea.focus();
+            if (!readOnly) {
+              textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+            }
+          } else {
+            closeBtn.focus();
+          }
+        } catch (_e) { /* noop */ }
+      });
+    }
+
+    openMultilineEditor(rowIndex, colIndex, anchorInput = null) {
+      if (!this.root) return;
+      const row = this.getVisibleRowAt(rowIndex);
+      const field = this.fields[colIndex];
+      if (!row || !field || !this.isMultiLineField(field)) return;
+      const recordId = String(row.id || '').trim();
+      if (!recordId) return;
+      const permission = this.getFieldPermissionInfo(recordId, field);
+      const interaction = this.resolveFieldInteraction(field, permission, {
+        allowReadonlyModal: this.isOverlayViewOnly()
+      });
+      if (!interaction.canOpen) {
+        this.notifyViewOnlyBlocked();
+        return;
+      }
+      this.openFieldValueModal(field, {
+        value: row.values[field.code] ?? '',
+        anchorInput: anchorInput || this.getInput(rowIndex, colIndex),
+        readOnly: interaction.readOnly,
+        onSave: interaction.readOnly ? null : (nextValue) => {
+          this.applyEditorValueChange(recordId, field, nextValue, {
+            historyType: 'cell-edit',
+            pushHistory: true,
+            applyFilters: true
+          });
+        }
+      });
+    }
+
+    openRichTextViewer(rowIndex, colIndex, anchorInput = null) {
+      if (!this.root) return;
+      const row = this.getVisibleRowAt(rowIndex);
+      const field = this.fields[colIndex];
+      if (!row || !field || !this.isRichTextField(field)) return;
+      this.openFieldValueModal(field, {
+        value: row.values[field.code] ?? '',
+        anchorInput: anchorInput || this.getInput(rowIndex, colIndex),
+        readOnly: true
+>>>>>>> Stashed changes
       });
     }
 
@@ -6188,9 +6559,11 @@
       this.closeRadioPicker(true);
     }
 
-    createSubtableDefaultValue(type) {
-      if (type === 'NUMBER') return '';
-      if (type === 'DATE') return '';
+    createSubtableDefaultValue(fieldOrType) {
+      const field = fieldOrType && typeof fieldOrType === 'object'
+        ? fieldOrType
+        : { type: String(fieldOrType || '') };
+      if (this.isMultiValueField(field)) return [];
       return '';
     }
 
@@ -6204,13 +6577,7 @@
       this.closeSubtableEditor(false);
       this.exitEditMode();
 
-      const childFields = Array.isArray(field.subtable?.fields)
-        ? field.subtable.fields.filter((child) => (
-          child
-          && child.code
-          && ['SINGLE_LINE_TEXT', 'NUMBER', 'DATE', 'RADIO_BUTTON', 'DROP_DOWN'].includes(child.type)
-        ))
-        : [];
+      let childFields = await this.getSubtableEditorChildFields(field);
       const sourceRows = Array.isArray(row.values[field.code]) ? row.values[field.code] : [];
       const editorRows = sourceRows.map((item, idx) => ({
         localId: `row:${idx}:${Date.now()}`,
@@ -6218,6 +6585,32 @@
         value: item && typeof item.value === 'object' ? JSON.parse(JSON.stringify(item.value)) : {}
       }));
       let currentColumnWidths = await this.getInitialSubtableColumnWidths(field.code, childFields, editorRows);
+      let isReloadingLayout = false;
+      const parentRecordId = String(row.id || '').trim();
+      const getSubtableCellValue = (item, child) => item?.value?.[child.code]?.value;
+      const setSubtableCellValue = (item, child, nextValue) => {
+        if (!item.value || typeof item.value !== 'object') item.value = {};
+        item.value[child.code] = { value: this.deepClone(nextValue) };
+      };
+      const openSubtableFieldModal = (item, child, anchorEl) => {
+        const permission = this.getFieldPermissionInfo(parentRecordId, child, { localOnly: true });
+        const interaction = this.resolveFieldInteraction(child, permission, {
+          allowReadonlyModal: readOnlyMode
+        });
+        if (!interaction.canOpen) return false;
+        this.openFieldValueModal(child, {
+          value: getSubtableCellValue(item, child) ?? '',
+          anchorInput: anchorEl,
+          readOnly: interaction.readOnly,
+          onSave: interaction.readOnly ? null : (nextValue) => {
+            setSubtableCellValue(item, child, nextValue);
+            if (anchorEl instanceof HTMLInputElement) {
+              anchorEl.value = this.formatSubtableCellDisplayValue(child, nextValue);
+            }
+          }
+        });
+        return true;
+      };
 
       const layer = document.createElement('div');
       layer.className = 'pb-overlay__subtable-layer';
@@ -6248,28 +6641,9 @@
       const table = document.createElement('table');
       table.className = 'pb-subtable';
       const colgroup = document.createElement('colgroup');
-      childFields.forEach((child) => {
-        const col = document.createElement('col');
-        col.dataset.fieldCode = String(child.code || '');
-        colgroup.appendChild(col);
-      });
-      const opCol = document.createElement('col');
-      opCol.className = 'pb-subtable__col-op';
-      opCol.style.width = '44px';
-      colgroup.appendChild(opCol);
       table.appendChild(colgroup);
       const thead = document.createElement('thead');
       const theadRow = document.createElement('tr');
-      childFields.forEach((child) => {
-        const th = document.createElement('th');
-        th.className = 'pb-subtable__head';
-        th.textContent = child.label || child.code;
-        theadRow.appendChild(th);
-      });
-      const opTh = document.createElement('th');
-      opTh.className = 'pb-subtable__head pb-subtable__op';
-      opTh.setAttribute('aria-label', resolveText(this.language, 'subtableActionsAria'));
-      theadRow.appendChild(opTh);
       thead.appendChild(theadRow);
       const tbody = document.createElement('tbody');
       tbody.className = 'pb-subtable__body';
@@ -6279,6 +6653,10 @@
 
       const footer = document.createElement('div');
       footer.className = 'pb-overlay__subtable-foot';
+      const footerLeft = document.createElement('div');
+      footerLeft.className = 'pb-overlay__subtable-foot-group pb-overlay__subtable-foot-group--left';
+      const footerRight = document.createElement('div');
+      footerRight.className = 'pb-overlay__subtable-foot-group pb-overlay__subtable-foot-group--right';
       const addBtn = document.createElement('button');
       addBtn.type = 'button';
       addBtn.className = 'pb-overlay__btn';
@@ -6289,6 +6667,11 @@
       autoBtn.className = 'pb-overlay__btn';
       autoBtn.dataset.subtableAction = 'autowidth';
       autoBtn.textContent = resolveText(this.language, 'subtableAutoWidth');
+      const reloadLayoutBtn = document.createElement('button');
+      reloadLayoutBtn.type = 'button';
+      reloadLayoutBtn.className = 'pb-overlay__btn';
+      reloadLayoutBtn.dataset.subtableAction = 'reload-layout';
+      reloadLayoutBtn.textContent = resolveText(this.language, 'subtableReloadLayout');
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.className = 'pb-overlay__btn';
@@ -6299,10 +6682,38 @@
       saveBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
       saveBtn.dataset.subtableAction = 'save';
       saveBtn.textContent = resolveText(this.language, 'subtableSave');
-      footer.appendChild(addBtn);
-      footer.appendChild(autoBtn);
-      footer.appendChild(cancelBtn);
-      footer.appendChild(saveBtn);
+      footerLeft.appendChild(autoBtn);
+      footerLeft.appendChild(reloadLayoutBtn);
+      footerRight.appendChild(addBtn);
+      footerRight.appendChild(cancelBtn);
+      footerRight.appendChild(saveBtn);
+      footer.appendChild(footerLeft);
+      footer.appendChild(footerRight);
+
+      const renderSubtableColumns = () => {
+        colgroup.textContent = '';
+        childFields.forEach((child) => {
+          const col = document.createElement('col');
+          col.dataset.fieldCode = String(child.code || '');
+          colgroup.appendChild(col);
+        });
+        const opCol = document.createElement('col');
+        opCol.className = 'pb-subtable__col-op';
+        opCol.style.width = '44px';
+        colgroup.appendChild(opCol);
+
+        theadRow.textContent = '';
+        childFields.forEach((child) => {
+          const th = document.createElement('th');
+          th.className = 'pb-subtable__head';
+          th.textContent = child.label || child.code;
+          theadRow.appendChild(th);
+        });
+        const opTh = document.createElement('th');
+        opTh.className = 'pb-subtable__head pb-subtable__op';
+        opTh.setAttribute('aria-label', resolveText(this.language, 'subtableActionsAria'));
+        theadRow.appendChild(opTh);
+      };
 
       const applySubtableWidthStyles = () => {
         childFields.forEach((child, index) => {
@@ -6343,26 +6754,134 @@
           childFields.forEach((child) => {
             const cell = document.createElement('td');
             cell.className = 'pb-subtable__cell';
-            const input = document.createElement('input');
-            input.className = 'pb-overlay__subtable-input';
-            input.type = child.type === 'DATE' ? 'date' : 'text';
-            if (child.type === 'NUMBER') input.inputMode = 'decimal';
-            if (child.type === 'RADIO_BUTTON' || child.type === 'DROP_DOWN') {
-              input.placeholder = Array.isArray(child.choices) ? (child.choices[0] || '') : '';
-            }
             const width = this.normalizeSubtableColumnWidth(currentColumnWidths?.[child.code], child.type);
             cell.style.width = `${width}px`;
             cell.style.minWidth = `${width}px`;
-            input.style.width = `${Math.max(80, width - 16)}px`;
-            const rawCell = item.value?.[child.code]?.value;
-            input.value = rawCell === undefined || rawCell === null ? '' : String(rawCell);
-            input.disabled = readOnlyMode;
-            input.addEventListener('input', () => {
-              if (readOnlyMode) return;
-              if (!item.value || typeof item.value !== 'object') item.value = {};
-              item.value[child.code] = { value: input.value };
+            const permission = this.getFieldPermissionInfo(parentRecordId, child, { localOnly: true });
+            const interaction = this.resolveFieldInteraction(child, permission, {
+              allowReadonlyModal: readOnlyMode
             });
-            cell.appendChild(input);
+            const editable = !readOnlyMode && permission.editable;
+            const editableVisual = this.isOverlayViewOnly() ? true : permission.editable;
+            const lookupReadonly = permission.reason === 'lookup_readonly';
+            const fieldDeniedByAcl = permission.reason === 'field_readonly';
+            const rawCell = getSubtableCellValue(item, child);
+            const displayValue = this.formatSubtableCellDisplayValue(child, rawCell);
+
+            cell.classList.toggle('pb-subtable__cell--readonly', !editableVisual);
+            cell.classList.toggle('pb-subtable__cell--dropdown', child?.type === 'DROP_DOWN');
+            cell.classList.toggle('pb-subtable__cell--radio', child?.type === 'RADIO_BUTTON');
+            cell.classList.toggle('pb-subtable__cell--lookup', this.permissionService.isLookupField(child) || Boolean(child.lookupAuto));
+            cell.classList.toggle('pb-subtable__cell--multiline', this.isMultiLineField(child));
+            cell.classList.toggle('pb-subtable__cell--richtext', this.isRichTextField(child));
+
+            let control;
+            if (interaction.kind === 'inline-choice' && editable) {
+              const select = document.createElement('select');
+              select.className = 'pb-overlay__subtable-input pb-overlay__subtable-select';
+              select.style.width = `${Math.max(80, width - 16)}px`;
+              const currentValue = rawCell === undefined || rawCell === null ? '' : String(rawCell);
+              const emptyOption = document.createElement('option');
+              emptyOption.value = '';
+              emptyOption.textContent = '';
+              select.appendChild(emptyOption);
+              const choices = (Array.isArray(child.choices) ? child.choices : []).map((choice) => String(choice ?? ''));
+              if (currentValue && !choices.includes(currentValue)) {
+                const currentOption = document.createElement('option');
+                currentOption.value = currentValue;
+                currentOption.textContent = currentValue;
+                select.appendChild(currentOption);
+              }
+              choices.forEach((choice) => {
+                const option = document.createElement('option');
+                option.value = choice;
+                option.textContent = choice;
+                select.appendChild(option);
+              });
+              select.value = currentValue;
+              select.addEventListener('change', () => {
+                setSubtableCellValue(item, child, select.value);
+              });
+              control = select;
+            } else if (interaction.kind === 'inline-multi-choice' && editable) {
+              const input = document.createElement('input');
+              input.className = 'pb-overlay__subtable-input pb-overlay__input--subtable';
+              input.style.width = `${Math.max(80, width - 16)}px`;
+              input.type = 'text';
+              input.readOnly = true;
+              input.placeholder = resolveText(this.language, 'multiChoiceTitle');
+              input.value = displayValue;
+              input.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                this.openMultiChoicePickerForValues(child, input, rawCell, (nextValues) => {
+                  setSubtableCellValue(item, child, nextValues);
+                  input.value = this.formatSubtableCellDisplayValue(child, nextValues);
+                });
+              });
+              control = input;
+            } else {
+              const input = document.createElement('input');
+              input.className = 'pb-overlay__subtable-input';
+              input.style.width = `${Math.max(80, width - 16)}px`;
+              input.type = editable && child.type === 'DATE' ? 'date' : 'text';
+              if (child.type === 'NUMBER') input.inputMode = 'decimal';
+              if (child.type === 'LINK') input.inputMode = 'url';
+              if (child.type === 'RADIO_BUTTON' || child.type === 'DROP_DOWN') {
+                input.placeholder = Array.isArray(child.choices) ? (child.choices[0] || '') : '';
+              }
+              if (this.isMultiLineField(child)) {
+                input.placeholder = resolveText(this.language, 'multilineTitle');
+              }
+              if (this.isRichTextField(child)) {
+                input.placeholder = resolveText(this.language, 'richTextReadonly');
+              }
+              input.value = editable && interaction.kind === 'inline-edit'
+                ? (rawCell === undefined || rawCell === null ? '' : String(rawCell))
+                : displayValue;
+              input.readOnly = !(editable && interaction.kind === 'inline-edit');
+              input.classList.toggle('pb-overlay__input--readonly', !editableVisual);
+              if (interaction.kind === 'modal-edit' || interaction.kind === 'modal-view') {
+                input.classList.add('pb-overlay__input--subtable');
+                input.addEventListener('click', (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openSubtableFieldModal(item, child, input);
+                });
+              } else if (this.isLinkField(child) && input.readOnly) {
+                input.addEventListener('click', (event) => {
+                  const wantsOpen = Boolean(event?.ctrlKey || event?.metaKey);
+                  if (!wantsOpen) return;
+                  let href = String(rawCell ?? '').trim();
+                  if (!href) return;
+                  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(href)) {
+                    href = `https://${href}`;
+                  }
+                  try {
+                    window.open(href, '_blank', 'noopener,noreferrer');
+                  } catch (_err) {
+                    // noop
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                });
+              } else if (editable && interaction.kind === 'inline-edit') {
+                input.addEventListener('input', () => {
+                  setSubtableCellValue(item, child, input.value);
+                });
+              }
+              if (lookupReadonly) {
+                input.title = resolveText(this.language, 'lookupAutoReadonly');
+              } else if (!editableVisual) {
+                input.title = resolveText(this.language, fieldDeniedByAcl ? 'permNoFieldEdit' : 'permNoEdit');
+              }
+              control = input;
+            }
+
+            if (control instanceof HTMLElement && !lookupReadonly && editableVisual) {
+              control.removeAttribute('title');
+            }
+            cell.appendChild(control);
             rowEl.appendChild(cell);
           });
 
@@ -6393,7 +6912,7 @@
         if (readOnlyMode) return;
         const value = {};
         childFields.forEach((child) => {
-          value[child.code] = { value: this.createSubtableDefaultValue(child.type) };
+          value[child.code] = { value: this.createSubtableDefaultValue(child) };
         });
         editorRows.push({
           localId: `row:new:${Date.now()}:${Math.random().toString(16).slice(2)}`,
@@ -6408,6 +6927,26 @@
         applySubtableWidthStyles();
         renderRows();
         void this.persistSubtableColumnWidths(field.code, currentColumnWidths);
+      });
+
+      reloadLayoutBtn.addEventListener('click', async () => {
+        if (isReloadingLayout) return;
+        isReloadingLayout = true;
+        reloadLayoutBtn.disabled = true;
+        try {
+          await this.refreshSubtableLayoutFieldOrder(field.code);
+          childFields = await this.getSubtableEditorChildFields(field);
+          currentColumnWidths = await this.getInitialSubtableColumnWidths(field.code, childFields, editorRows);
+          renderSubtableColumns();
+          applySubtableWidthStyles();
+          renderRows();
+          this.notify(resolveText(this.language, 'toastSubtableLayoutReloaded'));
+        } catch (_err) {
+          this.notify(resolveText(this.language, 'toastSubtableLayoutReloadFailed'));
+        } finally {
+          isReloadingLayout = false;
+          reloadLayoutBtn.disabled = false;
+        }
       });
 
       cancelBtn.addEventListener('click', () => this.closeSubtableEditor(true));
@@ -6467,10 +7006,12 @@
       });
       addBtn.disabled = readOnlyMode;
       autoBtn.disabled = false;
+      reloadLayoutBtn.disabled = false;
       saveBtn.disabled = readOnlyMode;
 
       layer.addEventListener('click', () => this.closeSubtableEditor(true));
       layer.appendChild(panel);
+      renderSubtableColumns();
       body.appendChild(tableWrap);
       panel.appendChild(head);
       panel.appendChild(body);
@@ -6590,6 +7131,10 @@
       const rowIndex = Number(input.dataset.rowIndex || '0');
       const colIndex = Number(input.dataset.colIndex || '0');
       if (!field) return;
+      const permission = this.getFieldPermissionInfo(recordId, field);
+      const interaction = this.resolveFieldInteraction(field, permission, {
+        allowReadonlyModal: this.isOverlayViewOnly()
+      });
       if (this.isLinkField(field) && input.readOnly) {
         const wantsOpen = Boolean(event?.ctrlKey || event?.metaKey);
         if (wantsOpen) {
@@ -6610,6 +7155,22 @@
         }
         return;
       }
+<<<<<<< Updated upstream
+=======
+      if ((interaction.kind === 'modal-edit' || interaction.kind === 'modal-view') && interaction.canOpen) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        if (typeof event?.stopImmediatePropagation === 'function') {
+          event.stopImmediatePropagation();
+        }
+        if (this.isRichTextField(field)) {
+          this.openRichTextViewer(rowIndex, colIndex, input);
+        } else if (this.isMultiLineField(field)) {
+          this.openMultilineEditor(rowIndex, colIndex, input);
+        }
+        return;
+      }
+>>>>>>> Stashed changes
       if (this.isSubtableField(field)) {
         if (this.isDetailFormLayoutMode()) return;
         this.openSubtableEditor(rowIndex, colIndex, input);
@@ -7193,11 +7754,23 @@
       const targetRow = this.getVisibleRowAt(r);
       const targetRecordId = String(targetRow?.id || '').trim();
       const cellPermission = this.getCellPermissionInfo(targetRecordId, String(field?.code || ''));
+      const interaction = this.resolveFieldInteraction(field, cellPermission, {
+        allowReadonlyModal: this.isOverlayViewOnly()
+      });
       if (!this.isOverlayEditable() || !cellPermission.editable) {
         if (this.isSubtableField(field)) {
           if (targetRecordId) {
             this.openSubtableEditor(r, c, input || this.getInput(r, c));
           }
+<<<<<<< Updated upstream
+=======
+        } else if ((interaction.kind === 'modal-edit' || interaction.kind === 'modal-view') && interaction.canOpen) {
+          if (this.isRichTextField(field)) {
+            this.openRichTextViewer(r, c, input || this.getInput(r, c));
+          } else if (this.isMultiLineField(field)) {
+            this.openMultilineEditor(r, c, input || this.getInput(r, c));
+          }
+>>>>>>> Stashed changes
         }
         return;
       }
@@ -7209,11 +7782,15 @@
       this.armedCell = null;
       this.pendingEdit = null;
       const targetInput = input || this.getInput(r, c);
-      if (this.isMultiLineField(field)) {
+      if (interaction.kind === 'modal-edit' || interaction.kind === 'modal-view') {
         this.closeRadioPicker();
         this.closeMultiChoicePicker();
         this.editingCell = null;
-        this.openMultilineEditor(r, c, targetInput);
+        if (this.isRichTextField(field)) {
+          this.openRichTextViewer(r, c, targetInput);
+        } else {
+          this.openMultilineEditor(r, c, targetInput);
+        }
         return;
       }
       if (this.isMultiChoiceField(field)) {
@@ -7968,16 +8545,6 @@
         return;
       }
 
-      if (this.subtableEditor?.panel && this.subtableEditor.panel.contains(target)) {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          event.stopPropagation();
-          event.stopImmediatePropagation();
-          this.closeSubtableEditor(true);
-        }
-        return;
-      }
-
       if (this.multilineEditor?.panel && this.multilineEditor.panel.contains(target)) {
         if (event.key === 'Escape') {
           event.preventDefault();
@@ -7994,6 +8561,16 @@
           event.stopPropagation();
           event.stopImmediatePropagation();
           this.closeMultiChoicePicker(true);
+        }
+        return;
+      }
+
+      if (this.subtableEditor?.panel && this.subtableEditor.panel.contains(target)) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          this.closeSubtableEditor(true);
         }
         return;
       }
@@ -8228,13 +8805,6 @@
         this.closeFilterPanel();
         return true;
       }
-      if (this.subtableEditor?.panel) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        this.closeSubtableEditor(true);
-        return true;
-      }
       if (this.multilineEditor?.panel) {
         event.preventDefault();
         event.stopPropagation();
@@ -8254,6 +8824,13 @@
         event.stopPropagation();
         event.stopImmediatePropagation();
         this.closeRadioPicker(true);
+        return true;
+      }
+      if (this.subtableEditor?.panel) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        this.closeSubtableEditor(true);
         return true;
       }
       return false;
@@ -9160,6 +9737,7 @@
       this.listAllFields = [];
       this.viewFieldOrder = [];
       this.overlayLayoutState = null;
+      this.detailFormLayout = null;
       this.recordFetchFieldCodes = [];
       this.fieldMap.clear();
       this.fieldsMetaMap.clear();
@@ -9170,6 +9748,7 @@
       this.permissionService.clearRecordAcl();
       this.aclStatus = { loaded: false, failed: false };
       this.pendingDeletes.clear();
+      this.detailSubtableLayoutOrderCache.clear();
       this.syncPermissionServicePendingDeletes();
       this.filters.clear();
       this.filteredRowIds = null;

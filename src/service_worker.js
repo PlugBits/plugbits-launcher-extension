@@ -1320,7 +1320,10 @@ function normalizeMetadataNeedFlags(options = {}) {
   return {
     needApp: Boolean(options?.needApp),
     needViews: Boolean(options?.needViews),
-    needFields: Boolean(options?.needFields)
+    needFields: Boolean(options?.needFields),
+    forceAppRefresh: Boolean(options?.forceAppRefresh),
+    forceViewsRefresh: Boolean(options?.forceViewsRefresh),
+    forceFieldsRefresh: Boolean(options?.forceFieldsRefresh)
   };
 }
 
@@ -1335,6 +1338,8 @@ function hasRequiredMetadata(bundle, needFlags) {
 function shouldFetchMetadataPiece(bundle, isFresh, needFlags, pieceName) {
   const needKey = `need${pieceName.charAt(0).toUpperCase()}${pieceName.slice(1)}`;
   if (!needFlags[needKey]) return false;
+  const forceKey = `force${pieceName.charAt(0).toUpperCase()}${pieceName.slice(1)}Refresh`;
+  if (needFlags[forceKey]) return true;
   if (!bundle) return true;
   if (!isFresh) return true;
   return !hasMetadataPiece(bundle, pieceName);
@@ -1906,7 +1911,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   })();
   return true;
 });
-
 
 
 

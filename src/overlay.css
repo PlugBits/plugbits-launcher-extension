@@ -1406,9 +1406,10 @@
 }
 
 .pb-overlay__subtable-panel {
-  width: min(1100px, 90vw);
-  max-width: 1200px;
-  height: min(600px, 80vh);
+  width: min(92vw, 1400px);
+  max-width: 1400px;
+  height: min(88vh, 900px);
+  max-height: 88vh;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 20px 48px rgba(2, 6, 23, 0.28);
@@ -1418,6 +1419,7 @@
 }
 
 .pb-overlay__subtable-head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1442,12 +1444,18 @@
 }
 
 .pb-overlay__subtable-body {
-  padding: 12px 16px;
-  overflow: auto;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px 18px;
+  overflow: hidden;
 }
 
 .pb-subtable-wrap {
   width: 100%;
+  height: 100%;
+  min-height: 0;
   display: block;
   text-align: left;
   overflow: auto;
@@ -1487,8 +1495,44 @@
   padding: 6px 8px;
   border-bottom: 1px solid #eef2f7;
   vertical-align: middle;
-  min-width: 140px;
+  min-width: 100px;
   cursor: default;
+  position: relative;
+}
+
+.pb-subtable__cell--readonly {
+  background: #f3f4f6;
+}
+
+.pb-subtable__cell--dropdown,
+.pb-subtable__cell--radio,
+.pb-subtable__cell--lookup {
+  position: relative;
+}
+
+.pb-subtable__cell--dropdown::after,
+.pb-subtable__cell--radio::after,
+.pb-subtable__cell--lookup::after {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9aa4b2;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.pb-subtable__cell--dropdown::after {
+  content: '\25BE';
+}
+
+.pb-subtable__cell--radio::after {
+  content: '\25CE';
+}
+
+.pb-subtable__cell--lookup::after {
+  content: '\2197';
 }
 
 .pb-subtable__col-op {
@@ -1520,8 +1564,22 @@
   background: #fff;
 }
 
+.pb-overlay__subtable-select {
+  appearance: none;
+  padding-right: 20px;
+}
+
 .pb-subtable .pb-overlay__subtable-input:disabled {
   cursor: not-allowed;
+}
+
+.pb-subtable__cell--readonly .pb-overlay__subtable-input {
+  cursor: default;
+}
+
+.pb-subtable__cell--multiline .pb-overlay__subtable-input,
+.pb-subtable__cell--richtext .pb-overlay__subtable-input {
+  color: #374151;
 }
 
 .pb-subtable button {
@@ -1539,11 +1597,30 @@
 }
 
 .pb-overlay__subtable-foot {
+  flex: 0 0 auto;
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 24px 32px;
   padding: 12px 16px;
   border-top: 1px solid #e5e7eb;
+}
+
+.pb-overlay__subtable-foot-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.pb-overlay__subtable-foot-group--left {
+  opacity: 0.92;
+}
+
+.pb-overlay__subtable-foot-group--right {
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .pb-overlay__multiline-layer {
@@ -2064,6 +2141,10 @@
     color: #e5edf8;
   }
 
+  #pb-excel-overlay .pb-subtable__cell--readonly {
+    background: rgba(148, 163, 184, 0.08);
+  }
+
   #pb-excel-overlay .pb-subtable__empty {
     color: #9fb0c7;
   }
@@ -2073,6 +2154,12 @@
     background: #0f1726;
     color: #f8fbff;
     border-color: #334155;
+  }
+
+  #pb-excel-overlay .pb-subtable__cell--dropdown::after,
+  #pb-excel-overlay .pb-subtable__cell--radio::after,
+  #pb-excel-overlay .pb-subtable__cell--lookup::after {
+    color: #94a3b8;
   }
 
   /* choice panel */
