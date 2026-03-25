@@ -2732,14 +2732,7 @@ addBtn.addEventListener('click', async () => {
     loadApiUsageStats(),
   ]);
   optionsDataReady = true;
-  console.log('[options][state] loaded keys', ['kintoneFavorites', 'kfavPins', 'kfavShortcuts', UI_LANGUAGE_KEY]);
-  console.log('[options][state] watchlists count', items.length);
-  console.log('[options][state] pins count', pinnedEntries.length);
-  console.log('[options][render] render start', {
-    lang: currentLang,
-    watchlists: items.length,
-    pins: pinnedEntries.length
-  });
+
 })();
 
 if (chrome?.storage?.onChanged) {
@@ -2826,14 +2819,6 @@ function hostFromUrl(u){
 async function rerenderLocalizedDynamicSections() {
   if (!optionsDataReady) return;
   const items = await loadFavorites();
-  console.log('[options][state] loaded keys', ['kintoneFavorites', 'kfavPins', 'kfavShortcuts', UI_LANGUAGE_KEY]);
-  console.log('[options][state] watchlists count', items.length);
-  console.log('[options][state] pins count', pinnedEntries.length);
-  console.log('[options][render] render start', {
-    lang: currentLang,
-    watchlists: items.length,
-    pins: pinnedEntries.length
-  });
   await render(items);
   renderShortcutEntries();
   renderPinnedEntries();
@@ -2871,10 +2856,8 @@ async function applyUiLanguageSetting(settingValue, { persist = false } = {}) {
   currentLang = resolveEffectiveUiLanguage(setting);
   document.documentElement.lang = currentLang;
   document.title = t('settings_title');
-  console.log('[options][i18n] resolved currentLang', currentLang);
   if (persist) {
     await chrome.storage.local.set({ [UI_LANGUAGE_KEY]: setting });
-    console.log('[options][i18n] uiLanguage saved', setting);
   }
   applyI18n(document);
   updateDeveloperProOverrideVisibility();
