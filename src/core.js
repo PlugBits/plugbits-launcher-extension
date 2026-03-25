@@ -400,6 +400,18 @@ export async function saveAppNameMap(host, map) {
   await chrome.storage.local.set({ [key]: payload });
 }
 
+export async function clearAppNameMap(host) {
+  const safeHost = normalizeHostForCache(host);
+  if (!safeHost) return false;
+  const key = getAppNameCacheKey(safeHost);
+  try {
+    await chrome.storage.local.remove(key);
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
 export async function getCachedAppName(host, appId) {
   const safeAppId = String(appId || '').trim();
   if (!safeAppId) return null;

@@ -8,9 +8,10 @@
 const viewsCache = new Map(); // appId -> views
 const fieldsCache = new Map(); // appId -> fields metadata cache
 const appMetaCache = new Map(); // appId -> { name, raw }
+const formLayoutCache = new Map(); // appId -> layout response
 const PB_API_USAGE_EVENT = '__kfav_api_usage__';
 const PB_DEBUG_FLAG_KEY = '__PB_DEBUG_API__';
-const PB_DEBUG_DEFAULT = true; // temporary debug for API trigger investigation
+const PB_DEBUG_DEFAULT = false;
 const PB_DOM_METADATA_FALLBACK_FLAG_KEY = '__PB_ENABLE_DOM_METADATA_FALLBACK__';
 const PB_DOM_METADATA_FALLBACK_DEFAULT = false;
 
@@ -20,6 +21,44 @@ function normalizeEndpointForTelemetry(path) {
   if (!raw.startsWith('/k/v1/')) return raw;
   if (raw.endsWith('.json')) return raw;
   return `${raw}.json`;
+}
+
+function getFormLayoutSessionKey(appId) {
+  return `pb_form_layout_cache:${String(appId || '').trim()}`;
+}
+
+function loadFormLayoutFromSession(appId) {
+  const key = String(appId || '').trim();
+  if (!key) return null;
+  try {
+    const raw = window.sessionStorage?.getItem(getFormLayoutSessionKey(key));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function saveFormLayoutToSession(appId, layout) {
+  const key = String(appId || '').trim();
+  if (!key || !layout || typeof layout !== 'object') return;
+  try {
+    window.sessionStorage?.setItem(getFormLayoutSessionKey(key), JSON.stringify(layout));
+  } catch (_err) {
+    // ignore storage failures
+  }
+}
+
+function clearFormLayoutCache(appId) {
+  const key = String(appId || '').trim();
+  if (!key) return;
+  formLayoutCache.delete(key);
+  try {
+    window.sessionStorage?.removeItem(getFormLayoutSessionKey(key));
+  } catch (_err) {
+    // ignore storage failures
+  }
 }
 
 function normalizeApiMeta(meta = {}) {
@@ -224,16 +263,21 @@ function normalizeSubtableMeta(prop) {
     ? prop.fields
     : null;
   if (!fieldsObj) return undefined;
-  const fields = Object.keys(fieldsObj).map((code) => {
+  const fields = Object.keys(fieldsObj).map((code, index) => {
     const child = fieldsObj[code] || {};
-    return {
+    const meta = {
       code,
       label: child.label || '',
       type: child.type || '',
       required: Boolean(child.required),
-      choices: normalizeChoiceList(child)
+      choices: normalizeChoiceList(child),
+      orderIndex: index
     };
+    const lookup = normalizeLookupMeta(code, child);
+    if (lookup) meta.lookup = lookup;
+    return meta;
   });
+  markLookupAutoFields(fieldsObj, fields);
   return { fields };
 }
 
@@ -401,6 +445,41 @@ function markLookupAutoFields(properties, metas) {
     });
     const resp = await callKintoneApi('/k/v1/app/views', 'GET', { app: String(appId) }, meta);
     return resp.views || {};
+  }
+
+  async function getFormLayout(appId, apiMeta = {}) {
+    const key = String(appId || '').trim();
+    if (!key) return {};
+    const forceRefresh = Boolean(apiMeta?.forceRefresh);
+    const meta = normalizeApiMeta({
+      feature: 'overlay',
+      logGroup: 'overlay',
+      trigger: forceRefresh ? 'subtable_layout_manual_refresh' : (apiMeta?.trigger || 'subtable_modal_open'),
+      source: String(apiMeta?.source || 'overlay'),
+      ...apiMeta
+    });
+
+    if (forceRefresh) {
+      clearFormLayoutCache(key);
+    } else if (formLayoutCache.has(key)) {
+      logApiCache(meta, '/k/v1/app/form/layout', 'hit-memory');
+      const cached = formLayoutCache.get(key);
+      return cached && typeof cached === 'object' ? cached : {};
+    } else {
+      const sessionCached = loadFormLayoutFromSession(key);
+      if (sessionCached) {
+        formLayoutCache.set(key, sessionCached);
+        logApiCache(meta, '/k/v1/app/form/layout', 'hit-session');
+        return sessionCached;
+      }
+    }
+
+    logApiCache(meta, '/k/v1/app/form/layout', forceRefresh ? 'manual-refresh' : 'miss');
+    const resp = await callKintoneApi('/k/v1/app/form/layout', 'GET', { app: key }, meta);
+    const layout = resp && typeof resp === 'object' ? resp : {};
+    formLayoutCache.set(key, layout);
+    saveFormLayoutToSession(key, layout);
+    return layout;
   }
 
   async function getViewsCached(appId, apiMeta = {}) {
@@ -1342,6 +1421,19 @@ function markLookupAutoFields(properties, metas) {
           source: 'overlay'
         });
         window.postMessage({ __kfav__: true, replyTo: id, ok: true, fieldsMeta }, ORIGIN);
+        return;
+      }
+
+      if (type === 'EXCEL_GET_FORM_LAYOUT') {
+        const appId = payload?.appId;
+        if (!appId) throw new Error('appId is required');
+        const layout = await getFormLayout(appId, {
+          feature: 'overlay',
+          trigger: String(payload?.__pbTrigger || payload?.trigger || 'subtable_modal_open'),
+          source: 'overlay',
+          forceRefresh: Boolean(payload?.forceRefresh)
+        });
+        window.postMessage({ __kfav__: true, replyTo: id, ok: true, layout }, ORIGIN);
         return;
       }
 
