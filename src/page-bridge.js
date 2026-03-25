@@ -4,20 +4,16 @@
   if (window.__kfav_pageBridgeLoaded) return;
   window.__kfav_pageBridgeLoaded = true;
 
-const ORIGIN = location.origin;
+  const ORIGIN = location.origin;
 const viewsCache = new Map(); // appId -> views
 const fieldsCache = new Map(); // appId -> fields metadata cache
-const formLayoutCache = new Map(); // appId -> form layout
 const appMetaCache = new Map(); // appId -> { name, raw }
+const formLayoutCache = new Map(); // appId -> layout response
 const PB_API_USAGE_EVENT = '__kfav_api_usage__';
 const PB_DEBUG_FLAG_KEY = '__PB_DEBUG_API__';
 const PB_DEBUG_DEFAULT = false;
-const PB_API_TRACE_FLAG_KEY = '__PB_TRACE_OVERLAY_APIS__';
-const PB_API_TRACE_DEFAULT = false;
 const PB_DOM_METADATA_FALLBACK_FLAG_KEY = '__PB_ENABLE_DOM_METADATA_FALLBACK__';
 const PB_DOM_METADATA_FALLBACK_DEFAULT = false;
-let pbApiTraceSeq = 0;
-const FORM_LAYOUT_SESSION_KEY_PREFIX = 'pb:overlay:formLayout:v1:';
 
 function normalizeEndpointForTelemetry(path) {
   const raw = String(path || '').trim();
@@ -25,6 +21,44 @@ function normalizeEndpointForTelemetry(path) {
   if (!raw.startsWith('/k/v1/')) return raw;
   if (raw.endsWith('.json')) return raw;
   return `${raw}.json`;
+}
+
+function getFormLayoutSessionKey(appId) {
+  return `pb_form_layout_cache:${String(appId || '').trim()}`;
+}
+
+function loadFormLayoutFromSession(appId) {
+  const key = String(appId || '').trim();
+  if (!key) return null;
+  try {
+    const raw = window.sessionStorage?.getItem(getFormLayoutSessionKey(key));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function saveFormLayoutToSession(appId, layout) {
+  const key = String(appId || '').trim();
+  if (!key || !layout || typeof layout !== 'object') return;
+  try {
+    window.sessionStorage?.setItem(getFormLayoutSessionKey(key), JSON.stringify(layout));
+  } catch (_err) {
+    // ignore storage failures
+  }
+}
+
+function clearFormLayoutCache(appId) {
+  const key = String(appId || '').trim();
+  if (!key) return;
+  formLayoutCache.delete(key);
+  try {
+    window.sessionStorage?.removeItem(getFormLayoutSessionKey(key));
+  } catch (_err) {
+    // ignore storage failures
+  }
 }
 
 function normalizeApiMeta(meta = {}) {
@@ -46,189 +80,12 @@ function isPbDebugEnabled() {
   }
 }
 
-function isPbApiTraceEnabled() {
-  try {
-    return PB_API_TRACE_DEFAULT || Boolean(window?.[PB_API_TRACE_FLAG_KEY]);
-  } catch (_err) {
-    return PB_API_TRACE_DEFAULT;
-  }
-}
-
 function pbDebug(message, extra) {
   if (!isPbDebugEnabled()) return;
   if (extra === undefined) {
     console.debug(message);
   } else {
     console.debug(message, extra);
-  }
-}
-
-function shouldTraceApiEndpoint(endpoint) {
-  const path = String(endpoint || '').trim().toLowerCase();
-  return path.includes('/k/v1/app/form/layout')
-    || path.includes('/k/v1/app/form/fields')
-    || path.includes('/k/v1/record')
-    || path.includes('/k/v1/records');
-}
-
-function summarizeApiPayload(payload) {
-  if (!payload || typeof payload !== 'object') return {};
-  const summary = {};
-  if (Object.prototype.hasOwnProperty.call(payload, 'app')) summary.app = payload.app;
-  if (Object.prototype.hasOwnProperty.call(payload, 'id')) summary.id = payload.id;
-  if (Array.isArray(payload.ids)) summary.idsCount = payload.ids.length;
-  if (Array.isArray(payload.fields)) summary.fieldsCount = payload.fields.length;
-  if (typeof payload.query === 'string') {
-    summary.query = payload.query.slice(0, 120);
-    summary.queryLength = payload.query.length;
-  }
-  if (Array.isArray(payload.records)) summary.recordsCount = payload.records.length;
-  if (Array.isArray(payload.requests)) summary.requestsCount = payload.requests.length;
-  if (Array.isArray(payload.updates)) summary.updatesCount = payload.updates.length;
-  if (Object.prototype.hasOwnProperty.call(payload, 'totalCount')) summary.totalCount = payload.totalCount;
-  return summary;
-}
-
-function getTraceStack() {
-  try {
-    const lines = String(new Error().stack || '')
-      .split('\n')
-      .slice(3, 9)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    return lines.join('\n');
-  } catch (_err) {
-    return '';
-  }
-}
-
-function traceApiCall(stage, details = {}) {
-  if (!isPbApiTraceEnabled()) return;
-  const label = String(stage || 'API TRACE').trim();
-  const seq = details.seq ? ` #${details.seq}` : '';
-  try {
-    console.groupCollapsed(`[${label}]${seq} ${details.method || ''} ${details.endpoint || ''}`.trim());
-    console.log('timestamp', details.timestamp || new Date().toISOString());
-    if (details.trigger) console.log('trigger', details.trigger);
-    if (details.feature) console.log('feature', details.feature);
-    if (details.appId !== undefined) console.log('appId', details.appId || '');
-    if (details.subtableCode !== undefined) console.log('subtableCode', details.subtableCode || '');
-    if (details.cache !== undefined) console.log('cache', details.cache);
-    if (details.forceRefresh !== undefined) console.log('forceRefresh', details.forceRefresh);
-    if (details.payloadSummary) console.log('params', details.payloadSummary);
-    if (details.stack) console.log('caller/stack\n' + details.stack);
-    console.groupEnd();
-  } catch (_err) {
-    // ignore logging failures
-  }
-}
-
-function getFormLayoutSessionKey(appId) {
-  const key = String(appId || '').trim();
-  if (!key) return '';
-  return `${FORM_LAYOUT_SESSION_KEY_PREFIX}${location.origin}:${key}`;
-}
-
-function readFormLayoutSessionCache(appId) {
-  const key = getFormLayoutSessionKey(appId);
-  if (!key) return null;
-  try {
-    traceApiCall('LAYOUT SESSION LOAD', {
-      endpoint: '/k/v1/app/form/layout.json',
-      method: 'GET',
-      appId,
-      cache: 'session',
-      timestamp: new Date().toISOString(),
-      payloadSummary: { key }
-    });
-    const raw = window.sessionStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const layout = Array.isArray(parsed?.layout) ? parsed.layout : null;
-    if (!layout) {
-      traceApiCall('LAYOUT SESSION PARSE FAIL', {
-        endpoint: '/k/v1/app/form/layout.json',
-        method: 'GET',
-        appId,
-        cache: 'session',
-        timestamp: new Date().toISOString(),
-        payloadSummary: { key, reason: 'layout_missing' }
-      });
-      return null;
-    }
-    traceApiCall('LAYOUT SESSION PARSE SUCCESS', {
-      endpoint: '/k/v1/app/form/layout.json',
-      method: 'GET',
-      appId,
-      cache: 'session',
-      timestamp: new Date().toISOString(),
-      payloadSummary: { key, fields: layout.length }
-    });
-    return layout;
-  } catch (error) {
-    traceApiCall('LAYOUT SESSION PARSE FAIL', {
-      endpoint: '/k/v1/app/form/layout.json',
-      method: 'GET',
-      appId,
-      cache: 'session',
-      timestamp: new Date().toISOString(),
-      payloadSummary: { key, reason: String(error?.message || error || 'session_read_failed') }
-    });
-    return null;
-  }
-}
-
-function writeFormLayoutSessionCache(appId, layout) {
-  const key = getFormLayoutSessionKey(appId);
-  if (!key) return;
-  try {
-    window.sessionStorage.setItem(key, JSON.stringify({
-      appId: String(appId || ''),
-      savedAt: Date.now(),
-      layout: Array.isArray(layout) ? layout : []
-    }));
-    traceApiCall('LAYOUT SESSION SAVE', {
-      endpoint: '/k/v1/app/form/layout.json',
-      method: 'GET',
-      appId,
-      cache: 'session',
-      timestamp: new Date().toISOString(),
-      payloadSummary: { key, fields: Array.isArray(layout) ? layout.length : 0 }
-    });
-  } catch (error) {
-    traceApiCall('LAYOUT SESSION SAVE FAIL', {
-      endpoint: '/k/v1/app/form/layout.json',
-      method: 'GET',
-      appId,
-      cache: 'session',
-      timestamp: new Date().toISOString(),
-      payloadSummary: { key, reason: String(error?.message || error || 'session_write_failed') }
-    });
-  }
-}
-
-function clearFormLayoutSessionCache(appId, reason = 'unknown') {
-  const key = getFormLayoutSessionKey(appId);
-  if (!key) return;
-  try {
-    window.sessionStorage.removeItem(key);
-    traceApiCall('LAYOUT SESSION CLEAR', {
-      endpoint: '/k/v1/app/form/layout.json',
-      method: 'GET',
-      appId,
-      cache: 'session',
-      timestamp: new Date().toISOString(),
-      payloadSummary: { key, reason }
-    });
-  } catch (error) {
-    traceApiCall('LAYOUT SESSION CLEAR FAIL', {
-      endpoint: '/k/v1/app/form/layout.json',
-      method: 'GET',
-      appId,
-      cache: 'session',
-      timestamp: new Date().toISOString(),
-      payloadSummary: { key, reason: String(error?.message || error || 'session_clear_failed') }
-    });
   }
 }
 
@@ -277,30 +134,6 @@ function resolveApiCategory(feature) {
   return 'other';
 }
 
-function detectApiUsageFeature(endpoint, apiMeta = {}) {
-  const path = String(endpoint || '').trim().toLowerCase();
-  const explicit = String(apiMeta?.feature || '').trim().toLowerCase();
-  if (explicit.startsWith('watchlist')) return 'watchlist_bulk';
-  if (explicit === 'record_pin') return 'record_pin';
-  if (explicit === 'recent') return 'recent';
-  if (explicit === 'admin') return 'admin';
-  if (path.includes('/records/acl/evaluate') || path.includes('/records/permissions') || path.includes('/acl')) {
-    return 'overlay_acl';
-  }
-  if (path.includes('/k/v1/record') || path.includes('/k/v1/records')) {
-    return 'overlay_records';
-  }
-  if (
-    path.includes('/k/v1/app/form/layout')
-    || path.includes('/k/v1/app/form/fields')
-    || path.includes('/k/v1/app/views')
-    || path.includes('/k/v1/app.json')
-  ) {
-    return 'overlay';
-  }
-  return explicit || 'other';
-}
-
 function normalizeAppIdForBulk(value) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -344,14 +177,13 @@ async function callKintoneApi(path, method, payload, apiMeta = {}) {
   const requestKind = resolveRequestKind(endpoint);
   const appId = resolveAppIdForApiSend(endpoint, payload);
   const category = resolveApiCategory(meta.feature);
-  const trackedFeature = detectApiUsageFeature(endpoint, meta);
   pbDebug(
     `[API_SEND] endpoint=${endpoint} method=${verb} appId=${appId || '-'} category=${category} feature=${meta.feature} requestCount=1 cache=${meta.cache || 'miss'} flow=${meta.flow || 'main'} trigger=${meta.trigger}`
   );
   try {
     const response = await sdk.api(sdk.api.url(path, true), verb, payload);
     emitApiUsage({
-      feature: trackedFeature,
+      feature: meta.feature,
       endpoint,
       method: verb,
       trigger: meta.trigger,
@@ -368,7 +200,7 @@ async function callKintoneApi(path, method, payload, apiMeta = {}) {
     return response;
   } catch (error) {
     emitApiUsage({
-      feature: trackedFeature,
+      feature: meta.feature,
       endpoint,
       method: verb,
       trigger: meta.trigger,
@@ -437,14 +269,15 @@ function normalizeSubtableMeta(prop) {
       code,
       label: child.label || '',
       type: child.type || '',
-      orderIndex: index,
       required: Boolean(child.required),
-      choices: normalizeChoiceList(child)
+      choices: normalizeChoiceList(child),
+      orderIndex: index
     };
     const lookup = normalizeLookupMeta(code, child);
     if (lookup) meta.lookup = lookup;
     return meta;
   });
+  markLookupAutoFields(fieldsObj, fields);
   return { fields };
 }
 
@@ -614,6 +447,41 @@ function markLookupAutoFields(properties, metas) {
     return resp.views || {};
   }
 
+  async function getFormLayout(appId, apiMeta = {}) {
+    const key = String(appId || '').trim();
+    if (!key) return {};
+    const forceRefresh = Boolean(apiMeta?.forceRefresh);
+    const meta = normalizeApiMeta({
+      feature: 'overlay',
+      logGroup: 'overlay',
+      trigger: forceRefresh ? 'subtable_layout_manual_refresh' : (apiMeta?.trigger || 'subtable_modal_open'),
+      source: String(apiMeta?.source || 'overlay'),
+      ...apiMeta
+    });
+
+    if (forceRefresh) {
+      clearFormLayoutCache(key);
+    } else if (formLayoutCache.has(key)) {
+      logApiCache(meta, '/k/v1/app/form/layout', 'hit-memory');
+      const cached = formLayoutCache.get(key);
+      return cached && typeof cached === 'object' ? cached : {};
+    } else {
+      const sessionCached = loadFormLayoutFromSession(key);
+      if (sessionCached) {
+        formLayoutCache.set(key, sessionCached);
+        logApiCache(meta, '/k/v1/app/form/layout', 'hit-session');
+        return sessionCached;
+      }
+    }
+
+    logApiCache(meta, '/k/v1/app/form/layout', forceRefresh ? 'manual-refresh' : 'miss');
+    const resp = await callKintoneApi('/k/v1/app/form/layout', 'GET', { app: key }, meta);
+    const layout = resp && typeof resp === 'object' ? resp : {};
+    formLayoutCache.set(key, layout);
+    saveFormLayoutToSession(key, layout);
+    return layout;
+  }
+
   async function getViewsCached(appId, apiMeta = {}) {
     const key = String(appId);
     if (viewsCache.has(key)) {
@@ -715,83 +583,6 @@ function markLookupAutoFields(properties, metas) {
         })),
         raw: {}
       };
-    }
-  }
-
-  async function getFormLayout(appId, apiMeta = {}) {
-    const key = String(appId || '');
-    if (!key) return [];
-    const forceRefresh = Boolean(apiMeta?.forceRefresh);
-    const sdk = window.kintone;
-    if (!sdk?.api) return [];
-    if (forceRefresh) {
-      formLayoutCache.delete(key);
-      clearFormLayoutSessionCache(key, 'manual_refresh');
-    }
-    if (!forceRefresh && formLayoutCache.has(key)) {
-      logApiCache(
-        { feature: 'metadata_layout', logGroup: 'overlay', ...apiMeta },
-        '/k/v1/app/form/layout',
-        'hit'
-      );
-      traceApiCall('LAYOUT CACHE HIT: memory', {
-        endpoint: '/k/v1/app/form/layout.json',
-        method: 'GET',
-        appId: key,
-        cache: 'hit',
-        trigger: apiMeta?.trigger || '',
-        feature: 'metadata_layout',
-        forceRefresh
-      });
-      return JSON.parse(JSON.stringify(formLayoutCache.get(key) || []));
-    }
-    if (!forceRefresh) {
-      const sessionLayout = readFormLayoutSessionCache(key);
-      if (Array.isArray(sessionLayout) && sessionLayout.length >= 0) {
-        formLayoutCache.set(key, sessionLayout);
-        traceApiCall('LAYOUT CACHE HIT: session', {
-          endpoint: '/k/v1/app/form/layout.json',
-          method: 'GET',
-          appId: key,
-          cache: 'session',
-          trigger: apiMeta?.trigger || '',
-          feature: 'metadata_layout',
-          forceRefresh
-        });
-        return JSON.parse(JSON.stringify(sessionLayout));
-      }
-    }
-    try {
-      const meta = normalizeApiMeta({
-        feature: 'metadata_layout',
-        logGroup: 'overlay',
-        cache: 'miss',
-        ...apiMeta
-      });
-      logApiCache(
-        { feature: 'metadata_layout', logGroup: 'overlay', ...apiMeta },
-        '/k/v1/app/form/layout',
-        'miss'
-      );
-      traceApiCall(forceRefresh ? 'LAYOUT MANUAL REFRESH' : 'LAYOUT CACHE MISS', {
-        endpoint: '/k/v1/app/form/layout.json',
-        method: 'GET',
-        appId: key,
-        cache: 'miss',
-        trigger: apiMeta?.trigger || '',
-        feature: 'metadata_layout',
-        forceRefresh
-      });
-      const resp = await callKintoneApi('/k/v1/app/form/layout', 'GET', { app: key }, meta);
-      const layout = Array.isArray(resp?.layout) ? resp.layout : [];
-      formLayoutCache.set(key, layout);
-      writeFormLayoutSessionCache(key, layout);
-      return JSON.parse(JSON.stringify(layout));
-    } catch (error) {
-      if (typeof console !== 'undefined' && console.warn) {
-        console.warn('[kintone-favorites] getFormLayout failed via form layout API', error);
-      }
-      return [];
     }
   }
 
@@ -1637,7 +1428,7 @@ function markLookupAutoFields(properties, metas) {
         const appId = payload?.appId;
         if (!appId) throw new Error('appId is required');
         const layout = await getFormLayout(appId, {
-          feature: 'metadata_layout',
+          feature: 'overlay',
           trigger: String(payload?.__pbTrigger || payload?.trigger || 'subtable_modal_open'),
           source: 'overlay',
           forceRefresh: Boolean(payload?.forceRefresh)

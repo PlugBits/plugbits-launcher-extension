@@ -300,6 +300,7 @@ const state = {
   selectionIds: [],
   selectionIndex: -1,
   storageListener: null,
+  runtimeListener: null,
   dragging: null,
   shortcutToggleHandler: null,
   recentRecords: [],
@@ -307,12 +308,19 @@ const state = {
   recordPinsCollapsed: false,
   recentRecordsCollapsed: false,
   appCatalog: [],
+  appCatalogByHost: new Map(),
+  appCatalogLoadedHosts: new Set(),
+  appCatalogLastRequestedHosts: [],
+  appCatalogInFlightHosts: new Set(),
+  appCatalogLoadPromise: null,
   appCatalogSeq: 0,
   appCatalogError: false,
   appSearchOpen: false,
   appSearchQuery: '',
   appSearchMatches: [],
   appSearchActiveIndex: -1,
+  pendingHostCacheRefreshHosts: new Set(),
+  pendingHostCacheRefreshTimerId: 0,
   shortcutSearchOpenMode: SHORTCUT_SEARCH_OPEN_MODE_CURRENT_TAB,
   appSearchToggleHandler: null,
   appSearchInputHandler: null,
@@ -346,6 +354,12 @@ const DEFAULT_ICON_COLOR = 'gray';
 const ICON_COLOR_OPTIONS = ['gray', 'blue', 'green', 'orange', 'red', 'purple'];
 const APP_CANDIDATE_LIMIT = 10;
 const SHORTCUT_MAX_VISIBLE = 16;
+const CACHE_INVALIDATION_MESSAGE_TYPES = new Set([
+  'CACHE_INVALIDATED',
+  'PERMISSION_UPDATED',
+  'HOST_PERMISSION_GRANTED',
+  'HOST_PERMISSION_REMOVED'
+]);
 
 function normalizeUiLanguage(raw) {
   const value = String(raw || '').trim().toLowerCase();
@@ -1902,28 +1916,42 @@ function formatRecentTime(value) {
 function getRecentAppLabel(entry) {
   const appName = String(entry?.appName || '').trim();
   if (appName) return appName;
-  const appId = String(entry?.appId || '').trim();
+  const appId = String(resolveRecentRecordIdentity(entry).appId || '').trim();
   return appId ? `${t('panel_recent_app_prefix')} ${appId}` : t('panel_recent_app_fallback');
 }
 
 function normalizeRecentHost(host) {
-  const raw = String(host || '').trim();
-  if (!raw) return '';
-  try {
-    return new URL(raw).origin.toLowerCase().replace(/\/$/, '');
-  } catch (_err) {
-    return raw.toLowerCase().replace(/\/$/, '');
-  }
+  return normalizeHostOrigin(host);
 }
 
 function normalizeHostOrigin(host) {
   const raw = String(host || '').trim();
   if (!raw) return '';
   try {
-    return new URL(raw).origin.replace(/\/$/, '');
+    return new URL(raw).origin.replace(/\/$/, '').toLowerCase();
   } catch (_err) {
-    return raw.replace(/\/$/, '');
+    return raw.replace(/\/$/, '').toLowerCase();
   }
+}
+
+function normalizeHostList(hosts) {
+  return Array.from(new Set(
+    (Array.isArray(hosts) ? hosts : [hosts])
+      .map((host) => normalizeHostOrigin(host))
+      .filter(Boolean)
+  ));
+}
+
+function resolveRecentRecordIdentity(entry) {
+  const parsed = parseKintoneUrl(String(entry?.url || ''));
+  const host = normalizeRecentHost(parsed?.host || entry?.host || '');
+  const appId = String(parsed?.appId || entry?.appId || '').trim();
+  const recordId = String(parsed?.recordId || entry?.recordId || '').trim();
+  return {
+    host,
+    appId,
+    recordId
+  };
 }
 
 function buildFavoriteAppKey(host, appId) {
@@ -2026,32 +2054,133 @@ function setRecentAppNameInState(host, appId, appName) {
   const safeHost = normalizeRecentHost(host);
   const safeAppId = String(appId || '').trim();
   const safeName = String(appName || '').trim();
-  if (!safeHost || !safeAppId || !safeName) return;
+  if (!safeHost || !safeAppId || !safeName) return false;
+  let changed = false;
   state.recentRecords.forEach((item) => {
-    if (normalizeRecentHost(item.host) === safeHost && String(item.appId || '').trim() === safeAppId) {
+    const identity = resolveRecentRecordIdentity(item);
+    if (identity.host === safeHost && identity.appId === safeAppId && String(item.appName || '').trim() !== safeName) {
       item.appName = safeName;
+      changed = true;
     }
   });
+  return changed;
 }
 
 async function fillRecentAppNamesFromCache() {
   const list = Array.isArray(state.recentRecords) ? state.recentRecords : [];
-  if (!list.length) return;
+  if (!list.length) return false;
   const hosts = new Set();
+  let changed = false;
   list.forEach((entry) => {
-    const host = normalizeRecentHost(entry.host);
+    const identity = resolveRecentRecordIdentity(entry);
+    const host = normalizeRecentHost(identity.host);
+    if (identity.host && identity.host !== normalizeRecentHost(entry.host || '')) {
+      entry.host = identity.host;
+    }
+    if (identity.appId && identity.appId !== String(entry.appId || '').trim()) {
+      entry.appId = identity.appId;
+    }
+    if (identity.recordId && identity.recordId !== String(entry.recordId || '').trim()) {
+      entry.recordId = identity.recordId;
+    }
     if (host) hosts.add(host);
   });
   for (const host of hosts.values()) {
     try {
       const { map } = await loadAppNameMap(host);
       Object.entries(map).forEach(([appId, appName]) => {
-        setRecentAppNameInState(host, appId, appName);
+        if (setRecentAppNameInState(host, appId, appName)) {
+          changed = true;
+        }
       });
     } catch (_err) {
       // ignore
     }
   }
+  return changed;
+}
+
+function collectRecentAppIdsForHost(host, { onlyMissing = true } = {}) {
+  const safeHost = normalizeRecentHost(host);
+  const appIds = new Set();
+  state.recentRecords.forEach((entry) => {
+    const identity = resolveRecentRecordIdentity(entry);
+    if (identity.host !== safeHost || !identity.appId) return;
+    const hasName = Boolean(String(entry.appName || '').trim());
+    if (onlyMissing && hasName) return;
+    appIds.add(identity.appId);
+  });
+  return Array.from(appIds);
+}
+
+function clearRecentAppNamesInState(hosts) {
+  const targetHosts = new Set(normalizeHostList(hosts).map((host) => normalizeRecentHost(host)));
+  if (!targetHosts.size) return false;
+  let changed = false;
+  state.recentRecords.forEach((entry) => {
+    const identity = resolveRecentRecordIdentity(entry);
+    if (!targetHosts.has(identity.host)) return;
+    if (String(entry.appName || '').trim()) {
+      entry.appName = '';
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+async function fetchRecentAppNamesByIds(host, appIds, trigger = 'recent_records') {
+  const safeHost = normalizeHostOrigin(host);
+  const uniqueIds = Array.from(new Set((appIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id))));
+  if (!safeHost || !uniqueIds.length) return {};
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: 'GET_APP_NAMES_BY_IDS',
+      payload: {
+        host: safeHost,
+        appIds: uniqueIds,
+        trigger
+      }
+    });
+    return res?.ok && res?.map && typeof res.map === 'object' ? res.map : {};
+  } catch (_err) {
+    return {};
+  }
+}
+
+async function resolveRecentAppNames(options = {}) {
+  const hosts = normalizeHostList(options?.hosts || []);
+  const scopedHosts = hosts.length ? new Set(hosts.map((host) => normalizeRecentHost(host))) : null;
+  const onlyMissing = options?.onlyMissing !== false;
+  const trigger = String(options?.trigger || 'recent_records').trim() || 'recent_records';
+  let changed = false;
+  const recentHosts = new Set();
+  state.recentRecords.forEach((entry) => {
+    const identity = resolveRecentRecordIdentity(entry);
+    if (!identity.host) return;
+    if (scopedHosts && !scopedHosts.has(identity.host)) return;
+    recentHosts.add(identity.host);
+  });
+  for (const host of recentHosts.values()) {
+    const appIds = collectRecentAppIdsForHost(host, { onlyMissing });
+    if (!appIds.length) continue;
+    let permitted = false;
+    try {
+      permitted = await hasHostPermission(host);
+    } catch (_err) {
+      permitted = false;
+    }
+    if (!permitted) continue;
+    const fetchedMap = await fetchRecentAppNamesByIds(host, appIds, trigger);
+    Object.entries(fetchedMap).forEach(([appId, appName]) => {
+      if (setRecentAppNameInState(host, appId, appName)) {
+        changed = true;
+      }
+    });
+  }
+  if (changed && options?.render !== false) {
+    renderRecentRecords();
+  }
+  return changed;
 }
 
 function renderRecentRecords() {
@@ -2073,9 +2202,10 @@ function renderRecentRecords() {
     const btn = doc.createElement('button');
     btn.type = 'button';
     btn.className = 'recent-item';
-    const safeHost = normalizeRecentHost(item.host);
-    const safeAppId = String(item.appId || '').trim();
-    const safeRecordId = String(item.recordId || '').trim();
+    const identity = resolveRecentRecordIdentity(item);
+    const safeHost = identity.host;
+    const safeAppId = identity.appId;
+    const safeRecordId = identity.recordId;
     const appLabel = getRecentAppLabel(item);
     btn.dataset.host = safeHost;
     btn.dataset.appId = safeAppId;
@@ -2104,7 +2234,7 @@ function renderRecentRecords() {
     title.appendChild(app);
     const sub = doc.createElement('div');
     sub.className = 'recent-sub recent-item-meta';
-    sub.textContent = `#${item.recordId}`;
+    sub.textContent = safeRecordId ? `#${safeRecordId}` : '';
     text.appendChild(title);
     text.appendChild(sub);
 
@@ -2133,6 +2263,13 @@ async function loadRecentAndRender() {
     state.recentRecords = [];
   }
   renderRecentRecords();
+  resolveRecentAppNames({
+    onlyMissing: true,
+    trigger: 'panel_open',
+    render: true
+  }).catch((error) => {
+    console.error('Failed to resolve recent app names', error);
+  });
 }
 
 async function clearRecentRecords() {
@@ -2156,6 +2293,49 @@ async function openRecentRecord(entry) {
   } catch (_err) {
     window.open(entry.url, '_blank', 'noopener');
   }
+}
+
+function logAppSearchDebug(message, detail = {}) {
+  try {
+    console.debug(`[app-search] ${message}`, detail);
+  } catch (_err) {
+    // ignore debug log failures
+  }
+}
+
+function clearAppSearchCatalogState(options = {}) {
+  state.appCatalog = [];
+  state.appCatalogByHost = new Map();
+  state.appCatalogLoadedHosts = new Set();
+  state.appCatalogLastRequestedHosts = [];
+  state.appCatalogInFlightHosts = new Set();
+  state.appCatalogLoadPromise = null;
+  state.appCatalogError = false;
+  state.appSearchMatches = [];
+  state.appSearchActiveIndex = -1;
+  if (options?.render) {
+    renderAppSearchResults();
+  }
+}
+
+async function collectAppSearchTargetHosts(affectedHosts = []) {
+  const hostSet = new Set(normalizeHostList(affectedHosts));
+  state.favorites
+    .map((item) => normalizeHostOrigin(item.host))
+    .filter(Boolean)
+    .forEach((host) => hostSet.add(host));
+  try {
+    const tab = await getActiveTab();
+    const tabUrl = String(tab?.url || '').trim();
+    if (tabUrl && isKintoneUrl(tabUrl)) {
+      const parsed = parseKintoneUrl(tabUrl);
+      const activeHost = normalizeHostOrigin(parsed?.host || '');
+      if (activeHost) hostSet.add(activeHost);
+    }
+  } catch (_err) {
+    // ignore active tab lookup failures
+  }
+  return Array.from(hostSet);
 }
 
 function searchAppsByName(query, limit = APP_CANDIDATE_LIMIT) {
@@ -2183,10 +2363,7 @@ function searchAppsByName(query, limit = APP_CANDIDATE_LIMIT) {
 }
 
 function normalizeAppSearchHost(host) {
-  return String(host || '')
-    .trim()
-    .replace(/^https?:\/\//i, '')
-    .replace(/\/+$/, '');
+  return normalizeHostOrigin(host);
 }
 
 function buildAppSearchUrl(appId, hostHint = '') {
@@ -2206,7 +2383,7 @@ function buildAppSearchUrl(appId, hostHint = '') {
   }
   const normalizedHost = host;
   if (!normalizedHost) return '';
-  return `https://${normalizedHost}/k/${encodeURIComponent(safeAppId)}/`;
+  return `${normalizedHost}/k/${encodeURIComponent(safeAppId)}/`;
 }
 
 async function openAppSearchCandidate(appId, hostHint = '') {
@@ -2223,8 +2400,9 @@ async function openAppSearchCandidate(appId, hostHint = '') {
       const parsed = parseKintoneUrl(activeUrl);
       normalizedHost = normalizeAppSearchHost(parsed?.host || '');
     }
-    if (!normalizedHost) {
-      normalizedHost = normalizeAppSearchHost(location.host);
+    const currentOrigin = String(location.origin || '').trim();
+    if (!normalizedHost && currentOrigin && isKintoneUrl(currentOrigin)) {
+      normalizedHost = normalizeAppSearchHost(currentOrigin);
     }
     if (!normalizedHost) {
       console.warn('No host resolved for app search navigation');
@@ -2309,11 +2487,17 @@ function refreshAppSearchMatches() {
   if (!query) {
     state.appSearchMatches = [];
     state.appSearchActiveIndex = -1;
+    logAppSearchDebug('query cleared', { totalAppCount: state.appCatalog.length });
     renderAppSearchResults();
     return;
   }
   state.appSearchMatches = searchAppsByName(query, 8);
   state.appSearchActiveIndex = state.appSearchMatches.length ? 0 : -1;
+  logAppSearchDebug('query executed', {
+    query,
+    candidateCount: state.appSearchMatches.length,
+    totalAppCount: state.appCatalog.length
+  });
   renderAppSearchResults();
 }
 
@@ -2333,7 +2517,7 @@ function setAppSearchPopoverVisible(visible) {
     renderAppSearchResults();
     return;
   }
-  refreshAppCatalog().catch(() => {});
+  refreshAppCatalog({ reason: 'app_search_open' }).catch(() => {});
   refreshAppSearchMatches();
   if (els.appSearchInput) {
     setTimeout(() => {
@@ -2495,28 +2679,25 @@ function ensureAppSearchUi() {
   }
 }
 
-async function refreshAppCatalog() {
+async function refreshAppCatalog(options = {}) {
   const seq = ++state.appCatalogSeq;
-  const hostSet = new Set(
-    state.favorites
-      .map((item) => normalizeHostOrigin(item.host))
-      .filter(Boolean)
-  );
-  try {
-    const tab = await getActiveTab();
-    const tabUrl = String(tab?.url || '');
-    if (tabUrl && isKintoneUrl(tabUrl)) {
-      const parsed = parseKintoneUrl(tabUrl);
-      const host = normalizeHostOrigin(parsed?.host || '');
-      if (host) hostSet.add(host);
-    }
-  } catch (_err) {
-    // ignore
-  }
-  const hostList = Array.from(hostSet);
+  const affectedHosts = normalizeHostList(options?.affectedHosts || []);
+  logAppSearchDebug('rebuild requested', {
+    reason: String(options?.reason || 'unknown'),
+    affectedHosts
+  });
+  clearAppSearchCatalogState({ render: false });
+  const hostList = await collectAppSearchTargetHosts(affectedHosts);
+  logAppSearchDebug('rebuild target hosts', {
+    reason: String(options?.reason || 'unknown'),
+    targetHosts: hostList
+  });
+
+  state.appCatalogSeq = seq;
+  state.appCatalogLastRequestedHosts = hostList.slice();
+  state.appCatalogInFlightHosts = new Set(hostList);
+
   if (!hostList.length) {
-    state.appCatalog = [];
-    state.appCatalogError = false;
     if (state.appSearchOpen) {
       refreshAppSearchMatches();
     }
@@ -2525,26 +2706,48 @@ async function refreshAppCatalog() {
 
   const favoriteSet = buildFavoriteAppSet();
   const nextCatalog = [];
+  const nextCatalogByHost = new Map();
   let hasFailure = false;
 
   for (const host of hostList) {
     if (seq !== state.appCatalogSeq) return;
-    const { map, ok } = await loadHostAppNameMap(host);
-    if (!ok) hasFailure = true;
-    Object.entries(map || {}).forEach(([appIdRaw, nameRaw]) => {
-      const appId = String(appIdRaw || '').trim();
-      const name = String(nameRaw || '').trim();
-      if (!appId || !name) return;
-      const key = buildFavoriteAppKey(host, appId);
-      nextCatalog.push({
-        host,
-        appId,
-        name,
-        nameLower: appSearchText(name),
-        url: `${host}/k/${encodeURIComponent(appId)}/`,
-        isFavorite: key ? favoriteSet.has(key) : false
+    const normalizedHost = normalizeHostOrigin(host);
+    let entryCount = 0;
+    try {
+      const { map, ok } = await loadHostAppNameMap(normalizedHost);
+      if (!ok) hasFailure = true;
+      const hostEntries = [];
+      Object.entries(map || {}).forEach(([appIdRaw, nameRaw]) => {
+        const appId = String(appIdRaw || '').trim();
+        const name = String(nameRaw || '').trim();
+        if (!appId || !name) return;
+        const key = buildFavoriteAppKey(normalizedHost, appId);
+        const entry = {
+          host: normalizedHost,
+          appId,
+          name,
+          nameLower: appSearchText(name),
+          url: `${normalizedHost}/k/${encodeURIComponent(appId)}/`,
+          isFavorite: key ? favoriteSet.has(key) : false
+        };
+        hostEntries.push(entry);
+        nextCatalog.push(entry);
       });
-    });
+      entryCount = hostEntries.length;
+      nextCatalogByHost.set(normalizedHost, hostEntries);
+      logAppSearchDebug('host app list fetched', {
+        host: normalizedHost,
+        appCount: entryCount,
+        ok
+      });
+    } catch (error) {
+      hasFailure = true;
+      nextCatalogByHost.set(normalizedHost, []);
+      logAppSearchDebug('host app list fetch failed', {
+        host: normalizedHost,
+        error: String(error?.message || error)
+      });
+    }
   }
 
   if (seq !== state.appCatalogSeq) return;
@@ -2556,7 +2759,15 @@ async function refreshAppCatalog() {
   });
 
   state.appCatalog = nextCatalog;
+  state.appCatalogByHost = nextCatalogByHost;
+  state.appCatalogLoadedHosts = new Set(hostList);
+  state.appCatalogInFlightHosts = new Set();
+  state.appCatalogLoadPromise = null;
   state.appCatalogError = hasFailure && nextCatalog.length === 0;
+  logAppSearchDebug('rebuild completed', {
+    targetHosts: hostList,
+    totalAppCount: nextCatalog.length
+  });
   if (state.appSearchOpen) {
     refreshAppSearchMatches();
   }
@@ -3037,7 +3248,7 @@ async function loadFavoritesAndRender() {
   await pruneWatchlistCountCache(validIds);
   applyWatchlistCountCacheToBadges();
   renderLists();
-  await refreshAppCatalog();
+  await refreshAppCatalog({ reason: 'load_favorites' });
   renderShortcuts();
   await syncWatchlistAutoRefreshTimer('load_favorites');
   const hosts = new Set(state.favorites.map((item) => item.host).filter(Boolean));
@@ -3244,6 +3455,64 @@ function attachStorageListener() {
   };
   chrome.storage.onChanged.addListener(listener);
   state.storageListener = listener;
+}
+
+function queueHostCacheRefresh(hosts) {
+  const normalizedHosts = normalizeHostList(hosts);
+  normalizedHosts.forEach((host) => {
+    state.pendingHostCacheRefreshHosts.add(host);
+  });
+  if (state.pendingHostCacheRefreshTimerId) return;
+  state.pendingHostCacheRefreshTimerId = window.setTimeout(() => {
+    state.pendingHostCacheRefreshTimerId = 0;
+    const targetHosts = Array.from(state.pendingHostCacheRefreshHosts);
+    state.pendingHostCacheRefreshHosts.clear();
+    if (!targetHosts.length) return;
+    refreshAfterHostCacheInvalidation(targetHosts).catch((error) => {
+      console.error('Failed to refresh launcher after cache invalidation', error);
+    });
+  }, 60);
+}
+
+async function refreshAfterHostCacheInvalidation(hosts) {
+  const targetHosts = normalizeHostList(hosts);
+  if (!targetHosts.length) return;
+  state.appCatalogSeq += 1;
+  const recentChanged = clearRecentAppNamesInState(targetHosts);
+  clearAppSearchCatalogState({ render: state.appSearchOpen });
+  if (recentChanged) {
+    renderRecentRecords();
+  }
+  await Promise.allSettled([
+    resolveRecentAppNames({
+      hosts: targetHosts,
+      onlyMissing: false,
+      trigger: 'permission_change',
+      render: true
+    }),
+    refreshAppCatalog({
+      affectedHosts: targetHosts,
+      reason: 'permission_change'
+    })
+  ]);
+}
+
+function attachRuntimeListener() {
+  if (!chrome?.runtime?.onMessage || state.runtimeListener) return;
+  const listener = (message) => {
+    const messageType = String(message?.type || '').trim();
+    if (!CACHE_INVALIDATION_MESSAGE_TYPES.has(messageType)) return;
+    const payload = message?.payload && typeof message.payload === 'object' ? message.payload : {};
+    const hosts = normalizeHostList(payload?.hosts || message?.hosts || payload?.host || message?.host);
+    if (!hosts.length) return;
+    logAppSearchDebug('permission event received', {
+      messageType,
+      affectedHosts: hosts
+    });
+    queueHostCacheRefresh(hosts);
+  };
+  chrome.runtime.onMessage.addListener(listener);
+  state.runtimeListener = listener;
 }
 
 function detachStorageListener() {
@@ -3870,7 +4139,16 @@ function dispose() {
   state.watchlistLastResumeEventAt = 0;
   state.watchlistResumeSourceAt.clear();
   state.watchlistSectionSync.activeRequestId = '';
+  if (state.pendingHostCacheRefreshTimerId) {
+    window.clearTimeout(state.pendingHostCacheRefreshTimerId);
+    state.pendingHostCacheRefreshTimerId = 0;
+  }
+  state.pendingHostCacheRefreshHosts.clear();
   detachStorageListener();
+  if (state.runtimeListener && chrome?.runtime?.onMessage) {
+    chrome.runtime.onMessage.removeListener(state.runtimeListener);
+    state.runtimeListener = null;
+  }
   stopWatchlistAutoRefreshTimer();
   if (state.watchlistFocusHandler) {
     window.removeEventListener('focus', state.watchlistFocusHandler);
@@ -3938,6 +4216,7 @@ async function init() {
   await loadWatchlistCountCache();
   wireEvents();
   attachStorageListener();
+  attachRuntimeListener();
   await initializeRecordPins();
   await refreshShortcutEntries();
   await loadRecentAndRender();

@@ -1197,15 +1197,15 @@
 }
 
 .pb-overlay__column-panel {
-  width: min(900px, 96vw);
-  max-height: 90vh;
+  width: min(960px, 92vw);
+  max-height: 80vh;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 20px 40px rgba(15, 23, 42, 0.25);
-  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .pb-overlay__column-panel-head {
@@ -1213,6 +1213,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .pb-overlay__column-panel-title {
@@ -1228,12 +1230,28 @@
 }
 
 .pb-overlay__column-close {
-  border: none;
-  background: transparent;
+  flex: 0 0 auto;
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
   color: #6b7280;
+}
+
+.pb-overlay__column-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .pb-overlay__column-preview {
@@ -1245,6 +1263,8 @@
 
 .pb-overlay__column-preview-scroll {
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 
 .pb-overlay__column-preview-row {
@@ -1324,6 +1344,12 @@
   background: #d1d5db;
 }
 
+.pb-overlay__column-panel-foot {
+  flex: 0 0 auto;
+  padding: 12px 20px 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
 .pb-overlay__column-panel-actions {
   display: flex;
   justify-content: flex-end;
@@ -1350,9 +1376,6 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 6px 10px;
-  max-height: 180px;
-  overflow: auto;
-  padding-right: 4px;
 }
 
 .pb-overlay__column-visibility-item {
@@ -1419,7 +1442,6 @@
 }
 
 .pb-overlay__subtable-head {
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1445,17 +1467,14 @@
 
 .pb-overlay__subtable-body {
   flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
   min-height: 0;
-  padding: 14px 18px;
+  padding: 12px 16px;
   overflow: hidden;
 }
 
 .pb-subtable-wrap {
   width: 100%;
   height: 100%;
-  min-height: 0;
   display: block;
   text-align: left;
   overflow: auto;
@@ -1495,44 +1514,8 @@
   padding: 6px 8px;
   border-bottom: 1px solid #eef2f7;
   vertical-align: middle;
-  min-width: 100px;
+  min-width: 140px;
   cursor: default;
-  position: relative;
-}
-
-.pb-subtable__cell--readonly {
-  background: #f3f4f6;
-}
-
-.pb-subtable__cell--dropdown,
-.pb-subtable__cell--radio,
-.pb-subtable__cell--lookup {
-  position: relative;
-}
-
-.pb-subtable__cell--dropdown::after,
-.pb-subtable__cell--radio::after,
-.pb-subtable__cell--lookup::after {
-  position: absolute;
-  right: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #9aa4b2;
-  font-size: 10px;
-  line-height: 1;
-  pointer-events: none;
-}
-
-.pb-subtable__cell--dropdown::after {
-  content: '\25BE';
-}
-
-.pb-subtable__cell--radio::after {
-  content: '\25CE';
-}
-
-.pb-subtable__cell--lookup::after {
-  content: '\2197';
 }
 
 .pb-subtable__col-op {
@@ -1564,22 +1547,37 @@
   background: #fff;
 }
 
-.pb-overlay__subtable-select {
-  appearance: none;
-  padding-right: 20px;
+.pb-overlay__subtable-input--readonly {
+  background: #f8fafc;
+  color: #334155;
+  cursor: default;
+}
+
+.pb-overlay__subtable-input--modal {
+  cursor: pointer;
+}
+
+.pb-overlay__subtable-choice-trigger {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  color: #111827;
+  text-align: left;
+  white-space: normal;
+}
+
+.pb-overlay__subtable-choice-trigger:disabled {
+  background: #f8fafc;
+  color: #64748b;
+  cursor: default;
 }
 
 .pb-subtable .pb-overlay__subtable-input:disabled {
   cursor: not-allowed;
-}
-
-.pb-subtable__cell--readonly .pb-overlay__subtable-input {
-  cursor: default;
-}
-
-.pb-subtable__cell--multiline .pb-overlay__subtable-input,
-.pb-subtable__cell--richtext .pb-overlay__subtable-input {
-  color: #374151;
 }
 
 .pb-subtable button {
@@ -1597,7 +1595,6 @@
 }
 
 .pb-overlay__subtable-foot {
-  flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1611,16 +1608,11 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 8px;
 }
 
 .pb-overlay__subtable-foot-group--left {
   opacity: 0.92;
-}
-
-.pb-overlay__subtable-foot-group--right {
-  justify-content: flex-end;
-  margin-left: auto;
 }
 
 .pb-overlay__multiline-layer {
@@ -1684,6 +1676,20 @@
   font-size: 13px;
   line-height: 1.45;
   color: #111827;
+}
+
+.pb-overlay__multiline-viewer {
+  min-height: 260px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #111827;
+  background: #ffffff;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .pb-overlay__multiline-foot {
@@ -2073,6 +2079,11 @@
     color: #f8fbff;
   }
 
+  #pb-excel-overlay .pb-overlay__column-panel-head,
+  #pb-excel-overlay .pb-overlay__column-panel-foot {
+    border-color: #243248;
+  }
+
   #pb-excel-overlay .pb-overlay__column-panel-hint,
   #pb-excel-overlay .pb-overlay__column-empty {
     color: #9fb0c7;
@@ -2104,6 +2115,12 @@
   #pb-excel-overlay .pb-overlay__column-chip.is-drop-target {
     border-color: #60a5fa;
     box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.18);
+  }
+
+  #pb-excel-overlay .pb-overlay__column-close {
+    border-color: #334155;
+    background: #162136;
+    color: #e5edf8;
   }
 
   #pb-excel-overlay .pb-overlay__column-chip-resizer::after {
@@ -2141,25 +2158,23 @@
     color: #e5edf8;
   }
 
-  #pb-excel-overlay .pb-subtable__cell--readonly {
-    background: rgba(148, 163, 184, 0.08);
-  }
-
   #pb-excel-overlay .pb-subtable__empty {
     color: #9fb0c7;
   }
 
   #pb-excel-overlay .pb-overlay__subtable-input,
-  #pb-excel-overlay .pb-overlay__multiline-input {
+  #pb-excel-overlay .pb-overlay__subtable-choice-trigger,
+  #pb-excel-overlay .pb-overlay__multiline-input,
+  #pb-excel-overlay .pb-overlay__multiline-viewer {
     background: #0f1726;
     color: #f8fbff;
     border-color: #334155;
   }
 
-  #pb-excel-overlay .pb-subtable__cell--dropdown::after,
-  #pb-excel-overlay .pb-subtable__cell--radio::after,
-  #pb-excel-overlay .pb-subtable__cell--lookup::after {
-    color: #94a3b8;
+  #pb-excel-overlay .pb-overlay__subtable-input--readonly,
+  #pb-excel-overlay .pb-overlay__subtable-choice-trigger:disabled {
+    background: #162136;
+    color: #b7c6da;
   }
 
   /* choice panel */

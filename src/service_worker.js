@@ -5,9 +5,11 @@ import {
   isKintoneUrl,
   parseKintoneUrl,
   loadShortcuts,
+  loadAppNameMap,
   saveShortcuts,
   upsertRecentRecord,
-  saveAppNameMap
+  saveAppNameMap,
+  clearAppNameMap
 } from './core.js';
 
 function disableLegacyWatchlistBadgeRefresh() {
@@ -51,6 +53,16 @@ chrome.storage.onChanged.addListener((changes, area) => {
     console.error('[kfav] failed to rebuild context menus on language change', error);
   });
 });
+chrome.permissions?.onAdded?.addListener((permissions) => {
+  handleOptionalHostPermissionChange(permissions, 'granted').catch((error) => {
+    console.error('[kfav] host permission add handling failed', error);
+  });
+});
+chrome.permissions?.onRemoved?.addListener((permissions) => {
+  handleOptionalHostPermissionChange(permissions, 'removed').catch((error) => {
+    console.error('[kfav] host permission removal handling failed', error);
+  });
+});
 
 const PIN_MENU_ID = 'kfav-pin-record';
 const FAVORITE_PARENT_ID = 'kfav-favorite-parent';
@@ -78,6 +90,10 @@ const PRO_INSTALL_TYPE_MESSAGE_ID = 'PB_GET_INSTALL_TYPE';
 const UI_LANGUAGE_KEY = 'uiLanguage';
 const UI_LANGUAGE_VALUES = new Set(['auto', 'ja', 'en']);
 const latestPageContextByTab = new Map();
+const CACHE_INVALIDATED_MESSAGE = 'CACHE_INVALIDATED';
+const PERMISSION_UPDATED_MESSAGE = 'PERMISSION_UPDATED';
+const HOST_PERMISSION_GRANTED_MESSAGE = 'HOST_PERMISSION_GRANTED';
+const HOST_PERMISSION_REMOVED_MESSAGE = 'HOST_PERMISSION_REMOVED';
 
 function normalizeWatchlistLimit(raw) {
   const value = Number(raw);
@@ -169,6 +185,24 @@ function normalizeUiLanguage(raw) {
   const value = String(raw || '').trim().toLowerCase();
   if (value === 'ja' || value.startsWith('ja-')) return 'ja';
   return 'en';
+}
+
+function extractHostOriginsFromPermissions(permissions) {
+  const origins = Array.isArray(permissions?.origins) ? permissions.origins : [];
+  return Array.from(new Set(
+    origins
+      .map((origin) => normalizeHostOrigin(origin))
+      .filter(Boolean)
+  ));
+}
+
+async function broadcastRuntimeMessage(message) {
+  if (!message || typeof message !== 'object') return;
+  try {
+    await chrome.runtime.sendMessage(message);
+  } catch (_err) {
+    // Ignore when no extension page is currently listening.
+  }
 }
 
 function normalizeUiLanguageSetting(raw) {
@@ -1208,9 +1242,9 @@ function normalizeHostOrigin(host) {
   const raw = String(host || '').trim();
   if (!raw) return '';
   try {
-    return new URL(raw).origin.replace(/\/$/, '');
+    return new URL(raw).origin.replace(/\/$/, '').toLowerCase();
   } catch (_err) {
-    return raw.replace(/\/$/, '');
+    return raw.replace(/\/$/, '').toLowerCase();
   }
 }
 
@@ -1421,6 +1455,106 @@ async function clearAllMetadataBundles() {
     // ignore
   }
   return removed;
+}
+
+async function clearMetadataBundlesByHost(host) {
+  const safeHost = normalizeHostOrigin(host);
+  if (!safeHost) return 0;
+  const removedKeys = new Set();
+  const prefix = `${PB_METADATA_CACHE_PREFIX}${safeHost}:`;
+  try {
+    for (const key of Array.from(metadataMemoryCache.keys())) {
+      if (key.startsWith(prefix)) {
+        metadataMemoryCache.delete(key);
+        removedKeys.add(key);
+      }
+    }
+    const all = await chrome.storage.local.get(null);
+    const keys = Object.keys(all || {}).filter((key) => key.startsWith(prefix));
+    if (keys.length) {
+      await chrome.storage.local.remove(keys);
+      keys.forEach((key) => removedKeys.add(key));
+    }
+  } catch (_err) {
+    // ignore
+  }
+  return removedKeys.size;
+}
+
+async function fetchAppNamesByIds(host, appIds) {
+  const safeHost = normalizeHostOrigin(host);
+  const uniqueIds = Array.from(new Set((appIds || []).map((id) => String(id || '').trim()).filter((id) => /^\d+$/.test(id))));
+  if (!safeHost || !uniqueIds.length) return {};
+  let cachedMap = {};
+  try {
+    const cached = await loadAppNameMap(safeHost);
+    cachedMap = cached?.map && typeof cached.map === 'object' ? cached.map : {};
+  } catch (_err) {
+    cachedMap = {};
+  }
+  const out = {};
+  uniqueIds.forEach((appId) => {
+    const name = String(cachedMap?.[appId] || '').trim();
+    if (name) out[appId] = name;
+  });
+  const missingIds = uniqueIds.filter((appId) => !String(out[appId] || '').trim());
+  if (!missingIds.length) {
+    return out;
+  }
+  const fetched = await fetchAppsMapByAppIds(safeHost, missingIds);
+  if (Object.keys(fetched).length) {
+    await saveAppNameMap(safeHost, { ...cachedMap, ...fetched });
+    Object.assign(out, fetched);
+  }
+  return out;
+}
+
+async function invalidateHostCaches(host, reason = 'permission_changed') {
+  const safeHost = normalizeHostOrigin(host);
+  if (!safeHost) return null;
+  const appNameCacheCleared = await clearAppNameMap(safeHost);
+  const metadataRemoved = await clearMetadataBundlesByHost(safeHost);
+  return {
+    host: safeHost,
+    reason: String(reason || 'permission_changed'),
+    categories: [
+      'app_list_cache',
+      'app_metadata_cache',
+      'recent_record_name_resolution_cache',
+      'bootstrap_cache',
+      'app_search_source_cache'
+    ],
+    cleared: {
+      appListCache: Boolean(appNameCacheCleared),
+      metadataBundleCount: metadataRemoved,
+      recentNameResolutionCache: Boolean(appNameCacheCleared),
+      bootstrapCache: metadataRemoved,
+      appSearchSourceCache: true
+    }
+  };
+}
+
+async function handleOptionalHostPermissionChange(permissions, reason = 'granted') {
+  const hosts = extractHostOriginsFromPermissions(permissions);
+  if (!hosts.length) return;
+  const invalidations = [];
+  for (const host of hosts) {
+    const result = await invalidateHostCaches(host, reason);
+    if (result) invalidations.push(result);
+  }
+  if (!invalidations.length) return;
+  const payload = {
+    reason,
+    hosts: invalidations.map((item) => item.host),
+    invalidations
+  };
+  await broadcastRuntimeMessage({ type: CACHE_INVALIDATED_MESSAGE, payload });
+  await broadcastRuntimeMessage({ type: PERMISSION_UPDATED_MESSAGE, payload });
+  if (reason === 'granted') {
+    await broadcastRuntimeMessage({ type: HOST_PERMISSION_GRANTED_MESSAGE, payload });
+  } else if (reason === 'removed') {
+    await broadcastRuntimeMessage({ type: HOST_PERMISSION_REMOVED_MESSAGE, payload });
+  }
 }
 
 async function fetchMetadataAppPiece(host, appId, options = {}) {
@@ -1788,11 +1922,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         console.debug('[kfav] apps map load failed', { host: safeHost, error: String(error?.message || error) });
         const fallbackMap = await fetchAppsMapByAppIds(safeHost, appIds);
         if (Object.keys(fallbackMap).length) {
-          await saveAppNameMap(safeHost, fallbackMap);
+          let existingMap = {};
+          try {
+            const cached = await loadAppNameMap(safeHost);
+            existingMap = cached?.map && typeof cached.map === 'object' ? cached.map : {};
+          } catch (_err) {
+            existingMap = {};
+          }
+          await saveAppNameMap(safeHost, { ...existingMap, ...fallbackMap });
           console.debug('[kfav] apps map fallback loaded', { host: safeHost, size: Object.keys(fallbackMap).length });
           sendResponse({ ok: true, host: safeHost, map: fallbackMap, fallback: true });
           return;
         }
+        sendResponse({ ok: false, host: safeHost, error: String(error?.message || error), map: {} });
+      }
+      return;
+    }
+
+    if (msg?.type === 'GET_APP_NAMES_BY_IDS') {
+      const payload = msg?.payload && typeof msg.payload === 'object' ? msg.payload : msg;
+      const safeHost = normalizeHostOrigin(payload?.host || payload?.origin || payload?.url || '');
+      const appIds = Array.isArray(payload?.appIds) ? payload.appIds : [];
+      if (!safeHost) {
+        sendResponse({ ok: false, error: 'host required', host: '', map: {} });
+        return;
+      }
+      try {
+        const map = await fetchAppNamesByIds(safeHost, appIds);
+        sendResponse({ ok: true, host: safeHost, map });
+      } catch (error) {
         sendResponse({ ok: false, host: safeHost, error: String(error?.message || error), map: {} });
       }
       return;
