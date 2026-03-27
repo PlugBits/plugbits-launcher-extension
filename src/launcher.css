@@ -39,6 +39,31 @@
     color-scheme: dark;
   }
 
+  .host-onboarding {
+    background: rgba(2, 6, 23, 0.56);
+  }
+
+  .host-onboarding__card {
+    background: var(--launcher-surface);
+    border-color: var(--launcher-line);
+    box-shadow: 0 20px 40px rgba(2, 6, 23, 0.56);
+  }
+
+  .host-onboarding__host {
+    background: rgba(96, 165, 250, 0.12);
+    border-color: rgba(148, 163, 184, 0.24);
+  }
+
+  .host-onboarding__btn:hover {
+    background: rgba(96, 165, 250, 0.14);
+    border-color: rgba(96, 165, 250, 0.32);
+  }
+
+  .host-onboarding__btn--primary:hover {
+    background: #3b82f6;
+    border-color: transparent;
+  }
+
   .pb-launcher,
   .plugbits-launcher,
   .launcher-root,
@@ -324,6 +349,168 @@ body.launcher {
   display: flex;
   gap: 8px;
   flex: 0 0 auto;
+}
+
+.launcher-head-menu {
+  position: relative;
+}
+
+.launcher-head-menu-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 152px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--menu-border);
+  background: var(--menu-bg);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 30;
+}
+
+.launcher-head-menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--launcher-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.launcher-head-menu-item:hover {
+  background: var(--launcher-accent-muted);
+}
+
+.launcher-head-menu-item:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 2px;
+}
+
+.host-onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(4px);
+}
+
+.host-onboarding__card {
+  width: min(360px, 100%);
+  margin-top: 56px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--launcher-line);
+  background: var(--launcher-surface);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.host-onboarding__eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--launcher-accent);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.host-onboarding__title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.host-onboarding__desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--launcher-muted);
+}
+
+.host-onboarding__host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--launcher-line);
+  background: rgba(37, 99, 235, 0.06);
+}
+
+.host-onboarding__host-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--launcher-muted);
+  letter-spacing: 0.03em;
+}
+
+.host-onboarding__host-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--launcher-text);
+  word-break: break-all;
+}
+
+.host-onboarding__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.host-onboarding__btn {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--launcher-line);
+  background: var(--launcher-surface);
+  color: var(--launcher-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+.host-onboarding__btn:hover {
+  border-color: rgba(37, 99, 235, 0.26);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.host-onboarding__btn:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 2px;
+}
+
+.host-onboarding__btn:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.host-onboarding__btn--primary {
+  border-color: transparent;
+  background: var(--launcher-accent);
+  color: #fff;
+}
+
+.host-onboarding__btn--primary:hover {
+  border-color: transparent;
+  background: #1d4ed8;
+}
+
+.host-onboarding__btn--subtle {
+  color: var(--launcher-muted);
 }
 
 .icon-btn {

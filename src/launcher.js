@@ -12,6 +12,7 @@ import {
   parseKintoneUrl,
   isKintoneUrl,
   hasHostPermission,
+  ensureHostPermission,
   sendRunInKintone,
   sendCountBulk,
   createId,
@@ -61,6 +62,8 @@ const UI_LANGUAGE_VALUES = ['auto', 'ja', 'en'];
 const DEFAULT_UI_LANGUAGE = 'auto';
 const DEFAULT_LANGUAGE = 'ja';
 const DEFAULT_LOCALE = 'ja';
+const HOST_ONBOARDING_DISMISSED_KEY = 'pbHostPermissionOnboardingDismissedHosts';
+const MANUAL_URL = 'https://plugbits.app/launcher/manual.html';
 
 const I18N_MESSAGES = {
   ja: {
@@ -79,6 +82,8 @@ const I18N_MESSAGES = {
     panel_action_open_overlay_view_only: 'Excel Overlay (View only)',
     panel_action_open_overlay_unsupported: 'Excel Overlay (一覧/詳細画面のみ)',
     panel_action_open_settings: '設定を開く',
+    panel_settings_menu_settings: '設定',
+    panel_settings_menu_manual: 'はじめかた',
     panel_action_clear_search: '検索をクリア',
     panel_action_toggle_shortcuts_collapse: 'ショートカットを折りたたむ',
     panel_action_toggle_shortcuts_expand: 'ショートカットを展開',
@@ -129,12 +134,24 @@ const I18N_MESSAGES = {
     panel_notice_favorites_stale: '他のタブで更新がありました。最新状態を再読み込みしました。',
     panel_notice_overlay_unsupported: 'この画面では Excel Overlay を利用できません（一覧/詳細画面で利用できます）',
     panel_notice_overlay_open_failed: 'Excel Overlay の起動に失敗しました',
+    panel_notice_permission_granted: 'ホストアクセスを許可しました: {host}',
+    panel_notice_permission_cancelled: 'ホストアクセスの許可がキャンセルされました',
     panel_notice_url_required: 'URLは必須です',
     panel_notice_kintone_url_required: 'kintone URLを入力してください',
     panel_notice_updated: '更新しました',
     panel_notice_icon_updated: 'アイコンを更新しました',
     panel_notice_category_updated: 'カテゴリを更新しました',
     panel_notice_initialization_failed: '初期化に失敗しました',
+    panel_host_onboarding_eyebrow: '初回設定',
+    panel_host_onboarding_title: 'ホストアクセスを設定',
+    panel_host_onboarding_desc: '件数取得やショートカットを使うには、現在の kintone ホストへのアクセスを許可してください。',
+    panel_host_onboarding_desc_no_host: '初回設定では kintone ホストへのアクセス許可が必要です。先に kintone タブを開くか、設定画面から手動で追加してください。',
+    panel_host_onboarding_host_label: '対象ホスト',
+    panel_host_onboarding_allow: 'このホストを許可',
+    panel_host_onboarding_detect: '現在のホストを確認',
+    panel_host_onboarding_allowing: '許可を確認中...',
+    panel_host_onboarding_settings: '設定画面を開く',
+    panel_host_onboarding_later: 'あとで',
     panel_prompt_edit_label: 'ラベルを編集',
     panel_prompt_edit_url: 'URLを編集',
     panel_prompt_icon: 'アイコン名を入力\n選択肢: {icons}',
@@ -159,6 +176,8 @@ const I18N_MESSAGES = {
     panel_action_open_overlay_view_only: 'Excel Overlay (View only)',
     panel_action_open_overlay_unsupported: 'Excel Overlay (List / Detail only)',
     panel_action_open_settings: 'Open settings',
+    panel_settings_menu_settings: 'Settings',
+    panel_settings_menu_manual: 'Getting Started',
     panel_action_clear_search: 'Clear search',
     panel_action_toggle_shortcuts_collapse: 'Collapse shortcuts',
     panel_action_toggle_shortcuts_expand: 'Expand shortcuts',
@@ -209,12 +228,24 @@ const I18N_MESSAGES = {
     panel_notice_favorites_stale: 'Another tab updated watchlist. Reloaded the latest state.',
     panel_notice_overlay_unsupported: 'Excel Overlay is only available on list/detail pages',
     panel_notice_overlay_open_failed: 'Failed to open Excel Overlay',
+    panel_notice_permission_granted: 'Host access granted: {host}',
+    panel_notice_permission_cancelled: 'Host access request was cancelled',
     panel_notice_url_required: 'URL is required',
     panel_notice_kintone_url_required: 'Please enter a kintone URL',
     panel_notice_updated: 'Updated',
     panel_notice_icon_updated: 'Icon updated',
     panel_notice_category_updated: 'Category updated',
     panel_notice_initialization_failed: 'Initialization failed',
+    panel_host_onboarding_eyebrow: 'Initial setup',
+    panel_host_onboarding_title: 'Set host access',
+    panel_host_onboarding_desc: 'Allow access to the current kintone host to enable counts, shortcuts, and other page integrations.',
+    panel_host_onboarding_desc_no_host: 'Initial setup needs a kintone host permission. Open a kintone tab first, or add a host manually from settings.',
+    panel_host_onboarding_host_label: 'Target host',
+    panel_host_onboarding_allow: 'Allow this host',
+    panel_host_onboarding_detect: 'Detect current host',
+    panel_host_onboarding_allowing: 'Checking permission...',
+    panel_host_onboarding_settings: 'Open settings',
+    panel_host_onboarding_later: 'Later',
     panel_prompt_edit_label: 'Edit label',
     panel_prompt_edit_url: 'Edit URL',
     panel_prompt_icon: 'Enter icon name\nChoices: {icons}',
@@ -228,6 +259,16 @@ const I18N_MESSAGES = {
 const doc = document;
 
 const els = {
+  hostOnboarding: doc.getElementById('hostOnboarding'),
+  hostOnboardingDesc: doc.getElementById('hostOnboardingDesc'),
+  hostOnboardingHost: doc.getElementById('hostOnboardingHost'),
+  hostOnboardingHostValue: doc.getElementById('hostOnboardingHostValue'),
+  hostOnboardingAllow: doc.getElementById('hostOnboardingAllow'),
+  hostOnboardingOpenSettings: doc.getElementById('hostOnboardingOpenSettings'),
+  hostOnboardingLater: doc.getElementById('hostOnboardingLater'),
+  settingsMenu: doc.getElementById('settingsMenu'),
+  openOptionsPageMenuItem: doc.getElementById('openOptionsPageMenuItem'),
+  openManualMenuItem: doc.getElementById('openManualMenuItem'),
   filterPanel: doc.getElementById('filterPanel'),
   toggleFilterPanel: doc.getElementById('toggleFilterPanel'),
   filter: doc.getElementById('filter'),
@@ -268,6 +309,7 @@ const state = {
   filterText: '',
   pinsOnly: false,
   badgeStatus: new Map(),
+  noticeTimerId: 0,
   watchlistCountCache: new Map(),
   watchlistRefreshInFlight: false,
   watchlistLimit: DEFAULT_WATCHLIST_LIMIT,
@@ -326,9 +368,14 @@ const state = {
   appSearchInputHandler: null,
   appSearchInputKeydownHandler: null,
   appSearchOutsideHandler: null,
+  settingsMenuOpen: false,
+  settingsMenuOutsideHandler: null,
   pinListObserver: null,
   uiLanguageSetting: DEFAULT_UI_LANGUAGE,
   currentLang: DEFAULT_LANGUAGE,
+  hostOnboardingVisible: false,
+  hostOnboardingHost: '',
+  hostOnboardingBusy: false,
   overlayLaunchState: {
     pageType: 'unsupported',
     canEditOverlay: false
@@ -760,6 +807,7 @@ function rerenderLocalizedUi() {
   } else {
     renderAppSearchResults();
   }
+  renderHostOnboarding();
 }
 
 function normalizeIconName(value) {
@@ -880,19 +928,221 @@ function resolveShortcutIconColor(entry) {
   return normalizeIconColor(entry?.iconColor);
 }
 
-function setNotice(message) {
+function setNotice(message, options = {}) {
+  const durationMs = Number.isFinite(options?.durationMs) ? Number(options.durationMs) : 4500;
   if (!els.notice) return;
+  if (state.noticeTimerId) {
+    window.clearTimeout(state.noticeTimerId);
+    state.noticeTimerId = 0;
+  }
   if (message) {
     els.notice.textContent = message;
     els.notice.classList.remove('hidden');
+    if (durationMs > 0) {
+      state.noticeTimerId = window.setTimeout(() => {
+        state.noticeTimerId = 0;
+        setNotice('');
+      }, durationMs);
+    }
   } else {
     els.notice.textContent = '';
     els.notice.classList.add('hidden');
   }
 }
 
-function setNoticeKey(key, vars) {
-  setNotice(t(key, vars));
+function setNoticeKey(key, vars, options) {
+  setNotice(t(key, vars), options);
+}
+
+function openOptionsPage() {
+  if (chrome?.runtime?.openOptionsPage) {
+    chrome.runtime.openOptionsPage();
+  } else {
+    window.open(chrome.runtime.getURL('options.html'), '_blank');
+  }
+}
+
+async function openManualPage() {
+  if (chrome?.tabs?.create) {
+    await chrome.tabs.create({ url: MANUAL_URL, active: true });
+    return;
+  }
+  window.open(MANUAL_URL, '_blank', 'noopener');
+}
+
+function setSettingsMenuOpen(open) {
+  state.settingsMenuOpen = Boolean(open);
+  if (els.settingsMenu) {
+    els.settingsMenu.classList.toggle('hidden', !state.settingsMenuOpen);
+  }
+  if (els.openOptions) {
+    els.openOptions.setAttribute('aria-expanded', state.settingsMenuOpen ? 'true' : 'false');
+  }
+}
+
+function formatHostForDisplay(origin) {
+  return String(origin || '').replace(/^https?:\/\//, '');
+}
+
+function normalizeOnboardingDismissedHosts(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw)
+      .map(([host, value]) => [normalizeHostOrigin(host), Boolean(value)])
+      .filter(([host, value]) => host && value)
+  );
+}
+
+async function loadDismissedHostOnboardingMap() {
+  if (!chrome?.storage?.local) return {};
+  try {
+    const stored = await chrome.storage.local.get(HOST_ONBOARDING_DISMISSED_KEY);
+    const normalized = normalizeOnboardingDismissedHosts(stored?.[HOST_ONBOARDING_DISMISSED_KEY]);
+    if (JSON.stringify(normalized) !== JSON.stringify(stored?.[HOST_ONBOARDING_DISMISSED_KEY] || {})) {
+      await chrome.storage.local.set({ [HOST_ONBOARDING_DISMISSED_KEY]: normalized });
+    }
+    return normalized;
+  } catch (_err) {
+    return {};
+  }
+}
+
+async function saveDismissedHostOnboardingMap(map) {
+  if (!chrome?.storage?.local) return;
+  const normalized = normalizeOnboardingDismissedHosts(map);
+  await chrome.storage.local.set({ [HOST_ONBOARDING_DISMISSED_KEY]: normalized });
+}
+
+async function resolveActiveKintoneHost() {
+  const tab = await getActiveTab();
+  if (!tab?.url || !isKintoneUrl(tab.url)) return '';
+  try {
+    return normalizeHostOrigin(new URL(tab.url).origin);
+  } catch (_err) {
+    return '';
+  }
+}
+
+function setHostOnboardingVisible(visible) {
+  state.hostOnboardingVisible = Boolean(visible);
+  if (!els.hostOnboarding) return;
+  els.hostOnboarding.classList.toggle('hidden', !state.hostOnboardingVisible);
+}
+
+function renderHostOnboarding() {
+  if (!els.hostOnboarding) return;
+  const hasHost = Boolean(state.hostOnboardingHost);
+  if (els.hostOnboardingDesc) {
+    els.hostOnboardingDesc.textContent = hasHost
+      ? t('panel_host_onboarding_desc')
+      : t('panel_host_onboarding_desc_no_host');
+  }
+  if (els.hostOnboardingHost) {
+    els.hostOnboardingHost.classList.toggle('hidden', !hasHost);
+  }
+  if (els.hostOnboardingHostValue) {
+    els.hostOnboardingHostValue.textContent = hasHost ? formatHostForDisplay(state.hostOnboardingHost) : '';
+  }
+  if (els.hostOnboardingAllow) {
+    let label = t('panel_host_onboarding_allow');
+    if (state.hostOnboardingBusy) {
+      label = t('panel_host_onboarding_allowing');
+    } else if (!hasHost) {
+      label = t('panel_host_onboarding_detect');
+    }
+    els.hostOnboardingAllow.textContent = label;
+    els.hostOnboardingAllow.disabled = state.hostOnboardingBusy;
+  }
+}
+
+async function refreshHostOnboarding() {
+  if (!els.hostOnboarding || !chrome?.storage?.local) return false;
+  try {
+    const host = await resolveActiveKintoneHost();
+    state.hostOnboardingHost = host;
+    if (!host) {
+      state.hostOnboardingHost = '';
+      state.hostOnboardingBusy = false;
+      setHostOnboardingVisible(false);
+      return false;
+    }
+    const dismissedMap = await loadDismissedHostOnboardingMap();
+    const dismissed = Boolean(dismissedMap[host]);
+    const granted = await hasHostPermission(host);
+    if (dismissed || granted) {
+      state.hostOnboardingBusy = false;
+      setHostOnboardingVisible(false);
+      return false;
+    }
+    renderHostOnboarding();
+    setHostOnboardingVisible(true);
+    return true;
+  } catch (error) {
+    console.warn('Failed to refresh host onboarding', error);
+    setHostOnboardingVisible(false);
+    return false;
+  }
+}
+
+async function dismissHostOnboarding() {
+  const host = normalizeHostOrigin(state.hostOnboardingHost);
+  if (!chrome?.storage?.local || !host) {
+    setHostOnboardingVisible(false);
+    return;
+  }
+  try {
+    const current = await loadDismissedHostOnboardingMap();
+    current[host] = true;
+    await saveDismissedHostOnboardingMap(current);
+  } catch (_err) {
+    // ignore
+  }
+  setHostOnboardingVisible(false);
+}
+
+async function clearHostOnboardingDismissedFlag() {
+  const host = normalizeHostOrigin(state.hostOnboardingHost);
+  if (!chrome?.storage?.local || !host) return;
+  try {
+    const current = await loadDismissedHostOnboardingMap();
+    if (Object.prototype.hasOwnProperty.call(current, host)) {
+      delete current[host];
+      await saveDismissedHostOnboardingMap(current);
+    }
+  } catch (_err) {
+    // ignore
+  }
+}
+
+async function handleHostOnboardingAllow() {
+  if (state.hostOnboardingBusy) return;
+  state.hostOnboardingBusy = true;
+  renderHostOnboarding();
+  try {
+    const host = await resolveActiveKintoneHost();
+    state.hostOnboardingHost = host;
+    renderHostOnboarding();
+    if (!host) {
+      setNoticeKey('panel_notice_open_kintone_first');
+      return;
+    }
+    const granted = await ensureHostPermission(host);
+    if (!granted) {
+      setNoticeKey('panel_notice_permission_cancelled');
+      return;
+    }
+    await clearHostOnboardingDismissedFlag();
+    setNoticeKey('panel_notice_permission_granted', { host: formatHostForDisplay(host) });
+    await refreshHostOnboarding();
+    requestWatchListReconcile('permission_granted', {
+      source: 'host_onboarding',
+      ignoreCooldown: true
+    }).catch(() => {});
+    refreshOverlayLaunchState().catch(() => {});
+  } finally {
+    state.hostOnboardingBusy = false;
+    renderHostOnboarding();
+  }
 }
 
 function setFilterPanelVisible(visible, { focus = false } = {}) {
@@ -3510,6 +3760,7 @@ function attachRuntimeListener() {
       affectedHosts: hosts
     });
     queueHostCacheRefresh(hosts);
+    refreshHostOnboarding().catch(() => {});
   };
   chrome.runtime.onMessage.addListener(listener);
   state.runtimeListener = listener;
@@ -3570,11 +3821,7 @@ function renderShortcuts() {
     empty.title = t('panel_empty_shortcuts');
     empty.setAttribute('aria-label', t('panel_empty_shortcuts'));
     empty.addEventListener('click', () => {
-      if (chrome?.runtime?.openOptionsPage) {
-        chrome.runtime.openOptionsPage();
-      } else {
-        window.open(chrome.runtime.getURL('options.html'), '_blank');
-      }
+      openOptionsPage();
     });
     els.shortcutRow.appendChild(empty);
     return;
@@ -4003,8 +4250,10 @@ function focusFilterSoon() {
 
 function wireEvents() {
   setFilterPanelVisible(false);
+  setSettingsMenuOpen(false);
   ensureRecentCollapseControl();
   ensureCollapsedSectionsTray();
+  renderHostOnboarding();
   setRecordPinsCollapsed(state.recordPinsCollapsed, { persist: false });
   setWatchlistCollapsed(state.pinsOnly, { persist: false, source: 'wire_events_init' });
   setRecentRecordsCollapsed(state.recentRecordsCollapsed, { persist: false });
@@ -4025,6 +4274,18 @@ function wireEvents() {
   if (els.filter) {
     els.filter.placeholder = t('panel_search_placeholder');
   }
+  els.hostOnboardingAllow?.addEventListener('click', () => {
+    handleHostOnboardingAllow().catch((error) => {
+      console.error('Failed to request host permission from onboarding', error);
+      setNoticeKey('panel_notice_permission_cancelled');
+    });
+  });
+  els.hostOnboardingOpenSettings?.addEventListener('click', () => {
+    openOptionsPage();
+  });
+  els.hostOnboardingLater?.addEventListener('click', () => {
+    dismissHostOnboarding().catch(() => {});
+  });
   els.toggleFilterPanel?.addEventListener('click', () => {
     const next = !state.filterPanelVisible;
     setFilterPanelVisible(next, { focus: next });
@@ -4068,11 +4329,17 @@ function wireEvents() {
     setRecentRecordsCollapsed(!state.recentRecordsCollapsed);
   });
   els.openOptions?.addEventListener('click', () => {
-    if (chrome?.runtime?.openOptionsPage) {
-      chrome.runtime.openOptionsPage();
-    } else {
-      window.open(chrome.runtime.getURL('options.html'), '_blank');
-    }
+    setSettingsMenuOpen(!state.settingsMenuOpen);
+  });
+  els.openOptionsPageMenuItem?.addEventListener('click', () => {
+    setSettingsMenuOpen(false);
+    openOptionsPage();
+  });
+  els.openManualMenuItem?.addEventListener('click', () => {
+    setSettingsMenuOpen(false);
+    openManualPage().catch((error) => {
+      console.error('Failed to open manual page', error);
+    });
   });
   els.recentClear?.addEventListener('click', () => {
     clearRecentRecords().catch(() => {});
@@ -4131,6 +4398,15 @@ function wireEvents() {
     };
     document.addEventListener('click', state.watchlistClickHandler, true);
   }
+  if (!state.settingsMenuOutsideHandler) {
+    state.settingsMenuOutsideHandler = (event) => {
+      if (!state.settingsMenuOpen) return;
+      const target = event.target;
+      if (els.settingsMenu?.contains(target) || els.openOptions?.contains(target)) return;
+      setSettingsMenuOpen(false);
+    };
+    document.addEventListener('mousedown', state.settingsMenuOutsideHandler);
+  }
 }
 
 function dispose() {
@@ -4142,6 +4418,10 @@ function dispose() {
   if (state.pendingHostCacheRefreshTimerId) {
     window.clearTimeout(state.pendingHostCacheRefreshTimerId);
     state.pendingHostCacheRefreshTimerId = 0;
+  }
+  if (state.noticeTimerId) {
+    window.clearTimeout(state.noticeTimerId);
+    state.noticeTimerId = 0;
   }
   state.pendingHostCacheRefreshHosts.clear();
   detachStorageListener();
@@ -4196,6 +4476,10 @@ function dispose() {
     document.removeEventListener('mousedown', state.appSearchOutsideHandler);
     state.appSearchOutsideHandler = null;
   }
+  if (state.settingsMenuOutsideHandler) {
+    document.removeEventListener('mousedown', state.settingsMenuOutsideHandler);
+    state.settingsMenuOutsideHandler = null;
+  }
   if (els.toggleShortcuts && state.shortcutToggleHandler) {
     els.toggleShortcuts.removeEventListener('click', state.shortcutToggleHandler);
     state.shortcutToggleHandler = null;
@@ -4217,6 +4501,7 @@ async function init() {
   wireEvents();
   attachStorageListener();
   attachRuntimeListener();
+  await refreshHostOnboarding();
   await initializeRecordPins();
   await refreshShortcutEntries();
   await loadRecentAndRender();
@@ -4231,5 +4516,3 @@ init().catch((error) => {
 });
 
 window.addEventListener('beforeunload', dispose);
-
-
