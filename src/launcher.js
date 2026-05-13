@@ -3359,11 +3359,7 @@ function createEntryElement(entry, pinned) {
   title.className = 'entry-title';
   title.textContent = entry.label || t('panel_entry_no_label');
   const sub = doc.createElement('div');
-  sub.className = 'entry-sub';
-  const viewLabel = String(entry.viewIdOrName || '').trim() || String(entry.viewName || '').trim();
-  const view = viewLabel ? `${t('panel_meta_view_prefix')}:${viewLabel}` : '';
-  sub.textContent = view;
-  sub.classList.toggle('hidden', !view);
+  sub.className = 'entry-sub hidden';
   li.dataset.search = [
     entry.label || '',
     entry.url || '',
