@@ -43,76 +43,86 @@
       </div>
     </section>
 
-    <section id="shortcutPanel" class="shortcut-panel" data-i18n-aria-label="panel_section_shortcuts">
-      <section id="filterPanel" class="filter-panel hidden" data-i18n-aria-label="panel_search_label">
-        <label class="sr-only" for="filter" data-i18n="panel_search_label">検索</label>
-        <div class="filter-field">
-          <span class="filter-icon lc" data-icon="filter" aria-hidden="true"></span>
-          <input id="filter" type="search" data-i18n-placeholder="panel_search_placeholder" autocomplete="off" />
-          <button id="clearFilter" class="icon-btn small" type="button" data-i18n-aria-label="panel_action_clear_search" data-i18n-title="panel_action_clear_search">✕</button>
-        </div>
-      </section>
+    <nav class="panel-tabs" role="tablist">
+      <button class="panel-tab is-active" data-tab="main" role="tab" aria-selected="true" aria-controls="tabpane-main">メイン</button>
+      <button class="panel-tab" data-tab="pins" role="tab" aria-selected="false" aria-controls="tabpane-pins">
+        <span class="lc" data-icon="pin" aria-hidden="true"></span> ピン
+      </button>
+    </nav>
 
-      <div class="shortcut-head">
-        <span class="shortcut-label" data-i18n="panel_section_shortcuts">ショートカット</span>
-        <div class="section-actions section-actions-icons">
-          <button id="toggleShortcuts" class="icon-btn small" type="button" aria-pressed="true" data-i18n-title="panel_action_toggle_shortcuts_collapse" data-i18n-aria-label="panel_action_toggle_shortcuts_collapse">▾</button>
-        </div>
-      </div>
-      <div id="shortcutRow" class="shortcut-row" role="toolbar" data-i18n-aria-label="panel_shortcuts_toolbar"></div>
-    </section>
+    <div class="panel-tab-pane is-active" id="tabpane-main" data-tab-pane="main" role="tabpanel">
+      <section id="shortcutPanel" class="shortcut-panel" data-i18n-aria-label="panel_section_shortcuts">
+        <section id="filterPanel" class="filter-panel hidden" data-i18n-aria-label="panel_search_label">
+          <label class="sr-only" for="filter" data-i18n="panel_search_label">検索</label>
+          <div class="filter-field">
+            <span class="filter-icon lc" data-icon="filter" aria-hidden="true"></span>
+            <input id="filter" type="search" data-i18n-placeholder="panel_search_placeholder" autocomplete="off" />
+            <button id="clearFilter" class="icon-btn small" type="button" data-i18n-aria-label="panel_action_clear_search" data-i18n-title="panel_action_clear_search">✕</button>
+          </div>
+        </section>
 
-    <div id="notice" class="launcher-notice hidden" role="status"></div>
-
-    <div class="lists-scroll" id="listsScroll">
-      <section id="pinSection" class="list-section" data-i18n-aria-label="panel_section_watchlist_pinned">
-        <div class="section-head">
-          <span class="section-label">📌 <span data-i18n="panel_section_watchlist_pinned">ウォッチリスト（ピン）</span></span>
-        </div>
-        <ul id="pinnedWatchList" class="entry-list" aria-live="polite"></ul>
-      </section>
-
-      <section id="favSection" class="list-section" data-i18n-aria-label="panel_section_watchlist">
-        <div class="section-head">
-          <span class="section-label">
-            <span class="section-ico lc" data-icon="bookmark" aria-hidden="true"></span>
-            <span data-i18n="panel_section_watchlist">ウォッチリスト</span>
-          </span>
+        <div class="shortcut-head">
+          <span class="shortcut-label" data-i18n="panel_section_shortcuts">ショートカット</span>
           <div class="section-actions section-actions-icons">
-            <button id="quickAdd" class="icon-btn small" type="button" data-i18n-title="panel_action_add_current_view" data-i18n-aria-label="panel_action_add_current_view">＋</button>
-            <button id="refreshCounts" class="icon-btn small" type="button" data-i18n-title="panel_action_refresh_counts" data-i18n-aria-label="panel_action_refresh_counts">↻</button>
-            <label class="icon-toggle pins-only-toggle" data-i18n-title="panel_action_toggle_watchlist_collapse" data-i18n-aria-label="panel_action_toggle_watchlist_collapse">
-              <input type="checkbox" id="togglePinsOnly" />
-              <span id="togglePinsOnlyIcon" class="icon-btn small" aria-hidden="true">▾</span>
-            </label>
+            <button id="toggleShortcuts" class="icon-btn small" type="button" aria-pressed="true" data-i18n-title="panel_action_toggle_shortcuts_collapse" data-i18n-aria-label="panel_action_toggle_shortcuts_collapse">▾</button>
           </div>
         </div>
-        <div id="watchlistUpdatedAt" class="watchlist-updated">更新: -</div>
-        <div id="favCategories" class="category-stack" aria-live="polite"></div>
+        <div id="shortcutRow" class="shortcut-row" role="toolbar" data-i18n-aria-label="panel_shortcuts_toolbar"></div>
       </section>
 
+      <div id="notice" class="launcher-notice hidden" role="status"></div>
+
+      <div class="lists-scroll" id="listsScroll">
+        <section id="pinSection" class="list-section" data-i18n-aria-label="panel_section_watchlist_pinned">
+          <div class="section-head">
+            <span class="section-label">📌 <span data-i18n="panel_section_watchlist_pinned">ウォッチリスト（ピン）</span></span>
+          </div>
+          <ul id="pinnedWatchList" class="entry-list" aria-live="polite"></ul>
+        </section>
+
+        <section id="favSection" class="list-section" data-i18n-aria-label="panel_section_watchlist">
+          <div class="section-head">
+            <span class="section-label">
+              <span class="section-ico lc" data-icon="bookmark" aria-hidden="true"></span>
+              <span data-i18n="panel_section_watchlist">ウォッチリスト</span>
+            </span>
+            <div class="section-actions section-actions-icons">
+              <button id="quickAdd" class="icon-btn small" type="button" data-i18n-title="panel_action_add_current_view" data-i18n-aria-label="panel_action_add_current_view">＋</button>
+              <button id="refreshCounts" class="icon-btn small" type="button" data-i18n-title="panel_action_refresh_counts" data-i18n-aria-label="panel_action_refresh_counts">↻</button>
+              <label class="icon-toggle pins-only-toggle" data-i18n-title="panel_action_toggle_watchlist_collapse" data-i18n-aria-label="panel_action_toggle_watchlist_collapse">
+                <input type="checkbox" id="togglePinsOnly" />
+                <span id="togglePinsOnlyIcon" class="icon-btn small" aria-hidden="true">▾</span>
+              </label>
+            </div>
+          </div>
+          <div id="watchlistUpdatedAt" class="watchlist-updated">更新: -</div>
+          <div id="favCategories" class="category-stack" aria-live="polite"></div>
+        </section>
+
+        <section id="recentSection" class="list-section hidden" data-i18n-aria-label="panel_section_recent_records">
+          <div class="section-head">
+            <span class="section-label">
+              <span class="section-ico lc" data-icon="history" aria-hidden="true"></span>
+              <span data-i18n="panel_section_recent_records">最近のレコード</span>
+            </span>
+            <button id="recentClear" class="icon-btn small" type="button" data-i18n-title="panel_action_clear_recent_records" data-i18n-aria-label="panel_action_clear_recent_records">✕</button>
+          </div>
+          <ul id="recentList" class="recent-list" aria-live="polite"></ul>
+        </section>
+      </div>
+    </div>
+
+    <div class="panel-tab-pane" id="tabpane-pins" data-tab-pane="pins" role="tabpanel">
       <section id="recordPinSection" class="list-section" data-i18n-aria-label="panel_section_record_pins">
         <div class="section-head">
           <span class="section-label"><span class="section-ico lc" data-icon="pin" aria-hidden="true"></span> <span data-i18n="panel_section_record_pins">レコードピン</span></span>
           <div class="section-actions section-actions-icons">
             <button id="addPinFromTab" class="icon-btn small" type="button" data-i18n-title="panel_action_add_current_record_pin" data-i18n-aria-label="panel_action_add_current_record_pin">＋</button>
             <button id="refreshPins" class="icon-btn small" type="button" data-i18n-title="panel_action_refresh_pins" data-i18n-aria-label="panel_action_refresh_pins">↻</button>
-            <button id="toggleRecordPins" class="icon-btn small" type="button" aria-pressed="false" data-i18n-title="panel_action_toggle_record_pins_collapse" data-i18n-aria-label="panel_action_toggle_record_pins_collapse">▾</button>
           </div>
         </div>
         <div id="pinNotice" class="pin-notice hidden" role="status"></div>
         <ul id="pinList" class="pin-cards" aria-live="polite"></ul>
-      </section>
-
-      <section id="recentSection" class="list-section hidden" data-i18n-aria-label="panel_section_recent_records">
-        <div class="section-head">
-          <span class="section-label">
-            <span class="section-ico lc" data-icon="history" aria-hidden="true"></span>
-            <span data-i18n="panel_section_recent_records">最近のレコード</span>
-          </span>
-          <button id="recentClear" class="icon-btn small" type="button" data-i18n-title="panel_action_clear_recent_records" data-i18n-aria-label="panel_action_clear_recent_records">✕</button>
-        </div>
-        <ul id="recentList" class="recent-list" aria-live="polite"></ul>
       </section>
     </div>
   </div>

@@ -167,9 +167,29 @@
   .watchlist-item,
   .recent-item,
   .record-item {
-    background: rgba(17, 26, 45, 0.86);
+    background: var(--launcher-surface-2);
     color: var(--launcher-text);
     border: 1px solid rgba(148, 163, 184, 0.16);
+  }
+
+  .entry {
+    background: var(--launcher-surface-2);
+    border-color: rgba(148, 163, 184, 0.16);
+    box-shadow: none;
+  }
+
+  .launcher-head,
+  .panel-tabs {
+    background: var(--launcher-surface);
+    border-color: var(--launcher-line);
+  }
+
+  .shortcut-panel {
+    border-color: var(--launcher-line);
+  }
+
+  .list-section {
+    border-color: var(--launcher-line);
   }
 
   .launcher-list-item:hover,
@@ -245,33 +265,14 @@
   }
 
   .shortcut-button {
-    background: #162136 !important;
-    color: #fff !important;
-    border: 1px solid rgba(148, 163, 184, 0.28) !important;
+    background: var(--launcher-surface-2) !important;
+    color: var(--launcher-text) !important;
+    border: 1px solid rgba(148, 163, 184, 0.22) !important;
+    border-left: 3px solid transparent !important;
   }
 
-  .shortcut-button .shortcut-icon,
-  .shortcut-button .shortcut-icon svg,
-  .shortcut-button .shortcut-icon svg * {
-    color: #fff !important;
-    stroke: #fff !important;
-    fill: none !important;
-    opacity: 1 !important;
-  }
-
-  .shortcut-button.shortcut-appTop {
-    background: rgba(245, 158, 11, 0.10) !important;
-    border-color: rgba(245, 158, 11, 0.42) !important;
-  }
-
-  .shortcut-button.shortcut-viewTop {
-    background: rgba(59, 130, 246, 0.10) !important;
-    border-color: rgba(59, 130, 246, 0.42) !important;
-  }
-
-  .shortcut-button.shortcut-create {
-    background: rgba(34, 197, 94, 0.10) !important;
-    border-color: rgba(34, 197, 94, 0.42) !important;
+  .shortcut-button:not(:disabled):hover {
+    background: rgba(96, 165, 250, 0.10) !important;
   }
 
   .pb-launcher .lc,
@@ -322,7 +323,8 @@ body.launcher {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 18px 10px;
+  padding: 14px 16px 10px;
+  background: var(--launcher-surface);
 }
 
 .launcher-title {
@@ -552,8 +554,69 @@ body.launcher {
   display: none;
 }
 
+/* ── Panel tabs ── */
+.panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--launcher-line);
+  padding: 0 14px;
+  gap: 2px;
+  flex: 0 0 auto;
+  background: var(--launcher-surface);
+}
+
+.panel-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  color: var(--launcher-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  border-radius: 6px 6px 0 0;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.panel-tab:hover {
+  color: var(--launcher-text);
+}
+
+.panel-tab.is-active {
+  color: var(--launcher-accent);
+  border-bottom-color: var(--launcher-accent);
+}
+
+.panel-tab:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 2px;
+}
+
+.panel-tab-pane {
+  display: none;
+  flex: 1 1 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-tab-pane.is-active {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* ── Shortcut panel ── */
 .shortcut-panel {
-  padding: 0 18px 14px;
+  background: transparent;
+  border: none;
+  margin: 0;
+  padding: 12px 16px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -671,9 +734,8 @@ body.launcher {
 
 .shortcut-row {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  grid-auto-rows: 28px;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
   overflow: visible;
   padding-bottom: 6px;
 }
@@ -683,37 +745,39 @@ body.launcher {
   appearance: none;
   -webkit-appearance: none;
   border: 1px solid var(--launcher-line);
+  border-left: 3px solid rgba(100, 116, 139, 0.22);
   background: var(--launcher-surface);
   color: var(--launcher-text);
-  width: 36px;
-  height: 32px;
-  padding: 0;
-  border-radius: 8px;
+  width: 100%;
+  height: 38px;
+  padding: 0 10px 0 9px;
+  border-radius: 10px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 8px;
   cursor: pointer;
   line-height: 1;
+  text-align: left;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   transition:
-    transform 0.12s ease,
+    background-color 0.12s ease,
     box-shadow 0.12s ease,
-    border-color 0.12s ease,
-    background-color 0.12s ease;
+    border-color 0.12s ease;
 }
-
-
-
 
 @media (hover: hover) {
   .shortcut-button:not(:disabled):not(.disabled):not(.is-disabled):hover {
-    transform: scale(1.06);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+    background: var(--launcher-accent-muted);
+    border-color: var(--launcher-accent);
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.10);
   }
 }
 
 .shortcut-button:not(:disabled):not(.disabled):not(.is-disabled):active {
-  transform: scale(0.98);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.10);
+  background: var(--launcher-accent-muted);
+  box-shadow: none;
 }
 
 .shortcut-icon {
@@ -731,7 +795,13 @@ body.launcher {
 }
 
 .shortcut-text {
-  display: none !important;
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 0;
 }
 
 [data-ico-color="gray"] {
@@ -823,22 +893,27 @@ body.launcher {
   outline-offset: 2px;
 }
 
-.shortcut-button.shortcut-appTop {
-  background: rgba(255, 184, 64, 0.18);
-  border-color: rgba(255, 165, 54, 0.35);
-  color: #7a4a05;
+.shortcut-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: #94a3b8;
 }
 
-.shortcut-button.shortcut-view {
-  background: rgba(55, 199, 124, 0.18);
-  border-color: rgba(33, 164, 96, 0.35);
-  color: #1f6b45;
+.shortcut-button.shortcut-appTop .shortcut-dot {
+  background: #f59e0b;
 }
 
-.shortcut-button.shortcut-create {
-  background: rgba(79, 159, 255, 0.18);
-  border-color: rgba(63, 134, 228, 0.35);
-  color: #1f4f8a;
+.shortcut-button.shortcut-view .shortcut-dot {
+  background: #10b981;
+}
+
+.shortcut-button.shortcut-create .shortcut-dot {
+  background: #3b82f6;
 }
 
 .shortcut-button.disabled {
@@ -973,7 +1048,12 @@ body.launcher {
   flex-direction: column;
   gap: 4px;
   padding-top: 4px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.category-block + .category-block {
+  border-top: 1px solid var(--launcher-line);
+  padding-top: 10px;
+  margin-top: 4px;
 }
 
 .category-block.hidden-by-filter {
@@ -1095,7 +1175,7 @@ body.launcher {
 }
 
 .launcher-notice {
-  margin: 0 18px 6px;
+  margin: 0 16px 6px;
   padding: 8px 12px;
   border-radius: 10px;
   border: 1px solid rgba(250, 204, 21, 0.35);
@@ -1112,17 +1192,25 @@ body.launcher {
 .lists-scroll {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 0 16px 18px;
+  padding: 0 16px 24px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 0;
+}
+
+/* ピンタブ: recordPinSection がタブペイン直下にあるのでスクロール対応 */
+#tabpane-pins {
+  overflow-y: auto;
+  padding: 16px 16px 18px;
+  gap: 0;
 }
 
 .list-section {
-  background: var(--launcher-surface);
-  border-radius: 16px;
-  border: 1px solid var(--launcher-line);
-  padding: 12px;
+  background: transparent;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid var(--launcher-line);
+  padding: 12px 0 4px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1264,7 +1352,8 @@ body.launcher {
   width: 100%;
   border: 1px solid var(--launcher-line);
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.01);
+  background: var(--launcher-surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   color: var(--launcher-text);
   font: inherit;
   padding: 8px 10px;
@@ -1352,7 +1441,8 @@ body.launcher {
   position: relative;
   border: 1px solid var(--launcher-line);
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.01);
+  background: var(--launcher-surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   display: flex;
   align-items: stretch;
   overflow: hidden;
