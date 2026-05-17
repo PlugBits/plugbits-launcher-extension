@@ -301,7 +301,10 @@ const els = {
   shortcutPanel: doc.getElementById('shortcutPanel'),
   toggleShortcuts: doc.getElementById('toggleShortcuts'),
   toggleRecordPins: doc.getElementById('toggleRecordPins'),
-  pinList: doc.getElementById('pinList')
+  pinList: doc.getElementById('pinList'),
+  panelTabBtns: doc.querySelectorAll('.panel-tab'),
+  mainTabPane: doc.getElementById('tabpane-main'),
+  pinsTabPane: doc.getElementById('tabpane-pins')
 };
 
 const state = {
@@ -370,6 +373,7 @@ const state = {
   appSearchOutsideHandler: null,
   settingsMenuOpen: false,
   settingsMenuOutsideHandler: null,
+  activeTab: 'main',
   pinListObserver: null,
   uiLanguageSetting: DEFAULT_UI_LANGUAGE,
   currentLang: DEFAULT_LANGUAGE,
@@ -3355,11 +3359,7 @@ function createEntryElement(entry, pinned) {
   title.className = 'entry-title';
   title.textContent = entry.label || t('panel_entry_no_label');
   const sub = doc.createElement('div');
-  sub.className = 'entry-sub';
-  const viewLabel = String(entry.viewIdOrName || '').trim() || String(entry.viewName || '').trim();
-  const view = viewLabel ? `${t('panel_meta_view_prefix')}:${viewLabel}` : '';
-  sub.textContent = view;
-  sub.classList.toggle('hidden', !view);
+  sub.className = 'entry-sub hidden';
   li.dataset.search = [
     entry.label || '',
     entry.url || '',
@@ -3809,6 +3809,23 @@ function closeShortcutTooltip(btn) {
   btn.classList.remove('tooltip-open', 'tooltip-align-left', 'tooltip-align-right');
 }
 
+function switchTab(tabName) {
+  state.activeTab = tabName;
+  els.panelTabBtns.forEach((btn) => {
+    const isActive = btn.dataset.tab === tabName;
+    btn.classList.toggle('is-active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  if (els.mainTabPane) els.mainTabPane.classList.toggle('is-active', tabName === 'main');
+  if (els.pinsTabPane) els.pinsTabPane.classList.toggle('is-active', tabName === 'pins');
+}
+
+function initPanelTabs() {
+  els.panelTabBtns.forEach((btn) => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+}
+
 function renderShortcuts() {
   if (!els.shortcutRow) return;
   els.shortcutRow.textContent = '';
@@ -3835,7 +3852,6 @@ function renderShortcuts() {
     const iconColor = resolveShortcutIconColor(entry);
     btn.className = `shortcut-button shortcut-${type}`;
     btn.setAttribute('aria-label', displayLabel);
-    btn.dataset.icoColor = iconColor;
     const url = buildShortcutUrl(entry);
     if (!url) {
       btn.disabled = true;
@@ -3847,17 +3863,19 @@ function renderShortcuts() {
     icon.dataset.icoColor = iconColor;
     icon.setAttribute('aria-hidden', 'true');
 
-    const tooltip = doc.createElement('span');
-    tooltip.className = 'shortcut-tooltip';
-    tooltip.textContent = displayLabel;
-    tooltip.setAttribute('aria-hidden', 'true');
+    const text = doc.createElement('span');
+    text.className = 'shortcut-text';
+    text.textContent = displayLabel;
+    text.setAttribute('aria-hidden', 'true');
+
+    const dot = doc.createElement('span');
+    dot.className = 'shortcut-dot';
+    dot.dataset.icoColor = iconColor;
+    dot.setAttribute('aria-hidden', 'true');
 
     btn.appendChild(icon);
-    btn.appendChild(tooltip);
-    btn.addEventListener('mouseenter', () => openShortcutTooltip(btn));
-    btn.addEventListener('focus', () => openShortcutTooltip(btn));
-    btn.addEventListener('mouseleave', () => closeShortcutTooltip(btn));
-    btn.addEventListener('blur', () => closeShortcutTooltip(btn));
+    btn.appendChild(text);
+    btn.appendChild(dot);
     btn.addEventListener('click', () => openShortcut(entry));
     els.shortcutRow.appendChild(btn);
   });
@@ -4498,6 +4516,7 @@ async function init() {
   await loadCollapsedSectionsState();
   await loadWatchlistRefreshPreset();
   await loadWatchlistCountCache();
+  initPanelTabs();
   wireEvents();
   attachStorageListener();
   attachRuntimeListener();
