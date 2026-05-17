@@ -4269,6 +4269,10 @@
       return type === 'USER_SELECT' || type === 'ORGANIZATION_SELECT' || type === 'GROUP_SELECT';
     }
 
+    isFileField(field) {
+      return String(field?.type || '').toUpperCase() === 'FILE';
+    }
+
     normalizeSelectionLabels(value) {
       if (Array.isArray(value)) {
         return value
@@ -4317,6 +4321,7 @@
       if (this.isMultiLineField(field)) return editable ? 'modal-edit' : (canViewOnly ? 'modal-view' : 'readonly');
       if (this.isMultiChoiceField(field)) return editable ? 'inline-choice-multi' : 'readonly';
       if (this.isChoiceField(field)) return editable ? 'inline-choice-single' : 'readonly';
+      if (this.isFileField(field)) return editable ? 'file-drop' : 'readonly';
       if (this.isLinkField(field) || this.isCalcField(field) || this.isUserSelectField(field)) return editable ? 'inline-edit' : 'readonly';
       if (String(field?.type || '').toUpperCase() === 'NUMBER' || String(field?.type || '').toUpperCase() === 'DATE' || String(field?.type || '').toUpperCase() === 'SINGLE_LINE_TEXT') {
         return editable ? 'inline-edit' : 'readonly';
@@ -4589,6 +4594,10 @@
       if (this.isSubtableField(field)) {
         const count = Array.isArray(value) ? value.length : 0;
         return count ? resolveText(this.language, 'subtableRows', count) : '';
+      }
+      if (this.isFileField(field)) {
+        if (!Array.isArray(value) || !value.length) return '';
+        return value.map((f) => String(f?.name || f?.fileKey || '')).filter(Boolean).join(', ');
       }
       if (this.isMultiValueField(field)) {
         return this.normalizeMultiValue(value, field).join(', ');
@@ -5701,6 +5710,9 @@
       if (this.isSubtableField(field)) {
         input.placeholder = resolveText(this.language, 'btnSubtableEdit');
       }
+      if (this.isFileField(field)) {
+        input.placeholder = resolveText(this.language, 'fileDropPlaceholder') || 'Drop files here';
+      }
       input.readOnly = true;
       input.addEventListener('input', () => { this.onInputChanged(input); });
       input.addEventListener('change', () => { this.onInputChanged(input); });
@@ -5743,6 +5755,7 @@
       const isMultiLine = this.isMultiLineField(field);
       const isCalc = this.isCalcField(field);
       const isRichText = this.isRichTextField(field);
+      const isFile = this.isFileField(field);
       const isLookupKey = field?.type === 'SINGLE_LINE_TEXT' && Boolean(field?.lookup);
       const fieldDeniedByAcl = permission.reason === 'field_readonly';
       this.setInputEditingVisual(input, editing);
@@ -5765,8 +5778,70 @@
         input.parentElement.classList.toggle('pb-overlay__cell--multiline', isMultiLine);
         input.parentElement.classList.toggle('pb-overlay__cell--calc', isCalc);
         input.parentElement.classList.toggle('pb-overlay__cell--richtext', isRichText);
+        input.parentElement.classList.toggle('pb-overlay__cell--file', isFile);
+        input.parentElement.classList.toggle('pb-overlay__cell--file-editable', isFile && editable);
         input.parentElement.classList.toggle('pb-overlay__cell--lookup', isLookupKey);
+        if (isFile && editable) {
+          this.bindFileDrop(input.parentElement, input, field, row);
+        }
       }
+    }
+
+    bindFileDrop(cell, input, field, row) {
+      if (cell.dataset.fileDropBound === '1') return;
+      cell.dataset.fileDropBound = '1';
+      let dragCounter = 0;
+      cell.addEventListener('dragenter', (ev) => {
+        ev.preventDefault();
+        dragCounter += 1;
+        cell.classList.add('pb-overlay__cell--file-dragover');
+      });
+      cell.addEventListener('dragleave', () => {
+        dragCounter -= 1;
+        if (dragCounter <= 0) {
+          dragCounter = 0;
+          cell.classList.remove('pb-overlay__cell--file-dragover');
+        }
+      });
+      cell.addEventListener('dragover', (ev) => {
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'copy';
+      });
+      cell.addEventListener('drop', async (ev) => {
+        ev.preventDefault();
+        dragCounter = 0;
+        cell.classList.remove('pb-overlay__cell--file-dragover');
+        const files = Array.from(ev.dataTransfer?.files || []);
+        if (!files.length) return;
+        const recordId = String(input.dataset.recordId || row.id || '');
+        if (!recordId || !this.appId) return;
+        cell.classList.add('pb-overlay__cell--file-uploading');
+        input.value = resolveText(this.language, 'fileUploading') || 'Uploading…';
+        try {
+          const res = await this.postFn('EXCEL_UPLOAD_FILE', {
+            appId: this.appId,
+            recordId,
+            fieldCode: field.code,
+            files,
+            __pbTrigger: 'file_drop'
+          });
+          if (!res?.ok) throw new Error(res?.error || 'upload_failed');
+          const targetRow = this.rowMap?.get(recordId) || row;
+          if (targetRow) {
+            const uploaded = Array.isArray(res.fileKeys)
+              ? res.fileKeys.map((k) => ({ fileKey: k, name: files.find((_, i) => res.fileKeys[i] === k)?.name || k }))
+              : [];
+            const existing = Array.isArray(targetRow.values?.[field.code]) ? targetRow.values[field.code] : [];
+            targetRow.values[field.code] = [...existing, ...uploaded];
+            targetRow.original[field.code] = targetRow.values[field.code];
+          }
+          this.applyCellVisualState(input, targetRow || row, field.code);
+        } catch (_err) {
+          this.applyCellVisualState(input, row, field.code);
+        } finally {
+          cell.classList.remove('pb-overlay__cell--file-uploading');
+        }
+      });
     }
 
     applyCellVisualState(input, row, fieldCode) {
@@ -5827,6 +5902,7 @@
       const isMultiLine = this.isMultiLineField(field);
       const isCalc = this.isCalcField(field);
       const isRichText = this.isRichTextField(field);
+      const isFile = this.isFileField(field);
       const isLookupKey = field?.type === 'SINGLE_LINE_TEXT' && Boolean(field?.lookup);
       const fieldDeniedByAcl = permission.reason === 'field_readonly';
       this.setInputEditingVisual(input, editing);
@@ -5848,6 +5924,8 @@
       cell.classList.toggle('pb-overlay__cell--multiline', isMultiLine);
       cell.classList.toggle('pb-overlay__cell--calc', isCalc);
       cell.classList.toggle('pb-overlay__cell--richtext', isRichText);
+      cell.classList.toggle('pb-overlay__cell--file', isFile);
+      cell.classList.toggle('pb-overlay__cell--file-editable', isFile && editable);
       cell.classList.toggle('pb-overlay__cell--lookup', isLookupKey);
       cell.classList.toggle('pb-overlay__cell--editing', editing);
     }

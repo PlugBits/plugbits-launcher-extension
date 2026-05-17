@@ -1599,6 +1599,88 @@ function markLookupAutoFields(properties, metas) {
         return;
       }
 
+      if (type === 'EXCEL_UPLOAD_FILE') {
+        const appId = payload?.appId;
+        const recordId = payload?.recordId;
+        const fieldCode = payload?.fieldCode;
+        const files = Array.isArray(payload?.files) ? payload.files : [];
+        if (!appId || !recordId || !fieldCode) throw new Error('appId, recordId, and fieldCode are required');
+        if (!files.length) {
+          window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { fileKeys: [] } }, ORIGIN);
+          return;
+        }
+        const sdk = window.kintone;
+        if (!sdk?.getRequestToken) throw new Error('kintone.getRequestToken unavailable');
+        const token = sdk.getRequestToken();
+        const uploadEndpoint = '/k/v1/file.json';
+        const uploadResults = await Promise.allSettled(
+          files.map(async (file) => {
+            const form = new FormData();
+            form.append('file', file, file.name);
+            const resp = await fetch(uploadEndpoint, {
+              method: 'POST',
+              headers: { 'X-Cybozu-RequestToken': token },
+              body: form
+            });
+            if (!resp.ok) {
+              const text = await resp.text().catch(() => '');
+              const err = new Error(`file upload failed: ${resp.status} ${text}`);
+              emitApiUsage({
+                feature: 'overlay_file_upload',
+                endpoint: uploadEndpoint,
+                method: 'POST',
+                trigger: String(payload?.__pbTrigger || payload?.trigger || 'file_drop'),
+                source: 'overlay',
+                ok: false,
+                sent: true,
+                requestCount: 1,
+                requestKind: 'rest',
+                error: err.message
+              });
+              throw err;
+            }
+            const json = await resp.json();
+            emitApiUsage({
+              feature: 'overlay_file_upload',
+              endpoint: uploadEndpoint,
+              method: 'POST',
+              trigger: String(payload?.__pbTrigger || payload?.trigger || 'file_drop'),
+              source: 'overlay',
+              ok: true,
+              sent: true,
+              requestCount: 1,
+              requestKind: 'rest'
+            });
+            return json.fileKey;
+          })
+        );
+        const errors = uploadResults.filter((r) => r.status === 'rejected').map((r) => r.reason?.message || 'upload_failed');
+        if (errors.length) throw new Error(errors.join('; '));
+        const newFileKeys = uploadResults.map((r) => r.value);
+        const current = await callKintoneApi('/k/v1/record', 'GET', { app: String(appId), id: String(recordId) }, {
+          feature: 'overlay_file_upload',
+          trigger: String(payload?.__pbTrigger || payload?.trigger || 'file_drop'),
+          source: 'overlay',
+          logGroup: 'overlay'
+        });
+        const existingFiles = Array.isArray(current?.record?.[fieldCode]?.value) ? current.record[fieldCode].value : [];
+        const mergedValue = [
+          ...existingFiles.map((f) => ({ fileKey: f.fileKey })),
+          ...newFileKeys.map((k) => ({ fileKey: k }))
+        ];
+        const putResp = await callKintoneApi('/k/v1/records', 'PUT', {
+          app: String(appId),
+          records: [{ id: String(recordId), record: { [fieldCode]: { value: mergedValue } } }]
+        }, {
+          feature: 'overlay_file_upload',
+          trigger: String(payload?.__pbTrigger || payload?.trigger || 'file_drop'),
+          source: 'overlay',
+          logGroup: 'overlay'
+        });
+        window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { fileKeys: newFileKeys, revision: putResp?.revision } }, ORIGIN);
+        return;
+      }
+
       if (type === 'EXCEL_EVALUATE_RECORD_ACL') {
         const appId = payload?.appId;
         const ids = Array.isArray(payload?.ids) ? payload.ids : [];
