@@ -1742,6 +1742,8 @@
       this.dragSelecting = false;
       this.editingCell = null;
       this.handleMouseUp = this.endSelection.bind(this);
+      this.handleOverlayDragOver = (ev) => { ev.preventDefault(); };
+      this.handleOverlayDrop = (ev) => { ev.preventDefault(); };
       this.columnPrefCache = null;
       this.overlayLayoutPresetCache = null;
       this.overlayLayoutState = null;
@@ -2228,6 +2230,8 @@
       this.root.addEventListener('keydown', this.handleKeyOnOverlay, true);
       document.addEventListener('keydown', this.handleGlobalArrowKeyCapture, true);
       document.addEventListener('mouseup', this.handleMouseUp, true);
+      this.root.addEventListener('dragover', this.handleOverlayDragOver);
+      this.root.addEventListener('drop', this.handleOverlayDrop);
     }
 
     detachEvents() {
@@ -2238,6 +2242,8 @@
       this.root.removeEventListener('keydown', this.handleKeyOnOverlay, true);
       document.removeEventListener('keydown', this.handleGlobalArrowKeyCapture, true);
       document.removeEventListener('mouseup', this.handleMouseUp, true);
+      this.root.removeEventListener('dragover', this.handleOverlayDragOver);
+      this.root.removeEventListener('drop', this.handleOverlayDrop);
       this.closeLayoutPresetMenu();
     }
 
@@ -5782,9 +5788,6 @@
         input.parentElement.classList.toggle('pb-overlay__cell--file', isFile);
         input.parentElement.classList.toggle('pb-overlay__cell--file-editable', isFile && editable);
         input.parentElement.classList.toggle('pb-overlay__cell--lookup', isLookupKey);
-        if (isFile && editable) {
-          this.bindFileDrop(input.parentElement, input, field, row);
-        }
       }
     }
 
@@ -5929,6 +5932,9 @@
       cell.classList.toggle('pb-overlay__cell--file-editable', isFile && editable);
       cell.classList.toggle('pb-overlay__cell--lookup', isLookupKey);
       cell.classList.toggle('pb-overlay__cell--editing', editing);
+      if (isFile && editable) {
+        this.bindFileDrop(cell, input, field, row);
+      }
     }
 
     getInput(rowIndex, colIndex) {
