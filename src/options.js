@@ -3005,9 +3005,14 @@ uiLanguageEl?.addEventListener('change', async () => {
 
 developerProOverrideEl?.addEventListener('change', async () => {
   if (!isDeveloperUiEnabled()) return;
-  await chrome.storage.local.set({
-    [DEVELOPER_PRO_OVERRIDE_KEY]: Boolean(developerProOverrideEl.checked)
-  });
+  if (developerProOverrideEl.checked) {
+    await chrome.storage.local.set({
+      [DEVELOPER_PRO_OVERRIDE_KEY]: true,
+      pbDeveloperProOverrideAt: Date.now()
+    });
+  } else {
+    await chrome.storage.local.remove([DEVELOPER_PRO_OVERRIDE_KEY, 'pbDeveloperProOverrideAt']);
+  }
 });
 
 apiUsageResetBtn?.addEventListener('click', async () => {
