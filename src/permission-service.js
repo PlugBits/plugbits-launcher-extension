@@ -24,7 +24,8 @@
     'DROP_DOWN',
     'RADIO_BUTTON',
     'CHECK_BOX',
-    'MULTI_SELECT'
+    'MULTI_SELECT',
+    'FILE'
   ]);
 
   function toTrimmedString(value) {

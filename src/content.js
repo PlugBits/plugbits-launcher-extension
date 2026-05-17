@@ -3193,7 +3193,7 @@
       const accessState = await this.proService.getProAccessState({
         featureName: 'excel-overlay-edit',
         requestedMode,
-        allowDevelopmentInstall: false
+        allowDevelopmentInstall: requestedMode === EXCEL_OVERLAY_MODE_PRO
       });
       this.proAccessState = accessState && typeof accessState === 'object'
         ? accessState

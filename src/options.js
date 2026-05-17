@@ -2883,7 +2883,7 @@ function normalizeExcelOverlayMode(value) {
 
 function getEffectiveExcelOverlayMode(value) {
   const normalized = normalizeExcelOverlayMode(value);
-  if (normalized === EXCEL_OVERLAY_MODE_PRO) return EXCEL_OVERLAY_MODE_STANDARD;
+  if (normalized === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) return EXCEL_OVERLAY_MODE_STANDARD;
   return normalized;
 }
 
@@ -2925,7 +2925,7 @@ async function loadExcelOverlayMode() {
   excelModeInputs.forEach((input) => {
     input.checked = input.value === mode;
   });
-  if (requestedMode === EXCEL_OVERLAY_MODE_PRO) {
+  if (requestedMode === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) {
     await saveExcelOverlayMode(EXCEL_OVERLAY_MODE_STANDARD);
   }
   setExcelModeNotice('');
@@ -2975,7 +2975,7 @@ excelModeInputs.forEach((input) => {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
     const selectedMode = normalizeExcelOverlayMode(input.value);
-    if (selectedMode === EXCEL_OVERLAY_MODE_PRO) {
+    if (selectedMode === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) {
       setExcelModeNotice(t(EXCEL_OVERLAY_MODE_PRO_NOTICE_KEY));
       const fallback = excelModeInputs.find((node) => node.value === EXCEL_OVERLAY_MODE_STANDARD);
       if (fallback) fallback.checked = true;
