@@ -631,7 +631,9 @@ async function initializeI18n() {
 function isDeveloperUiEnabled() {
   try {
     const params = new URLSearchParams(window.location.search || '');
-    return params.get(DEVELOPER_UI_QUERY_PARAM) === '1';
+    if (params.get(DEVELOPER_UI_QUERY_PARAM) === '1') return true;
+    const manifest = chrome.runtime.getManifest();
+    return manifest?.plugbits_dev_tools === true;
   } catch (_err) {
     return false;
   }

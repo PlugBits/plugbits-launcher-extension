@@ -57,11 +57,9 @@
 
         if (!enabled) return false;
         if (!enabledAt) {
-          await chrome.storage.local.remove([
-            DEVELOPER_OVERRIDE_KEY,
-            DEVELOPER_OVERRIDE_AT_KEY
-          ]);
-          return false;
+          // タイムスタンプ欠落時は自動補修（手動でキーを直接セットした場合の救済）
+          await chrome.storage.local.set({ [DEVELOPER_OVERRIDE_AT_KEY]: Date.now() });
+          return true;
         }
 
         const alive = (Date.now() - enabledAt) < DEVELOPER_OVERRIDE_TTL_MS;

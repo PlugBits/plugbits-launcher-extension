@@ -1458,7 +1458,8 @@
       'CALC',
       'RICH_TEXT',
       'SUBTABLE',
-      'LOOKUP'
+      'LOOKUP',
+      'FILE'
     ])
   };
 
