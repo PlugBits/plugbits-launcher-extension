@@ -1744,6 +1744,7 @@
       this.handleMouseUp = this.endSelection.bind(this);
       this.handleOverlayDragOver = (ev) => { ev.preventDefault(); };
       this.handleOverlayDrop = (ev) => { ev.preventDefault(); };
+      this.pendingFileUploads = new Map();
       this.columnPrefCache = null;
       this.overlayLayoutPresetCache = null;
       this.overlayLayoutState = null;
@@ -5811,40 +5812,25 @@
         ev.preventDefault();
         ev.dataTransfer.dropEffect = 'copy';
       });
-      cell.addEventListener('drop', async (ev) => {
+      cell.addEventListener('drop', (ev) => {
         ev.preventDefault();
         dragCounter = 0;
         cell.classList.remove('pb-overlay__cell--file-dragover');
-        const files = Array.from(ev.dataTransfer?.files || []);
-        if (!files.length) return;
+        const dropped = Array.from(ev.dataTransfer?.files || []);
+        if (!dropped.length) return;
         const recordId = String(input.dataset.recordId || row.id || '');
         if (!recordId || !this.appId) return;
-        cell.classList.add('pb-overlay__cell--file-uploading');
-        input.value = resolveText(this.language, 'fileUploading') || 'Uploading…';
-        try {
-          const res = await this.postFn('EXCEL_UPLOAD_FILE', {
-            appId: this.appId,
-            recordId,
-            fieldCode: field.code,
-            files,
-            __pbTrigger: 'file_drop'
-          });
-          if (!res?.ok) throw new Error(res?.error || 'upload_failed');
-          const targetRow = this.rowMap?.get(recordId) || row;
-          if (targetRow) {
-            const uploaded = Array.isArray(res.fileKeys)
-              ? res.fileKeys.map((k) => ({ fileKey: k, name: files.find((_, i) => res.fileKeys[i] === k)?.name || k }))
-              : [];
-            const existing = Array.isArray(targetRow.values?.[field.code]) ? targetRow.values[field.code] : [];
-            targetRow.values[field.code] = [...existing, ...uploaded];
-            targetRow.original[field.code] = targetRow.values[field.code];
-          }
-          this.applyCellVisualState(input, targetRow || row, field.code);
-        } catch (_err) {
-          this.applyCellVisualState(input, row, field.code);
-        } finally {
-          cell.classList.remove('pb-overlay__cell--file-uploading');
-        }
+        const key = `${recordId}:${field.code}`;
+        const pending = this.pendingFileUploads.get(key) || [];
+        this.pendingFileUploads.set(key, [...pending, ...dropped]);
+        const targetRow = this.rowMap?.get(recordId) || row;
+        const existing = Array.isArray(targetRow.values?.[field.code]) ? targetRow.values[field.code] : [];
+        const preview = [...existing, ...dropped.map((f) => ({ name: f.name, fileKey: '' }))];
+        this.addDiff(recordId, field.code, preview, 'FILE');
+        targetRow.values[field.code] = preview;
+        this.applyCellVisualState(input, targetRow, field.code);
+        this.updateDirtyBadge();
+        this.updateStats();
       });
     }
 
@@ -9033,6 +9019,10 @@
     }
 
     toRecordPayloadValue(field, value) {
+      if (this.isFileField(field)) {
+        if (!Array.isArray(value)) return [];
+        return value.map((f) => ({ fileKey: String(f?.fileKey || '') })).filter((f) => f.fileKey);
+      }
       if (this.isSubtableField(field)) {
         const rows = Array.isArray(value) ? value : [];
         return rows.map((row) => ({
@@ -9328,6 +9318,32 @@
       }
     }
 
+    async flushPendingFileUploads() {
+      if (!this.pendingFileUploads.size) return;
+      for (const [key, files] of this.pendingFileUploads) {
+        const colonIdx = key.indexOf(':');
+        const recordId = key.slice(0, colonIdx);
+        const fieldCode = key.slice(colonIdx + 1);
+        const res = await this.postFn('EXCEL_UPLOAD_FILE', {
+          appId: this.appId,
+          files,
+          __pbTrigger: 'save_click'
+        });
+        if (!res?.ok) throw new Error(res?.error || 'file_upload_failed');
+        const row = this.rowMap.get(recordId);
+        const existing = Array.isArray(row?.values?.[fieldCode])
+          ? row.values[fieldCode].filter((f) => f.fileKey)
+          : [];
+        const merged = [
+          ...existing.map((f) => ({ fileKey: f.fileKey, name: f.name || '' })),
+          ...(res.fileKeys || []).map((k, i) => ({ fileKey: k, name: files[i]?.name || k }))
+        ];
+        this.addDiff(recordId, fieldCode, merged, 'FILE');
+        if (row) row.values[fieldCode] = merged;
+      }
+      this.pendingFileUploads.clear();
+    }
+
     async save() {
       if (!this.canMutateOverlay(true)) return;
       if (this.saving) return;
@@ -9350,6 +9366,8 @@
       let anySaved = false;
       const savedIds = new Set();
       try {
+        await this.flushPendingFileUploads();
+        putBatches = this.createPutBatches();
         for (let index = 0; index < putBatches.length;) {
           let batch = putBatches[index];
           let attempt = 0;
@@ -9445,6 +9463,7 @@
           this.notify(resolveText(this.language, 'toastSaveSuccess'));
           this.diff.clear();
           this.pendingDeletes.clear();
+          this.pendingFileUploads.clear();
           this.syncPermissionServicePendingDeletes();
           this.clearHistory();
           this.updateDirtyBadge();
@@ -9720,6 +9739,7 @@
       });
       this.inputsByRow.clear();
       this.diff.clear();
+      this.pendingFileUploads.clear();
       this.undoStack = [];
       this.redoStack = [];
       this.isReplayingHistory = false;

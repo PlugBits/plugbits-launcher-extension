@@ -1600,11 +1600,7 @@ function markLookupAutoFields(properties, metas) {
       }
 
       if (type === 'EXCEL_UPLOAD_FILE') {
-        const appId = payload?.appId;
-        const recordId = payload?.recordId;
-        const fieldCode = payload?.fieldCode;
         const files = Array.isArray(payload?.files) ? payload.files : [];
-        if (!appId || !recordId || !fieldCode) throw new Error('appId, recordId, and fieldCode are required');
         if (!files.length) {
           window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { fileKeys: [] } }, ORIGIN);
           return;
@@ -1613,6 +1609,7 @@ function markLookupAutoFields(properties, metas) {
         if (!sdk?.getRequestToken) throw new Error('kintone.getRequestToken unavailable');
         const token = sdk.getRequestToken();
         const uploadEndpoint = '/k/v1/file.json';
+        const trigger = String(payload?.__pbTrigger || payload?.trigger || 'save_click');
         const uploadResults = await Promise.allSettled(
           files.map(async (file) => {
             const form = new FormData();
@@ -1625,59 +1622,18 @@ function markLookupAutoFields(properties, metas) {
             if (!resp.ok) {
               const text = await resp.text().catch(() => '');
               const err = new Error(`file upload failed: ${resp.status} ${text}`);
-              emitApiUsage({
-                feature: 'overlay_file_upload',
-                endpoint: uploadEndpoint,
-                method: 'POST',
-                trigger: String(payload?.__pbTrigger || payload?.trigger || 'file_drop'),
-                source: 'overlay',
-                ok: false,
-                sent: true,
-                requestCount: 1,
-                requestKind: 'rest',
-                error: err.message
-              });
+              emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: false, sent: true, requestCount: 1, requestKind: 'rest', error: err.message });
               throw err;
             }
             const json = await resp.json();
-            emitApiUsage({
-              feature: 'overlay_file_upload',
-              endpoint: uploadEndpoint,
-              method: 'POST',
-              trigger: String(payload?.__pbTrigger || payload?.trigger || 'file_drop'),
-              source: 'overlay',
-              ok: true,
-              sent: true,
-              requestCount: 1,
-              requestKind: 'rest'
-            });
+            emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: true, sent: true, requestCount: 1, requestKind: 'rest' });
             return json.fileKey;
           })
         );
         const errors = uploadResults.filter((r) => r.status === 'rejected').map((r) => r.reason?.message || 'upload_failed');
         if (errors.length) throw new Error(errors.join('; '));
-        const newFileKeys = uploadResults.map((r) => r.value);
-        const current = await callKintoneApi('/k/v1/record', 'GET', { app: String(appId), id: String(recordId) }, {
-          feature: 'overlay_file_upload',
-          trigger: String(payload?.__pbTrigger || payload?.trigger || 'file_drop'),
-          source: 'overlay',
-          logGroup: 'overlay'
-        });
-        const existingFiles = Array.isArray(current?.record?.[fieldCode]?.value) ? current.record[fieldCode].value : [];
-        const mergedValue = [
-          ...existingFiles.map((f) => ({ fileKey: f.fileKey })),
-          ...newFileKeys.map((k) => ({ fileKey: k }))
-        ];
-        const putResp = await callKintoneApi('/k/v1/records', 'PUT', {
-          app: String(appId),
-          records: [{ id: String(recordId), record: { [fieldCode]: { value: mergedValue } } }]
-        }, {
-          feature: 'overlay_file_upload',
-          trigger: String(payload?.__pbTrigger || payload?.trigger || 'file_drop'),
-          source: 'overlay',
-          logGroup: 'overlay'
-        });
-        window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { fileKeys: newFileKeys, revision: putResp?.revision } }, ORIGIN);
+        const fileKeys = uploadResults.map((r) => r.value);
+        window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { fileKeys } }, ORIGIN);
         return;
       }
 
