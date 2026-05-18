@@ -9336,7 +9336,7 @@
           : [];
         const merged = [
           ...existing.map((f) => ({ fileKey: f.fileKey, name: f.name || '' })),
-          ...(res.fileKeys || []).map((k, i) => ({ fileKey: k, name: files[i]?.name || k }))
+          ...(res.result?.fileKeys || []).map((k, i) => ({ fileKey: k, name: files[i]?.name || k }))
         ];
         this.addDiff(recordId, fieldCode, merged, 'FILE');
         if (row) row.values[fieldCode] = merged;
