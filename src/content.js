@@ -1771,6 +1771,10 @@
       this.newRowSeq = 1;
       this.subtableEditor = null;
       this.pasteFlashTimer = null;
+      this.fillHandleEl = null;
+      this.fillDrag = null;
+      this._boundFillDragMove = null;
+      this._boundFillDragUp = null;
       this.subtableActivationTs = 0;
       this.boundRadioPickerScrollHandler = () => { this.repositionRadioPicker(); };
       this.boundRadioPickerResizeHandler = () => { this.repositionRadioPicker(); };
@@ -7295,14 +7299,30 @@
       }
       const rowCount = this.getVisibleRowCount();
       const colCount = this.fields.length;
+
+      const matrixRows = matrix.length;
+      const matrixCols = matrix.reduce((max, r) => Math.max(max, r.length), 0);
+
+      // 選択範囲がmatrixの整数倍のときタイル展開（Excelと同じブロードキャスト挙動）
+      let targetRows = matrixRows;
+      let targetCols = matrixCols;
+      if (this.selection) {
+        const selRows = this.selection.endRow - this.selection.startRow + 1;
+        const selCols = this.selection.endCol - this.selection.startCol + 1;
+        if (selRows % matrixRows === 0 && selCols % matrixCols === 0) {
+          targetRows = selRows;
+          targetCols = selCols;
+        }
+      }
+
       let attemptedRows = 0;
       let attemptedCols = 0;
       const targets = [];
-      for (let r = 0; r < matrix.length; r += 1) {
+      for (let r = 0; r < targetRows; r += 1) {
         const targetRowIndex = startRow + r;
         if (targetRowIndex >= rowCount) break;
-        const rowValues = matrix[r];
-        for (let c = 0; c < rowValues.length; c += 1) {
+        const rowValues = matrix[r % matrixRows];
+        for (let c = 0; c < targetCols; c += 1) {
           const targetColIndex = startCol + c;
           if (targetColIndex >= colCount) break;
           const row = this.getVisibleRowAt(targetRowIndex);
@@ -7313,7 +7333,7 @@
             fieldCode: String(field.code || '').trim(),
             rowIndex: targetRowIndex,
             colIndex: targetColIndex,
-            value: rowValues[c]
+            value: rowValues[c % matrixCols] ?? ''
           });
           attemptedCols = Math.max(attemptedCols, c + 1);
         }
@@ -7438,6 +7458,132 @@
         flashedCells.forEach((cell) => cell.classList.remove('pb-overlay__cell--paste-flash'));
         this.pasteFlashTimer = null;
       }, 220);
+    }
+
+    buildFillMatrix() {
+      if (!this.selection) return [];
+      const { startRow, endRow, startCol, endCol } = this.selection;
+      const matrix = [];
+      for (let r = startRow; r <= endRow; r += 1) {
+        const row = this.getVisibleRowAt(r);
+        const rowData = [];
+        for (let c = startCol; c <= endCol; c += 1) {
+          const field = this.fields[c];
+          rowData.push(row && field ? this.formatCellDisplayValue(field, row.values[field.code]) : '');
+        }
+        matrix.push(rowData);
+      }
+      return matrix;
+    }
+
+    isFillPreviewCell(r, c) {
+      const drag = this.fillDrag;
+      if (!drag || drag.fillStartRow === null) return false;
+      return r >= drag.fillStartRow && r <= drag.fillEndRow
+        && c >= drag.fillStartCol && c <= drag.fillEndCol;
+    }
+
+    startFillDrag(e) {
+      if (!this.canMutateOverlay(false) || !this.selection || this.saving) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const { startRow, endRow, startCol, endCol } = this.selection;
+      this.fillDrag = {
+        srcStartRow: startRow, srcEndRow: endRow,
+        srcStartCol: startCol, srcEndCol: endCol,
+        fillStartRow: null, fillEndRow: null,
+        fillStartCol: null, fillEndCol: null,
+        direction: null
+      };
+      this._boundFillDragMove = (ev) => this.onFillDragMove(ev);
+      this._boundFillDragUp = () => this.commitFillDrag();
+      document.addEventListener('mousemove', this._boundFillDragMove);
+      document.addEventListener('mouseup', this._boundFillDragUp);
+    }
+
+    onFillDragMove(e) {
+      if (!this.fillDrag) return;
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const cell = el?.closest?.('.pb-overlay__cell');
+      if (!cell) return;
+      const input = cell.querySelector('[data-row-index]');
+      if (!input) return;
+      const targetRow = Number(input.dataset.rowIndex);
+      const targetCol = Number(input.dataset.colIndex);
+      if (isNaN(targetRow) || isNaN(targetCol)) return;
+      this.updateFillDrag(targetRow, targetCol);
+    }
+
+    updateFillDrag(targetRow, targetCol) {
+      const drag = this.fillDrag;
+      if (!drag) return;
+      const { srcStartRow, srcEndRow, srcStartCol, srcEndCol } = drag;
+
+      const deltaRow = targetRow < srcStartRow ? targetRow - srcStartRow
+        : targetRow > srcEndRow ? targetRow - srcEndRow : 0;
+      const deltaCol = targetCol < srcStartCol ? targetCol - srcStartCol
+        : targetCol > srcEndCol ? targetCol - srcEndCol : 0;
+
+      if (deltaRow === 0) {
+        drag.fillStartRow = null; drag.fillEndRow = null;
+        drag.fillStartCol = null; drag.fillEndCol = null;
+        drag.direction = null;
+        this.repaintSelection();
+        return;
+      }
+
+      if (deltaRow > 0) {
+        drag.direction = 'down';
+        drag.fillStartRow = srcEndRow + 1; drag.fillEndRow = targetRow;
+      } else {
+        drag.direction = 'up';
+        drag.fillStartRow = targetRow; drag.fillEndRow = srcStartRow - 1;
+      }
+      drag.fillStartCol = srcStartCol;
+      drag.fillEndCol = srcEndCol;
+      this.repaintSelection();
+    }
+
+    commitFillDrag() {
+      document.removeEventListener('mousemove', this._boundFillDragMove);
+      document.removeEventListener('mouseup', this._boundFillDragUp);
+      this._boundFillDragMove = null;
+      this._boundFillDragUp = null;
+
+      const drag = this.fillDrag;
+      this.fillDrag = null;
+
+      if (!drag || drag.fillStartRow === null || !this.canMutateOverlay(true)) {
+        this.repaintSelection();
+        return;
+      }
+
+      const srcMatrix = this.buildFillMatrix();
+      if (!srcMatrix.length) {
+        this.repaintSelection();
+        return;
+      }
+
+      const { srcStartRow, srcEndRow, srcStartCol, srcEndCol,
+              fillStartRow, fillEndRow, fillStartCol, fillEndCol } = drag;
+
+      this.selection = {
+        startRow: fillStartRow, endRow: fillEndRow,
+        startCol: fillStartCol, endCol: fillEndCol,
+        anchorRow: fillStartRow, anchorCol: fillStartCol
+      };
+      this.applyPastedMatrixAt(srcMatrix, fillStartRow, fillStartCol);
+
+      // 保存後の選択範囲をソースと埋め込み先を合わせた範囲に広げる
+      this.selection = {
+        startRow: Math.min(srcStartRow, fillStartRow),
+        endRow: Math.max(srcEndRow, fillEndRow),
+        startCol: Math.min(srcStartCol, fillStartCol),
+        endCol: Math.max(srcEndCol, fillEndCol),
+        anchorRow: srcStartRow,
+        anchorCol: srcStartCol
+      };
+      this.repaintSelection();
     }
 
     applyPastedValue(rowIndex, colIndex, rawValue) {
@@ -7662,6 +7808,10 @@
     }
 
     repaintSelection() {
+      if (this.fillHandleEl) {
+        this.fillHandleEl.remove();
+        this.fillHandleEl = null;
+      }
       this.inputsByRow.forEach((rowInputs, rowIndex) => {
         if (!Array.isArray(rowInputs)) return;
         rowInputs.forEach((input, colIndex) => {
@@ -7690,8 +7840,24 @@
           } else {
             cell.classList.remove('pb-overlay__cell--editing');
           }
+          if (this.isFillPreviewCell(r, c)) {
+            cell.classList.add('pb-overlay__cell--fill-preview');
+          } else {
+            cell.classList.remove('pb-overlay__cell--fill-preview');
+          }
         });
       });
+      if (this.selection && !this.isDetailFormLayoutMode()) {
+        const endInput = this.getInput(this.selection.endRow, this.selection.endCol);
+        const endCell = endInput?.parentElement;
+        if (endCell) {
+          const handle = document.createElement('div');
+          handle.className = 'pb-overlay__fill-handle';
+          handle.addEventListener('mousedown', (e) => this.startFillDrag(e));
+          endCell.appendChild(handle);
+          this.fillHandleEl = handle;
+        }
+      }
     }
 
     isEditingCell(rowIndex, colIndex) {

@@ -903,6 +903,27 @@
 .pb-overlay__cell--selected {
   position: relative;
   background: #eaf3ff;
+  overflow: visible;
+}
+
+.pb-overlay__fill-handle {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  background: #1d4ed8;
+  border: 1px solid #fff;
+  border-radius: 1px;
+  cursor: crosshair;
+  z-index: 10;
+  pointer-events: all;
+}
+
+.pb-overlay__cell--fill-preview {
+  background: rgba(29, 78, 216, 0.08) !important;
+  outline: 1px dashed #2563eb;
+  outline-offset: -1px;
 }
 
 .pb-overlay__cell--armed {
