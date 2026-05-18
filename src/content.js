@@ -573,6 +573,7 @@
 
   function postToPage(type, payload, meta = {}) {
     const id = uuid();
+    const timeoutMs = (Number(meta?.timeout) > 0) ? Number(meta.timeout) : 10000;
     const p = new Promise((resolve) => {
       pending.set(id, { resolve });
       setTimeout(() => {
@@ -580,7 +581,7 @@
           pending.delete(id);
           resolve({ ok: false, error: 'Timeout' });
         }
-      }, 10000);
+      }, timeoutMs);
     });
     try {
       window.postMessage({ __kfav__: true, id, type, payload }, location.origin);
@@ -1458,7 +1459,8 @@
       'CALC',
       'RICH_TEXT',
       'SUBTABLE',
-      'LOOKUP'
+      'LOOKUP',
+      'FILE'
     ])
   };
 
@@ -1741,6 +1743,9 @@
       this.dragSelecting = false;
       this.editingCell = null;
       this.handleMouseUp = this.endSelection.bind(this);
+      this.handleOverlayDragOver = (ev) => { ev.preventDefault(); };
+      this.handleOverlayDrop = (ev) => { ev.preventDefault(); };
+      this.pendingFileUploads = new Map();
       this.columnPrefCache = null;
       this.overlayLayoutPresetCache = null;
       this.overlayLayoutState = null;
@@ -2227,6 +2232,8 @@
       this.root.addEventListener('keydown', this.handleKeyOnOverlay, true);
       document.addEventListener('keydown', this.handleGlobalArrowKeyCapture, true);
       document.addEventListener('mouseup', this.handleMouseUp, true);
+      this.root.addEventListener('dragover', this.handleOverlayDragOver);
+      this.root.addEventListener('drop', this.handleOverlayDrop);
     }
 
     detachEvents() {
@@ -2237,6 +2244,8 @@
       this.root.removeEventListener('keydown', this.handleKeyOnOverlay, true);
       document.removeEventListener('keydown', this.handleGlobalArrowKeyCapture, true);
       document.removeEventListener('mouseup', this.handleMouseUp, true);
+      this.root.removeEventListener('dragover', this.handleOverlayDragOver);
+      this.root.removeEventListener('drop', this.handleOverlayDrop);
       this.closeLayoutPresetMenu();
     }
 
@@ -3192,7 +3201,7 @@
       const accessState = await this.proService.getProAccessState({
         featureName: 'excel-overlay-edit',
         requestedMode,
-        allowDevelopmentInstall: false
+        allowDevelopmentInstall: requestedMode === EXCEL_OVERLAY_MODE_PRO
       });
       this.proAccessState = accessState && typeof accessState === 'object'
         ? accessState
@@ -4269,6 +4278,10 @@
       return type === 'USER_SELECT' || type === 'ORGANIZATION_SELECT' || type === 'GROUP_SELECT';
     }
 
+    isFileField(field) {
+      return String(field?.type || '').toUpperCase() === 'FILE';
+    }
+
     normalizeSelectionLabels(value) {
       if (Array.isArray(value)) {
         return value
@@ -4317,6 +4330,7 @@
       if (this.isMultiLineField(field)) return editable ? 'modal-edit' : (canViewOnly ? 'modal-view' : 'readonly');
       if (this.isMultiChoiceField(field)) return editable ? 'inline-choice-multi' : 'readonly';
       if (this.isChoiceField(field)) return editable ? 'inline-choice-single' : 'readonly';
+      if (this.isFileField(field)) return editable ? 'file-drop' : 'readonly';
       if (this.isLinkField(field) || this.isCalcField(field) || this.isUserSelectField(field)) return editable ? 'inline-edit' : 'readonly';
       if (String(field?.type || '').toUpperCase() === 'NUMBER' || String(field?.type || '').toUpperCase() === 'DATE' || String(field?.type || '').toUpperCase() === 'SINGLE_LINE_TEXT') {
         return editable ? 'inline-edit' : 'readonly';
@@ -4579,6 +4593,10 @@
         }
         return [];
       }
+      if (this.isFileField(field)) {
+        if (!Array.isArray(value)) return [];
+        return value.map((f) => ({ fileKey: String(f?.fileKey || ''), name: String(f?.name || '') }));
+      }
       if (this.isMultiValueField(field)) {
         return this.normalizeMultiValue(value, field);
       }
@@ -4589,6 +4607,10 @@
       if (this.isSubtableField(field)) {
         const count = Array.isArray(value) ? value.length : 0;
         return count ? resolveText(this.language, 'subtableRows', count) : '';
+      }
+      if (this.isFileField(field)) {
+        if (!Array.isArray(value) || !value.length) return '';
+        return value.map((f) => String(f?.name || f?.fileKey || '')).filter(Boolean).join(', ');
       }
       if (this.isMultiValueField(field)) {
         return this.normalizeMultiValue(value, field).join(', ');
@@ -5701,6 +5723,9 @@
       if (this.isSubtableField(field)) {
         input.placeholder = resolveText(this.language, 'btnSubtableEdit');
       }
+      if (this.isFileField(field)) {
+        input.placeholder = resolveText(this.language, 'fileDropPlaceholder') || 'Drop files here';
+      }
       input.readOnly = true;
       input.addEventListener('input', () => { this.onInputChanged(input); });
       input.addEventListener('change', () => { this.onInputChanged(input); });
@@ -5743,6 +5768,7 @@
       const isMultiLine = this.isMultiLineField(field);
       const isCalc = this.isCalcField(field);
       const isRichText = this.isRichTextField(field);
+      const isFile = this.isFileField(field);
       const isLookupKey = field?.type === 'SINGLE_LINE_TEXT' && Boolean(field?.lookup);
       const fieldDeniedByAcl = permission.reason === 'field_readonly';
       this.setInputEditingVisual(input, editing);
@@ -5765,8 +5791,52 @@
         input.parentElement.classList.toggle('pb-overlay__cell--multiline', isMultiLine);
         input.parentElement.classList.toggle('pb-overlay__cell--calc', isCalc);
         input.parentElement.classList.toggle('pb-overlay__cell--richtext', isRichText);
+        input.parentElement.classList.toggle('pb-overlay__cell--file', isFile);
+        input.parentElement.classList.toggle('pb-overlay__cell--file-editable', isFile && editable);
         input.parentElement.classList.toggle('pb-overlay__cell--lookup', isLookupKey);
       }
+    }
+
+    bindFileDrop(cell, input, field, row) {
+      if (cell.dataset.fileDropBound === '1') return;
+      cell.dataset.fileDropBound = '1';
+      let dragCounter = 0;
+      cell.addEventListener('dragenter', (ev) => {
+        ev.preventDefault();
+        dragCounter += 1;
+        cell.classList.add('pb-overlay__cell--file-dragover');
+      });
+      cell.addEventListener('dragleave', () => {
+        dragCounter -= 1;
+        if (dragCounter <= 0) {
+          dragCounter = 0;
+          cell.classList.remove('pb-overlay__cell--file-dragover');
+        }
+      });
+      cell.addEventListener('dragover', (ev) => {
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'copy';
+      });
+      cell.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        dragCounter = 0;
+        cell.classList.remove('pb-overlay__cell--file-dragover');
+        const dropped = Array.from(ev.dataTransfer?.files || []);
+        if (!dropped.length) return;
+        const recordId = String(input.dataset.recordId || row.id || '');
+        if (!recordId || !this.appId) return;
+        const key = `${recordId}:${field.code}`;
+        const pending = this.pendingFileUploads.get(key) || [];
+        this.pendingFileUploads.set(key, [...pending, ...dropped]);
+        const targetRow = this.rowMap?.get(recordId) || row;
+        const existing = Array.isArray(targetRow.values?.[field.code]) ? targetRow.values[field.code] : [];
+        const preview = [...existing, ...dropped.map((f) => ({ name: f.name, fileKey: '' }))];
+        this.addDiff(recordId, field.code, preview, 'FILE');
+        targetRow.values[field.code] = preview;
+        this.applyCellVisualState(input, targetRow, field.code);
+        this.updateDirtyBadge();
+        this.updateStats();
+      });
     }
 
     applyCellVisualState(input, row, fieldCode) {
@@ -5827,6 +5897,7 @@
       const isMultiLine = this.isMultiLineField(field);
       const isCalc = this.isCalcField(field);
       const isRichText = this.isRichTextField(field);
+      const isFile = this.isFileField(field);
       const isLookupKey = field?.type === 'SINGLE_LINE_TEXT' && Boolean(field?.lookup);
       const fieldDeniedByAcl = permission.reason === 'field_readonly';
       this.setInputEditingVisual(input, editing);
@@ -5848,8 +5919,13 @@
       cell.classList.toggle('pb-overlay__cell--multiline', isMultiLine);
       cell.classList.toggle('pb-overlay__cell--calc', isCalc);
       cell.classList.toggle('pb-overlay__cell--richtext', isRichText);
+      cell.classList.toggle('pb-overlay__cell--file', isFile);
+      cell.classList.toggle('pb-overlay__cell--file-editable', isFile && editable);
       cell.classList.toggle('pb-overlay__cell--lookup', isLookupKey);
       cell.classList.toggle('pb-overlay__cell--editing', editing);
+      if (isFile && editable) {
+        this.bindFileDrop(cell, input, field, row);
+      }
     }
 
     getInput(rowIndex, colIndex) {
@@ -8948,6 +9024,10 @@
     }
 
     toRecordPayloadValue(field, value) {
+      if (this.isFileField(field)) {
+        if (!Array.isArray(value)) return [];
+        return value.map((f) => ({ fileKey: String(f?.fileKey || '') })).filter((f) => f.fileKey);
+      }
       if (this.isSubtableField(field)) {
         const rows = Array.isArray(value) ? value : [];
         return rows.map((row) => ({
@@ -9243,6 +9323,32 @@
       }
     }
 
+    async flushPendingFileUploads() {
+      if (!this.pendingFileUploads.size) return;
+      for (const [key, files] of this.pendingFileUploads) {
+        const colonIdx = key.indexOf(':');
+        const recordId = key.slice(0, colonIdx);
+        const fieldCode = key.slice(colonIdx + 1);
+        const res = await this.postFn('EXCEL_UPLOAD_FILE', {
+          appId: this.appId,
+          files,
+          __pbTrigger: 'save_click'
+        }, { timeout: 120000 });
+        if (!res?.ok) throw new Error(res?.error || 'file_upload_failed');
+        const row = this.rowMap.get(recordId);
+        const existing = Array.isArray(row?.values?.[fieldCode])
+          ? row.values[fieldCode].filter((f) => f.fileKey)
+          : [];
+        const merged = [
+          ...existing.map((f) => ({ fileKey: f.fileKey, name: f.name || '' })),
+          ...(res.result?.fileKeys || []).map((k, i) => ({ fileKey: k, name: files[i]?.name || k }))
+        ];
+        this.addDiff(recordId, fieldCode, merged, 'FILE');
+        if (row) row.values[fieldCode] = merged;
+      }
+      this.pendingFileUploads.clear();
+    }
+
     async save() {
       if (!this.canMutateOverlay(true)) return;
       if (this.saving) return;
@@ -9265,6 +9371,8 @@
       let anySaved = false;
       const savedIds = new Set();
       try {
+        await this.flushPendingFileUploads();
+        putBatches = this.createPutBatches();
         for (let index = 0; index < putBatches.length;) {
           let batch = putBatches[index];
           let attempt = 0;
@@ -9360,6 +9468,7 @@
           this.notify(resolveText(this.language, 'toastSaveSuccess'));
           this.diff.clear();
           this.pendingDeletes.clear();
+          this.pendingFileUploads.clear();
           this.syncPermissionServicePendingDeletes();
           this.clearHistory();
           this.updateDirtyBadge();
@@ -9635,6 +9744,7 @@
       });
       this.inputsByRow.clear();
       this.diff.clear();
+      this.pendingFileUploads.clear();
       this.undoStack = [];
       this.redoStack = [];
       this.isReplayingHistory = false;

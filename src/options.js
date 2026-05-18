@@ -631,7 +631,9 @@ async function initializeI18n() {
 function isDeveloperUiEnabled() {
   try {
     const params = new URLSearchParams(window.location.search || '');
-    return params.get(DEVELOPER_UI_QUERY_PARAM) === '1';
+    if (params.get(DEVELOPER_UI_QUERY_PARAM) === '1') return true;
+    const manifest = chrome.runtime.getManifest();
+    return manifest?.plugbits_dev_tools === true;
   } catch (_err) {
     return false;
   }
@@ -2881,7 +2883,7 @@ function normalizeExcelOverlayMode(value) {
 
 function getEffectiveExcelOverlayMode(value) {
   const normalized = normalizeExcelOverlayMode(value);
-  if (normalized === EXCEL_OVERLAY_MODE_PRO) return EXCEL_OVERLAY_MODE_STANDARD;
+  if (normalized === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) return EXCEL_OVERLAY_MODE_STANDARD;
   return normalized;
 }
 
@@ -2923,7 +2925,7 @@ async function loadExcelOverlayMode() {
   excelModeInputs.forEach((input) => {
     input.checked = input.value === mode;
   });
-  if (requestedMode === EXCEL_OVERLAY_MODE_PRO) {
+  if (requestedMode === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) {
     await saveExcelOverlayMode(EXCEL_OVERLAY_MODE_STANDARD);
   }
   setExcelModeNotice('');
@@ -2973,7 +2975,7 @@ excelModeInputs.forEach((input) => {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
     const selectedMode = normalizeExcelOverlayMode(input.value);
-    if (selectedMode === EXCEL_OVERLAY_MODE_PRO) {
+    if (selectedMode === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) {
       setExcelModeNotice(t(EXCEL_OVERLAY_MODE_PRO_NOTICE_KEY));
       const fallback = excelModeInputs.find((node) => node.value === EXCEL_OVERLAY_MODE_STANDARD);
       if (fallback) fallback.checked = true;
@@ -3005,9 +3007,14 @@ uiLanguageEl?.addEventListener('change', async () => {
 
 developerProOverrideEl?.addEventListener('change', async () => {
   if (!isDeveloperUiEnabled()) return;
-  await chrome.storage.local.set({
-    [DEVELOPER_PRO_OVERRIDE_KEY]: Boolean(developerProOverrideEl.checked)
-  });
+  if (developerProOverrideEl.checked) {
+    await chrome.storage.local.set({
+      [DEVELOPER_PRO_OVERRIDE_KEY]: true,
+      pbDeveloperProOverrideAt: Date.now()
+    });
+  } else {
+    await chrome.storage.local.remove([DEVELOPER_PRO_OVERRIDE_KEY, 'pbDeveloperProOverrideAt']);
+  }
 });
 
 apiUsageResetBtn?.addEventListener('click', async () => {
