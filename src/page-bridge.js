@@ -1619,7 +1619,7 @@ function markLookupAutoFields(properties, metas) {
             form.append('file', file, file.name);
             const resp = await fetch(uploadEndpoint, {
               method: 'POST',
-              headers: { 'X-Cybozu-RequestToken': token },
+              headers: { 'X-Cybozu-RequestToken': token, 'X-Requested-With': 'XMLHttpRequest' },
               body: form
             });
             if (!resp.ok) {
