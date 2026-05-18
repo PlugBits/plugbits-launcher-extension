@@ -1607,32 +1607,28 @@ function markLookupAutoFields(properties, metas) {
         }
         const sdk = window.kintone;
         if (!sdk?.getRequestToken) throw new Error('kintone.getRequestToken unavailable');
-        const token = sdk.getRequestToken();
         const uploadEndpoint = '/k/v1/file.json';
         const trigger = String(payload?.__pbTrigger || payload?.trigger || 'save_click');
-        const uploadResults = await Promise.allSettled(
-          files.map(async (file) => {
-            const form = new FormData();
-            form.append('file', file, file.name);
-            const resp = await fetch(uploadEndpoint, {
-              method: 'POST',
-              headers: { 'X-Cybozu-RequestToken': token, 'X-Requested-With': 'XMLHttpRequest' },
-              body: form
-            });
-            if (!resp.ok) {
-              const text = await resp.text().catch(() => '');
-              const err = new Error(`file upload failed: ${resp.status} ${text}`);
-              emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: false, sent: true, requestCount: 1, requestKind: 'rest', error: err.message });
-              throw err;
-            }
-            const json = await resp.json();
-            emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: true, sent: true, requestCount: 1, requestKind: 'rest' });
-            return json.fileKey;
-          })
-        );
-        const errors = uploadResults.filter((r) => r.status === 'rejected').map((r) => r.reason?.message || 'upload_failed');
-        if (errors.length) throw new Error(errors.join('; '));
-        const fileKeys = uploadResults.map((r) => r.value);
+        const fileKeys = [];
+        for (const file of files) {
+          const token = sdk.getRequestToken();
+          const form = new FormData();
+          form.append('file', file, file.name);
+          const resp = await fetch(uploadEndpoint, {
+            method: 'POST',
+            headers: { 'X-Cybozu-RequestToken': token, 'X-Requested-With': 'XMLHttpRequest' },
+            body: form
+          });
+          if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            const err = new Error(`file upload failed: ${resp.status} ${text}`);
+            emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: false, sent: true, requestCount: 1, requestKind: 'rest', error: err.message });
+            throw err;
+          }
+          const json = await resp.json();
+          emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: true, sent: true, requestCount: 1, requestKind: 'rest' });
+          fileKeys.push(json.fileKey);
+        }
         window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { fileKeys } }, ORIGIN);
         return;
       }

@@ -5823,6 +5823,7 @@
         const key = `${recordId}:${field.code}`;
         const pending = this.pendingFileUploads.get(key) || [];
         this.pendingFileUploads.set(key, [...pending, ...dropped]);
+        console.debug('[pb-file-drop] queued', { key, pendingCount: pending.length, droppedCount: dropped.length, totalNow: pending.length + dropped.length, files: [...pending, ...dropped].map((f) => f.name) });
         const targetRow = this.rowMap?.get(recordId) || row;
         const existing = Array.isArray(targetRow.values?.[field.code]) ? targetRow.values[field.code] : [];
         const preview = [...existing, ...dropped.map((f) => ({ name: f.name, fileKey: '' }))];
@@ -9324,11 +9325,13 @@
         const colonIdx = key.indexOf(':');
         const recordId = key.slice(0, colonIdx);
         const fieldCode = key.slice(colonIdx + 1);
+        console.debug('[pb-file-flush] uploading', { key, fileCount: files.length, fileNames: files.map((f) => f.name) });
         const res = await this.postFn('EXCEL_UPLOAD_FILE', {
           appId: this.appId,
           files,
           __pbTrigger: 'save_click'
         });
+        console.debug('[pb-file-flush] upload result', { ok: res?.ok, fileKeys: res?.result?.fileKeys, error: res?.error });
         if (!res?.ok) throw new Error(res?.error || 'file_upload_failed');
         const row = this.rowMap.get(recordId);
         const existing = Array.isArray(row?.values?.[fieldCode])
@@ -9338,6 +9341,7 @@
           ...existing.map((f) => ({ fileKey: f.fileKey, name: f.name || '' })),
           ...(res.result?.fileKeys || []).map((k, i) => ({ fileKey: k, name: files[i]?.name || k }))
         ];
+        console.debug('[pb-file-flush] merged diff', { recordId, fieldCode, merged: merged.map((f) => ({ fileKey: f.fileKey, name: f.name })) });
         this.addDiff(recordId, fieldCode, merged, 'FILE');
         if (row) row.values[fieldCode] = merged;
       }
