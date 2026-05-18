@@ -7295,14 +7295,30 @@
       }
       const rowCount = this.getVisibleRowCount();
       const colCount = this.fields.length;
+
+      const matrixRows = matrix.length;
+      const matrixCols = matrix.reduce((max, r) => Math.max(max, r.length), 0);
+
+      // 選択範囲がmatrixの整数倍のときタイル展開（Excelと同じブロードキャスト挙動）
+      let targetRows = matrixRows;
+      let targetCols = matrixCols;
+      if (this.selection) {
+        const selRows = this.selection.endRow - this.selection.startRow + 1;
+        const selCols = this.selection.endCol - this.selection.startCol + 1;
+        if (selRows % matrixRows === 0 && selCols % matrixCols === 0) {
+          targetRows = selRows;
+          targetCols = selCols;
+        }
+      }
+
       let attemptedRows = 0;
       let attemptedCols = 0;
       const targets = [];
-      for (let r = 0; r < matrix.length; r += 1) {
+      for (let r = 0; r < targetRows; r += 1) {
         const targetRowIndex = startRow + r;
         if (targetRowIndex >= rowCount) break;
-        const rowValues = matrix[r];
-        for (let c = 0; c < rowValues.length; c += 1) {
+        const rowValues = matrix[r % matrixRows];
+        for (let c = 0; c < targetCols; c += 1) {
           const targetColIndex = startCol + c;
           if (targetColIndex >= colCount) break;
           const row = this.getVisibleRowAt(targetRowIndex);
@@ -7313,7 +7329,7 @@
             fieldCode: String(field.code || '').trim(),
             rowIndex: targetRowIndex,
             colIndex: targetColIndex,
-            value: rowValues[c]
+            value: rowValues[c % matrixCols] ?? ''
           });
           attemptedCols = Math.max(attemptedCols, c + 1);
         }
