@@ -7524,7 +7524,7 @@
       const deltaCol = targetCol < srcStartCol ? targetCol - srcStartCol
         : targetCol > srcEndCol ? targetCol - srcEndCol : 0;
 
-      if (deltaRow === 0 && deltaCol === 0) {
+      if (deltaRow === 0) {
         drag.fillStartRow = null; drag.fillEndRow = null;
         drag.fillStartCol = null; drag.fillEndCol = null;
         drag.direction = null;
@@ -7532,27 +7532,15 @@
         return;
       }
 
-      if (Math.abs(deltaRow) >= Math.abs(deltaCol)) {
-        if (deltaRow > 0) {
-          drag.direction = 'down';
-          drag.fillStartRow = srcEndRow + 1; drag.fillEndRow = targetRow;
-          drag.fillStartCol = srcStartCol; drag.fillEndCol = srcEndCol;
-        } else {
-          drag.direction = 'up';
-          drag.fillStartRow = targetRow; drag.fillEndRow = srcStartRow - 1;
-          drag.fillStartCol = srcStartCol; drag.fillEndCol = srcEndCol;
-        }
+      if (deltaRow > 0) {
+        drag.direction = 'down';
+        drag.fillStartRow = srcEndRow + 1; drag.fillEndRow = targetRow;
       } else {
-        if (deltaCol > 0) {
-          drag.direction = 'right';
-          drag.fillStartRow = srcStartRow; drag.fillEndRow = srcEndRow;
-          drag.fillStartCol = srcEndCol + 1; drag.fillEndCol = targetCol;
-        } else {
-          drag.direction = 'left';
-          drag.fillStartRow = srcStartRow; drag.fillEndRow = srcEndRow;
-          drag.fillStartCol = targetCol; drag.fillEndCol = srcStartCol - 1;
-        }
+        drag.direction = 'up';
+        drag.fillStartRow = targetRow; drag.fillEndRow = srcStartRow - 1;
       }
+      drag.fillStartCol = srcStartCol;
+      drag.fillEndCol = srcEndCol;
       this.repaintSelection();
     }
 
