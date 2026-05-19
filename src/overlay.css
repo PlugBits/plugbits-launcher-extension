@@ -906,6 +906,45 @@
   overflow: visible;
 }
 
+.pb-overlay__date-pick-btn {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.pb-overlay__cell:hover .pb-overlay__date-pick-btn,
+.pb-overlay__cell--selected .pb-overlay__date-pick-btn {
+  opacity: 1;
+}
+
+.pb-overlay__date-pick-btn:hover {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.pb-overlay__date-pick-native {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  top: 0;
+  left: 0;
+}
+
 .pb-overlay__fill-handle {
   position: absolute;
   right: -4px;

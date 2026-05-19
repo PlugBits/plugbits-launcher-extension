@@ -593,11 +593,11 @@
       return ymd(new Date(today.getFullYear(), today.getMonth() + mo, 1));
     }
 
-    // weekdays: mon / tue+1 / fri-1  (+N/-N = weeks offset)
+    // weekdays: 今週ベース  mon / tue+1(来週火) / fri-1(先週金)
     const WEEKDAYS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
     const wdMatch = s.match(/^(sun|mon|tue|wed|thu|fri|sat)([+-]\d+)?$/);
     if (wdMatch) {
-      const baseDiff = (WEEKDAYS[wdMatch[1]] - today.getDay() + 7) % 7;
+      const baseDiff = WEEKDAYS[wdMatch[1]] - today.getDay(); // 今週の該当曜日（負=過去）
       const weekOffset = wdMatch[2] ? Number(wdMatch[2]) : 0;
       return ymd(shift(today, baseDiff + weekOffset * 7));
     }
@@ -5738,6 +5738,43 @@
           const input = this.createInputBase(field);
           this.bindInputToRow(input, field, row, rowIndex, colIndex);
           cell.appendChild(input);
+          if (field.type === 'DATE') {
+            const pickerBtn = document.createElement('button');
+            pickerBtn.type = 'button';
+            pickerBtn.className = 'pb-overlay__date-pick-btn';
+            pickerBtn.tabIndex = -1;
+            pickerBtn.textContent = '▾';
+            const nativePicker = document.createElement('input');
+            nativePicker.type = 'date';
+            nativePicker.className = 'pb-overlay__date-pick-native';
+            nativePicker.tabIndex = -1;
+            pickerBtn.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const rowIndex2 = Number(input.dataset.rowIndex || '0');
+              const colIndex2 = Number(input.dataset.colIndex || '0');
+              if (input.readOnly) this.enterEditMode(rowIndex2, colIndex2, input, false);
+              nativePicker.value = input.value || '';
+              if (nativePicker.showPicker) {
+                nativePicker.showPicker();
+              } else {
+                nativePicker.click();
+              }
+            });
+            nativePicker.addEventListener('change', () => {
+              if (nativePicker.value) {
+                if (input.readOnly) {
+                  const rowIndex2 = Number(input.dataset.rowIndex || '0');
+                  const colIndex2 = Number(input.dataset.colIndex || '0');
+                  this.enterEditMode(rowIndex2, colIndex2, input, false);
+                }
+                input.value = nativePicker.value;
+                this.onInputChanged(input);
+              }
+            });
+            cell.appendChild(pickerBtn);
+            cell.appendChild(nativePicker);
+          }
           this.applyCellVisualState(input, row, field.code);
           rowLine.appendChild(cell);
           inputsRow[colIndex] = input;
