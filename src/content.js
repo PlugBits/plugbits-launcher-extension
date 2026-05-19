@@ -593,11 +593,13 @@
       return ymd(new Date(today.getFullYear(), today.getMonth() + mo, 1));
     }
 
-    // weekdays: next occurrence including today
+    // weekdays: mon / tue+1 / fri-1  (+N/-N = weeks offset)
     const WEEKDAYS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
-    if (Object.prototype.hasOwnProperty.call(WEEKDAYS, s)) {
-      const diff = (WEEKDAYS[s] - today.getDay() + 7) % 7;
-      return ymd(shift(today, diff));
+    const wdMatch = s.match(/^(sun|mon|tue|wed|thu|fri|sat)([+-]\d+)?$/);
+    if (wdMatch) {
+      const baseDiff = (WEEKDAYS[wdMatch[1]] - today.getDay() + 7) % 7;
+      const weekOffset = wdMatch[2] ? Number(wdMatch[2]) : 0;
+      return ymd(shift(today, baseDiff + weekOffset * 7));
     }
 
     return null;
@@ -5759,7 +5761,7 @@
       if (field.type === 'LINK') input.inputMode = 'url';
       if (field.type === 'DATE') {
         input.type = 'text';
-        input.placeholder = 't / +3 / -1 / end / end+1 / first / mon';
+        input.placeholder = 't · +3 · end · end+1 · first · mon · mon+1';
       } else {
         input.type = 'text';
       }
@@ -5782,15 +5784,16 @@
         input.placeholder = resolveText(this.language, 'fileDropPlaceholder') || 'Drop files here';
       }
       input.readOnly = true;
-      const applySmartDate = field.type === 'DATE'
-        ? () => {
+      input.addEventListener('input', () => { this.onInputChanged(input); });
+      input.addEventListener('change', () => { this.onInputChanged(input); });
+      if (field.type === 'DATE') {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === 'Tab') {
             const smart = smartDateToYMD(input.value);
-            if (smart) input.value = smart;
-            this.onInputChanged(input);
+            if (smart) { input.value = smart; this.onInputChanged(input); }
           }
-        : null;
-      input.addEventListener('input', applySmartDate || (() => { this.onInputChanged(input); }));
-      input.addEventListener('change', applySmartDate || (() => { this.onInputChanged(input); }));
+        });
+      }
       input.addEventListener('compositionstart', this.handleCompositionStart);
       input.addEventListener('compositionend', this.handleCompositionEnd);
       input.addEventListener('paste', (event) => { this.handlePaste(event, input); });
