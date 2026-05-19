@@ -556,6 +556,29 @@
     return crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
   }
 
+  function smartDateToYMD(raw) {
+    const s = String(raw || '').trim().toLowerCase();
+    if (!s) return null;
+    const today = new Date();
+    const ymd = (d) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dd}`;
+    };
+    const shift = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+    if (s === '/today' || s === 'today') return ymd(today);
+    if (s === '/yesterday' || s === 'yesterday') return ymd(shift(today, -1));
+    if (s === '/tomorrow' || s === 'tomorrow') return ymd(shift(today, 1));
+    if (s === '/bom') return ymd(new Date(today.getFullYear(), today.getMonth(), 1));
+    if (s === '/eom') return ymd(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+    const plusMatch = s.match(/^\+(\d+)$/);
+    if (plusMatch) return ymd(shift(today, Number(plusMatch[1])));
+    const minusMatch = s.match(/^-(\d+)$/);
+    if (minusMatch) return ymd(shift(today, -Number(minusMatch[1])));
+    return null;
+  }
+
   window.addEventListener('message', (ev) => {
     if (ev.origin !== location.origin) return;
     const data = ev.data || {};
@@ -5710,8 +5733,12 @@
       input.spellcheck = false;
       if (field.type === 'NUMBER') input.inputMode = 'decimal';
       if (field.type === 'LINK') input.inputMode = 'url';
-      if (field.type === 'DATE') input.type = 'date';
-      else input.type = 'text';
+      if (field.type === 'DATE') {
+        input.type = 'text';
+        input.placeholder = 'YYYY-MM-DD / /today / +7';
+      } else {
+        input.type = 'text';
+      }
       if (this.isChoiceField(field)) {
         input.placeholder = field.choices?.[0] || '';
       }
@@ -8230,6 +8257,8 @@
       }
       if (type === 'DATE') {
         if (!trimmed) return { ok: true, value: '' };
+        const smart = smartDateToYMD(trimmed);
+        if (smart) return { ok: true, value: smart };
         const re = /^\d{4}-\d{2}-\d{2}$/;
         if (!re.test(trimmed)) return { ok: false, error: 'Invalid date' };
         return { ok: true, value: trimmed };
@@ -10273,6 +10302,286 @@
       canSaveOverlay: overlayController.canSaveOverlay()
     };
   }
+
+  // ── Command Palette ──────────────────────────────────────────────────────
+
+  const CP_COMMANDS = [
+    // ─ Admin: navigation ─
+    {
+      id: 'open-form-settings',
+      label: 'フォーム設定を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: '管理者',
+      keywords: ['form', 'フォーム', '設定', 'admin', 'アドミン'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/${ctx.appId}/form`; }
+    },
+    {
+      id: 'open-process-settings',
+      label: 'プロセス管理設定を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: '管理者',
+      keywords: ['process', 'プロセス', '管理', 'workflow', 'ワークフロー'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/${ctx.appId}/process`; }
+    },
+    {
+      id: 'open-api-token-settings',
+      label: 'APIトークン設定を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: '管理者',
+      keywords: ['api', 'token', 'トークン', 'key'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/${ctx.appId}/token`; }
+    },
+    // ─ Developer: clipboard ─
+    {
+      id: 'copy-app-id',
+      label: 'App IDをコピー',
+      icon: '#',
+      category: 'dev',
+      badge: '開発',
+      keywords: ['app', 'id', 'appid', 'copy', 'コピー'],
+      requiresApp: true,
+      action(ctx) {
+        navigator.clipboard.writeText(String(ctx.appId));
+      }
+    },
+    {
+      id: 'copy-record-id',
+      label: 'Record IDをコピー',
+      icon: '#',
+      category: 'dev',
+      badge: '開発',
+      keywords: ['record', 'id', 'recordid', 'copy', 'コピー'],
+      requiresRecord: true,
+      action(ctx) {
+        navigator.clipboard.writeText(String(ctx.recordId));
+      }
+    },
+    {
+      id: 'copy-query',
+      label: 'クエリ条件をコピー',
+      icon: 'Q',
+      category: 'dev',
+      badge: '開発',
+      keywords: ['query', 'クエリ', 'condition', '条件', 'copy', 'コピー'],
+      requiresApp: true,
+      action(ctx) {
+        navigator.clipboard.writeText(ctx.query || '');
+      }
+    },
+    {
+      id: 'copy-field-codes',
+      label: 'フィールドコード一覧をコピー',
+      icon: '{}',
+      category: 'dev',
+      badge: '開発',
+      keywords: ['field', 'code', 'フィールド', 'コード', 'copy', 'コピー', 'list'],
+      requiresApp: true,
+      isAsync: true,
+      async action(ctx, palette) {
+        await palette.copyFieldCodes(ctx);
+      }
+    },
+  ];
+
+  class CommandPalette {
+    constructor(postFn) {
+      this.postFn = postFn;
+      this.backdropEl = null;
+      this.inputEl = null;
+      this.listEl = null;
+      this.isOpen = false;
+      this.ctx = { appId: null, recordId: null, query: '' };
+      this.filtered = [];
+      this.activeIndex = 0;
+    }
+
+    async fetchContext() {
+      try {
+        const res = await this.postFn('CP_GET_CONTEXT', {});
+        if (res?.ok) this.ctx = { ...this.ctx, ...res.result };
+      } catch (_) { /* ignore */ }
+    }
+
+    async copyFieldCodes(ctx) {
+      try {
+        const res = await this.postFn('CP_GET_FIELDS', { appId: ctx.appId });
+        if (!res?.ok) return;
+        const fields = Array.isArray(res.result?.fields) ? res.result.fields : [];
+        const text = fields.map((f) => `${f.code}\t${f.label || ''}\t${f.type || ''}`).join('\n');
+        await navigator.clipboard.writeText(text);
+      } catch (_) { /* ignore */ }
+    }
+
+    mount() {
+      const backdrop = document.createElement('div');
+      backdrop.id = 'pb-command-palette-backdrop';
+      backdrop.addEventListener('mousedown', (e) => {
+        if (e.target === backdrop) this.close();
+      });
+
+      const panel = document.createElement('div');
+      panel.id = 'pb-command-palette';
+
+      const searchWrap = document.createElement('div');
+      searchWrap.className = 'pb-cp__search-wrap';
+
+      const icon = document.createElement('span');
+      icon.className = 'pb-cp__search-icon';
+      icon.textContent = '⌕';
+
+      const input = document.createElement('input');
+      input.className = 'pb-cp__search-input';
+      input.type = 'text';
+      input.placeholder = 'コマンドを検索...';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.addEventListener('input', () => this.filter(input.value));
+      input.addEventListener('keydown', (e) => this.handleKey(e));
+      this.inputEl = input;
+
+      searchWrap.append(icon, input);
+
+      const list = document.createElement('div');
+      list.className = 'pb-cp__list';
+      this.listEl = list;
+
+      const footer = document.createElement('div');
+      footer.className = 'pb-cp__footer';
+      footer.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
+
+      panel.append(searchWrap, list, footer);
+      backdrop.appendChild(panel);
+      document.body.appendChild(backdrop);
+      this.backdropEl = backdrop;
+    }
+
+    filter(query) {
+      const q = String(query || '').trim().toLowerCase();
+      const cmds = CP_COMMANDS.filter((cmd) => {
+        if (cmd.requiresApp && !this.ctx.appId) return false;
+        if (cmd.requiresRecord && !this.ctx.recordId) return false;
+        if (!q) return true;
+        if (cmd.label.toLowerCase().includes(q)) return true;
+        return cmd.keywords.some((k) => k.toLowerCase().includes(q));
+      });
+      this.filtered = cmds;
+      this.activeIndex = 0;
+      this.renderList();
+    }
+
+    renderList() {
+      if (!this.listEl) return;
+      this.listEl.innerHTML = '';
+      if (!this.filtered.length) {
+        const empty = document.createElement('div');
+        empty.className = 'pb-cp__empty';
+        empty.textContent = '該当するコマンドが見つかりません';
+        this.listEl.appendChild(empty);
+        return;
+      }
+      this.filtered.forEach((cmd, i) => {
+        const item = document.createElement('div');
+        item.className = 'pb-cp__item' + (i === this.activeIndex ? ' pb-cp__item--active' : '');
+
+        const icon = document.createElement('span');
+        icon.className = 'pb-cp__item-icon';
+        icon.textContent = cmd.icon || '›';
+
+        const label = document.createElement('span');
+        label.className = 'pb-cp__item-label';
+        label.textContent = cmd.label;
+
+        const badge = document.createElement('span');
+        badge.className = 'pb-cp__item-badge';
+        badge.textContent = cmd.badge || '';
+
+        item.append(icon, label, badge);
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          this.execute(i);
+        });
+        item.addEventListener('mousemove', () => {
+          if (this.activeIndex !== i) {
+            this.activeIndex = i;
+            this.renderList();
+          }
+        });
+        this.listEl.appendChild(item);
+      });
+      // scroll active item into view
+      const activeEl = this.listEl.children[this.activeIndex];
+      if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+    }
+
+    handleKey(e) {
+      if (e.key === 'Escape') { this.close(); return; }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.activeIndex = Math.min(this.activeIndex + 1, this.filtered.length - 1);
+        this.renderList();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.activeIndex = Math.max(this.activeIndex - 1, 0);
+        this.renderList();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.execute(this.activeIndex);
+      }
+    }
+
+    execute(index) {
+      const cmd = this.filtered[index];
+      if (!cmd) return;
+      this.close();
+      if (cmd.isAsync) {
+        cmd.action(this.ctx, this);
+      } else {
+        cmd.action(this.ctx, this);
+      }
+    }
+
+    async open() {
+      if (!this.backdropEl) this.mount();
+      await this.fetchContext();
+      this.backdropEl.style.display = 'flex';
+      this.isOpen = true;
+      this.filter('');
+      if (this.inputEl) {
+        this.inputEl.value = '';
+        this.inputEl.focus();
+      }
+    }
+
+    close() {
+      if (this.backdropEl) this.backdropEl.style.display = 'none';
+      this.isOpen = false;
+    }
+
+    toggle() {
+      if (this.isOpen) this.close(); else this.open();
+    }
+  }
+
+  const commandPalette = new CommandPalette(postToPage);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      commandPalette.toggle();
+    }
+  }, true);
+
+  // ── End Command Palette ──────────────────────────────────────────────────
 
   spaLifecycleReady = true;
   handleSpaLifecycle('boot_ready', location.href);

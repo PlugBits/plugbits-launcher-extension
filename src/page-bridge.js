@@ -1550,6 +1550,44 @@ function markLookupAutoFields(properties, metas) {
         return;
       }
 
+      if (type === 'CP_GET_CONTEXT') {
+        const sdk = window.kintone;
+        const appId = sdk?.app?.getId?.() ?? null;
+        const recordId = (() => {
+          try { return sdk?.app?.record?.getId?.() ?? null; } catch (_) { return null; }
+        })();
+        const query = (() => {
+          try { return sdk?.app?.getQueryCondition?.() ?? ''; } catch (_) { return ''; }
+        })();
+        window.postMessage({
+          __kfav__: true, replyTo: id, ok: true,
+          result: {
+            appId: appId != null ? String(appId) : null,
+            recordId: recordId != null ? String(recordId) : null,
+            query: String(query)
+          }
+        }, ORIGIN);
+        return;
+      }
+
+      if (type === 'CP_GET_FIELDS') {
+        const appId = String(payload?.appId || '').trim();
+        if (!appId) throw new Error('appId is required');
+        const resp = await callKintoneApi('/k/v1/app/form/fields', 'GET', { app: appId }, {
+          feature: 'command_palette',
+          trigger: 'cp_field_codes',
+          source: 'command_palette'
+        });
+        const rawFields = resp?.properties || {};
+        const fields = Object.values(rawFields).map((f) => ({
+          code: String(f.code || ''),
+          label: String(f.label || ''),
+          type: String(f.type || '')
+        })).sort((a, b) => a.code.localeCompare(b.code));
+        window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { fields } }, ORIGIN);
+        return;
+      }
+
       if (type === 'EXCEL_PUT_RECORDS') {
         const appId = payload?.appId;
         const records = Array.isArray(payload?.records) ? payload.records : null;
