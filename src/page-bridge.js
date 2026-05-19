@@ -1588,6 +1588,13 @@ function markLookupAutoFields(properties, metas) {
         return;
       }
 
+      if (type === 'CP_NAVIGATE') {
+        const url = String(payload?.url || '').trim();
+        if (url) window.location.href = url;
+        window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: {} }, ORIGIN);
+        return;
+      }
+
       if (type === 'EXCEL_PUT_RECORDS') {
         const appId = payload?.appId;
         const records = Array.isArray(payload?.records) ? payload.records : null;
