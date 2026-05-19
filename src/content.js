@@ -6165,7 +6165,8 @@
           }
         });
         this.setInputEditingVisual(input, editing);
-        const shouldSelectAll = editing && this.editingCell && this.editingCell.selectAll;
+        const field = this.fields[colIndex];
+        const shouldSelectAll = field?.type === 'DATE' || (editing && this.editingCell && this.editingCell.selectAll);
         this.applyCaretPlacement(input, shouldSelectAll);
       });
     }
@@ -6901,6 +6902,7 @@
                   setSubtableCellValue(item, child, input.value);
                 });
                 if (isDateField && permission.editable) {
+                  input.addEventListener('focus', () => { input.select(); });
                   input.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter' || e.key === 'Tab') {
                       const smart = smartDateToYMD(input.value);
@@ -8037,7 +8039,7 @@
         this.openMultiChoicePicker(r, c, targetInput);
         return;
       }
-      this.editingCell = this.createEditingState(r, c, !!selectAll);
+      this.editingCell = this.createEditingState(r, c, !!selectAll || field?.type === 'DATE');
       if (targetInput) {
         this.setInputEditingVisual(targetInput, true);
         requestAnimationFrame(() => {
