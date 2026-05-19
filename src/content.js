@@ -5786,14 +5786,6 @@
       input.readOnly = true;
       input.addEventListener('input', () => { this.onInputChanged(input); });
       input.addEventListener('change', () => { this.onInputChanged(input); });
-      if (field.type === 'DATE') {
-        input.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' || e.key === 'Tab') {
-            const smart = smartDateToYMD(input.value);
-            if (smart) { input.value = smart; this.onInputChanged(input); }
-          }
-        });
-      }
       input.addEventListener('compositionstart', this.handleCompositionStart);
       input.addEventListener('compositionend', this.handleCompositionEnd);
       input.addEventListener('paste', (event) => { this.handlePaste(event, input); });
@@ -8880,6 +8872,10 @@
           event.preventDefault();
           event.stopPropagation();
           event.stopImmediatePropagation();
+          if (field?.type === 'DATE' && targetInput) {
+            const smart = smartDateToYMD(targetInput.value);
+            if (smart) { targetInput.value = smart; this.onInputChanged(targetInput); }
+          }
           const isTabKey = event.key === 'Tab';
           const rowDelta = isTabKey ? 0 : (event.shiftKey ? -1 : 1);
           const colDelta = isTabKey ? (event.shiftKey ? -1 : 1) : 0;
