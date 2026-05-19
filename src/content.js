@@ -5758,8 +5758,15 @@
         input.placeholder = resolveText(this.language, 'fileDropPlaceholder') || 'Drop files here';
       }
       input.readOnly = true;
-      input.addEventListener('input', () => { this.onInputChanged(input); });
-      input.addEventListener('change', () => { this.onInputChanged(input); });
+      const applySmartDate = field.type === 'DATE'
+        ? () => {
+            const smart = smartDateToYMD(input.value);
+            if (smart) input.value = smart;
+            this.onInputChanged(input);
+          }
+        : null;
+      input.addEventListener('input', applySmartDate || (() => { this.onInputChanged(input); }));
+      input.addEventListener('change', applySmartDate || (() => { this.onInputChanged(input); }));
       input.addEventListener('compositionstart', this.handleCompositionStart);
       input.addEventListener('compositionend', this.handleCompositionEnd);
       input.addEventListener('paste', (event) => { this.handlePaste(event, input); });
@@ -10312,8 +10319,8 @@
       label: 'フォーム設定を開く',
       icon: '⚙',
       category: 'admin',
-      badge: '管理者',
-      keywords: ['form', 'フォーム', '設定', 'admin', 'アドミン'],
+      badge: 'form',
+      keywords: ['form', 'フォーム', '設定', 'admin'],
       requiresApp: true,
       action(ctx) { window.location.href = `/k/admin/app/flow?app=${ctx.appId}#section=form`; }
     },
@@ -10322,8 +10329,8 @@
       label: 'プロセス管理設定を開く',
       icon: '⚙',
       category: 'admin',
-      badge: '管理者',
-      keywords: ['process', 'プロセス', '管理', 'workflow', 'ワークフロー'],
+      badge: 'status',
+      keywords: ['process', 'status', 'プロセス', '管理', 'workflow'],
       requiresApp: true,
       action(ctx) { window.location.href = `/k/admin/app/status?app=${ctx.appId}`; }
     },
@@ -10332,8 +10339,8 @@
       label: 'APIトークン設定を開く',
       icon: '⚙',
       category: 'admin',
-      badge: '管理者',
-      keywords: ['api', 'token', 'トークン', 'key'],
+      badge: 'apitoken',
+      keywords: ['api', 'token', 'apitoken', 'トークン'],
       requiresApp: true,
       action(ctx) { window.location.href = `/k/admin/app/apitoken?app=${ctx.appId}`; }
     },
@@ -10343,8 +10350,8 @@
       label: 'App IDをコピー',
       icon: '#',
       category: 'dev',
-      badge: '開発',
-      keywords: ['app', 'id', 'appid', 'copy', 'コピー'],
+      badge: 'appid',
+      keywords: ['app', 'id', 'appid', 'copy'],
       requiresApp: true,
       action(ctx) {
         navigator.clipboard.writeText(String(ctx.appId));
@@ -10355,8 +10362,8 @@
       label: 'Record IDをコピー',
       icon: '#',
       category: 'dev',
-      badge: '開発',
-      keywords: ['record', 'id', 'recordid', 'copy', 'コピー'],
+      badge: 'recid',
+      keywords: ['record', 'id', 'recid', 'recordid', 'copy'],
       requiresRecord: true,
       action(ctx) {
         navigator.clipboard.writeText(String(ctx.recordId));
@@ -10367,8 +10374,8 @@
       label: 'クエリ条件をコピー',
       icon: 'Q',
       category: 'dev',
-      badge: '開発',
-      keywords: ['query', 'クエリ', 'condition', '条件', 'copy', 'コピー'],
+      badge: 'query',
+      keywords: ['query', 'クエリ', 'condition', '条件', 'copy'],
       requiresApp: true,
       action(ctx) {
         navigator.clipboard.writeText(ctx.query || '');
@@ -10379,8 +10386,8 @@
       label: 'フィールドコード一覧をコピー',
       icon: '{}',
       category: 'dev',
-      badge: '開発',
-      keywords: ['field', 'code', 'フィールド', 'コード', 'copy', 'コピー', 'list'],
+      badge: 'fields',
+      keywords: ['field', 'code', 'fields', 'copy'],
       requiresApp: true,
       isAsync: true,
       async action(ctx, palette) {
