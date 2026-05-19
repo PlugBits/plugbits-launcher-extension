@@ -5739,41 +5739,37 @@
           this.bindInputToRow(input, field, row, rowIndex, colIndex);
           cell.appendChild(input);
           if (field.type === 'DATE') {
-            const pickerBtn = document.createElement('button');
-            pickerBtn.type = 'button';
-            pickerBtn.className = 'pb-overlay__date-pick-btn';
-            pickerBtn.tabIndex = -1;
-            pickerBtn.textContent = '▾';
+            // label で native date input を包む → クリックで確実にピッカーが開く
+            const pickerLabel = document.createElement('label');
+            pickerLabel.className = 'pb-overlay__date-pick-btn';
+            pickerLabel.textContent = '▾';
             const nativePicker = document.createElement('input');
             nativePicker.type = 'date';
             nativePicker.className = 'pb-overlay__date-pick-native';
             nativePicker.tabIndex = -1;
-            pickerBtn.addEventListener('mousedown', (e) => {
-              e.preventDefault();
+            pickerLabel.appendChild(nativePicker);
+            pickerLabel.addEventListener('mousedown', (e) => {
               e.stopPropagation();
-              const rowIndex2 = Number(input.dataset.rowIndex || '0');
-              const colIndex2 = Number(input.dataset.colIndex || '0');
-              if (input.readOnly) this.enterEditMode(rowIndex2, colIndex2, input, false);
               nativePicker.value = input.value || '';
-              if (nativePicker.showPicker) {
-                nativePicker.showPicker();
-              } else {
-                nativePicker.click();
+              if (input.readOnly) {
+                e.preventDefault(); // label→input の自動クリックを止める
+                const ri = Number(input.dataset.rowIndex || '0');
+                const ci = Number(input.dataset.colIndex || '0');
+                this.enterEditMode(ri, ci, input, false);
+                requestAnimationFrame(() => {
+                  if (nativePicker.showPicker) nativePicker.showPicker();
+                });
               }
+              // readOnly でなければ label が nativePicker を自動クリック → ピッカー開く
             });
+            nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
             nativePicker.addEventListener('change', () => {
               if (nativePicker.value) {
-                if (input.readOnly) {
-                  const rowIndex2 = Number(input.dataset.rowIndex || '0');
-                  const colIndex2 = Number(input.dataset.colIndex || '0');
-                  this.enterEditMode(rowIndex2, colIndex2, input, false);
-                }
                 input.value = nativePicker.value;
                 this.onInputChanged(input);
               }
             });
-            cell.appendChild(pickerBtn);
-            cell.appendChild(nativePicker);
+            cell.appendChild(pickerLabel);
           }
           this.applyCellVisualState(input, row, field.code);
           rowLine.appendChild(cell);

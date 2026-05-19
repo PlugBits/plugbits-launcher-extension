@@ -907,6 +907,7 @@
 }
 
 .pb-overlay__date-pick-btn {
+  position: relative;
   flex-shrink: 0;
   width: 18px;
   height: 18px;
@@ -915,7 +916,8 @@
   background: transparent;
   color: #9ca3af;
   font-size: 11px;
-  line-height: 1;
+  line-height: 18px;
+  text-align: center;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -923,6 +925,7 @@
   border-radius: 3px;
   opacity: 0;
   transition: opacity 0.1s;
+  user-select: none;
 }
 
 .pb-overlay__cell:hover .pb-overlay__date-pick-btn,
@@ -937,12 +940,14 @@
 
 .pb-overlay__date-pick-native {
   position: absolute;
+  inset: 0;
   opacity: 0;
-  pointer-events: none;
-  width: 1px;
-  height: 1px;
-  top: 0;
-  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  margin: 0;
 }
 
 .pb-overlay__fill-handle {
