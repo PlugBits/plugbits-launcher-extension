@@ -10315,7 +10315,7 @@
       badge: '管理者',
       keywords: ['form', 'フォーム', '設定', 'admin', 'アドミン'],
       requiresApp: true,
-      action(ctx) { window.location.href = `/k/admin/${ctx.appId}/form`; }
+      action(ctx) { window.location.href = `/k/admin/app/flow?app=${ctx.appId}#section=form`; }
     },
     {
       id: 'open-process-settings',
@@ -10325,7 +10325,7 @@
       badge: '管理者',
       keywords: ['process', 'プロセス', '管理', 'workflow', 'ワークフロー'],
       requiresApp: true,
-      action(ctx) { window.location.href = `/k/admin/${ctx.appId}/process`; }
+      action(ctx) { window.location.href = `/k/admin/app/status?app=${ctx.appId}`; }
     },
     {
       id: 'open-api-token-settings',
@@ -10335,7 +10335,7 @@
       badge: '管理者',
       keywords: ['api', 'token', 'トークン', 'key'],
       requiresApp: true,
-      action(ctx) { window.location.href = `/k/admin/${ctx.appId}/token`; }
+      action(ctx) { window.location.href = `/k/admin/app/apitoken?app=${ctx.appId}`; }
     },
     // ─ Developer: clipboard ─
     {
