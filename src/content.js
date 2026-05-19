@@ -10312,8 +10312,6 @@
 
   // ── Command Palette ──────────────────────────────────────────────────────
 
-  const FILTER_PRESETS_KEY = 'pb_filter_presets_v1';
-
   const CP_COMMANDS = [
     // ─ Admin: navigation ─
     {
@@ -10396,46 +10394,6 @@
         await palette.copyFieldCodes(ctx);
       }
     },
-    // ─ Filters: preset management ─
-    {
-      id: 'save-filter',
-      label: '現在のフィルターを保存',
-      icon: '◈',
-      category: 'filter',
-      badge: 'save',
-      keywords: ['filter', 'save', 'フィルター', '保存', 'preset'],
-      requiresApp: true,
-      isAsync: true,
-      async action(ctx, palette) {
-        await palette.saveCurrentFilter(ctx);
-      }
-    },
-    {
-      id: 'clear-filter',
-      label: 'フィルターをクリア',
-      icon: '✕',
-      category: 'filter',
-      badge: 'clear',
-      keywords: ['filter', 'clear', 'reset', 'フィルター', 'クリア', 'リセット'],
-      requiresApp: true,
-      isAsync: true,
-      async action(ctx, palette) {
-        await palette.applyFilter(ctx.appId, '');
-      }
-    },
-    {
-      id: 'delete-filter',
-      label: 'フィルタープリセットを削除',
-      icon: '⊗',
-      category: 'filter',
-      badge: 'del',
-      keywords: ['filter', 'delete', 'remove', 'フィルター', '削除'],
-      requiresApp: true,
-      isAsync: true,
-      async action(ctx, palette) {
-        await palette.startDeleteFilterMode(ctx);
-      }
-    },
   ];
 
   class CommandPalette {
@@ -10448,9 +10406,6 @@
       this.ctx = { appId: null, recordId: null, query: '' };
       this.filtered = [];
       this.activeIndex = 0;
-      this._dynamicCmds = [];
-      this._mode = 'search';
-      this._modeData = null;
     }
 
     async fetchContext() {
@@ -10468,121 +10423,6 @@
         const text = fields.map((f) => `${f.code}\t${f.label || ''}\t${f.type || ''}`).join('\n');
         await navigator.clipboard.writeText(text);
       } catch (_) { /* ignore */ }
-    }
-
-    async loadFilterPresets(appId) {
-      try {
-        const stored = await chrome.storage.local.get([FILTER_PRESETS_KEY]);
-        const all = stored?.[FILTER_PRESETS_KEY] || {};
-        return Array.isArray(all[String(appId)]) ? all[String(appId)] : [];
-      } catch (_) { return []; }
-    }
-
-    async saveFilterPresets(appId, presets) {
-      try {
-        const stored = await chrome.storage.local.get([FILTER_PRESETS_KEY]);
-        const all = stored?.[FILTER_PRESETS_KEY] || {};
-        all[String(appId)] = presets;
-        await chrome.storage.local.set({ [FILTER_PRESETS_KEY]: all });
-      } catch (_) {}
-    }
-
-    async getDynamicCommands(ctx) {
-      if (!ctx.appId) return [];
-      const presets = await this.loadFilterPresets(ctx.appId);
-      return presets.map((preset) => ({
-        id: `apply-filter-${preset.id}`,
-        label: `▸ ${preset.name}`,
-        icon: '▼',
-        category: 'filter',
-        badge: 'filter',
-        keywords: ['filter', 'フィルター', preset.name.toLowerCase()],
-        _preset: preset,
-        action(_ctx, _palette) {
-          _palette.applyFilter(_ctx.appId, preset.query);
-        }
-      }));
-    }
-
-    async applyFilter(appId, query) {
-      try {
-        const url = query
-          ? `/k/${appId}/?query=${encodeURIComponent(query)}`
-          : `/k/${appId}/`;
-        await this.postFn('CP_NAVIGATE', { url });
-      } catch (_) {}
-    }
-
-    async saveCurrentFilter(ctx) {
-      const query = ctx.query || '';
-      const name = window.prompt('フィルター名を入力してください:', '');
-      if (!name || !name.trim()) return;
-      const presets = await this.loadFilterPresets(ctx.appId);
-      const id = String(Date.now());
-      presets.push({ id, name: name.trim(), query });
-      await this.saveFilterPresets(ctx.appId, presets);
-    }
-
-    async startDeleteFilterMode(ctx) {
-      const presets = await this.loadFilterPresets(ctx.appId);
-      if (!presets.length) {
-        window.alert('保存済みフィルターがありません');
-        return;
-      }
-      if (!this.backdropEl) this.mount();
-      this._mode = 'filter-delete';
-      this._modeData = { presets };
-      this.activeIndex = 0;
-      this.backdropEl.style.display = 'flex';
-      this.isOpen = true;
-      if (this.inputEl) {
-        this.inputEl.value = '';
-        this.inputEl.placeholder = '削除するフィルターを選択 (↑↓ Enter Esc)';
-        this.inputEl.focus();
-      }
-      this.renderModeList();
-    }
-
-    renderModeList() {
-      if (!this.listEl || this._mode !== 'filter-delete') return;
-      this.listEl.innerHTML = '';
-      const presets = this._modeData?.presets || [];
-      presets.forEach((preset, i) => {
-        const item = document.createElement('div');
-        item.className = 'pb-cp__item' + (i === this.activeIndex ? ' pb-cp__item--active' : '');
-        const icon = document.createElement('span');
-        icon.className = 'pb-cp__item-icon';
-        icon.textContent = '✕';
-        const label = document.createElement('span');
-        label.className = 'pb-cp__item-label';
-        label.textContent = preset.name;
-        const badge = document.createElement('span');
-        badge.className = 'pb-cp__item-badge';
-        badge.textContent = 'del';
-        item.append(icon, label, badge);
-        item.addEventListener('mousedown', (e) => {
-          e.preventDefault();
-          this._deleteFilterAtIndex(i);
-        });
-        item.addEventListener('mousemove', () => {
-          if (this.activeIndex !== i) {
-            this.activeIndex = i;
-            this.renderModeList();
-          }
-        });
-        this.listEl.appendChild(item);
-      });
-      const activeEl = this.listEl.children[this.activeIndex];
-      if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
-    }
-
-    async _deleteFilterAtIndex(i) {
-      const presets = this._modeData?.presets || [];
-      const newPresets = presets.filter((_, j) => j !== i);
-      await this.saveFilterPresets(this.ctx.appId, newPresets);
-      this._mode = 'search';
-      this._modeData = null;
-      this.close();
     }
 
     mount() {
@@ -10656,10 +10496,8 @@
     }
 
     filter(query) {
-      if (this._mode !== 'search') return;
       const q = String(query || '').trim().toLowerCase();
-      const all = [...CP_COMMANDS, ...this._dynamicCmds];
-      const cmds = all.filter((cmd) => {
+      const cmds = CP_COMMANDS.filter((cmd) => {
         if (cmd.requiresApp && !this.ctx.appId) return false;
         if (cmd.requiresRecord && !this.ctx.recordId) return false;
         if (!q) return true;
@@ -10681,7 +10519,7 @@
         this.listEl.appendChild(empty);
         return;
       }
-      const CATEGORY_LABELS = { admin: 'ADMIN', dev: 'DEV', filter: 'FILTER' };
+      const CATEGORY_LABELS = { admin: 'ADMIN', dev: 'DEV' };
       let lastCategory = null;
       this.filtered.forEach((cmd, i) => {
         if (cmd.category && cmd.category !== lastCategory) {
@@ -10725,34 +10563,6 @@
     }
 
     handleKey(e) {
-      if (this._mode === 'filter-delete') {
-        const presets = this._modeData?.presets || [];
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          this._mode = 'search';
-          this._modeData = null;
-          this.close();
-          return;
-        }
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          this.activeIndex = Math.min(this.activeIndex + 1, presets.length - 1);
-          this.renderModeList();
-          return;
-        }
-        if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          this.activeIndex = Math.max(this.activeIndex - 1, 0);
-          this.renderModeList();
-          return;
-        }
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          this._deleteFilterAtIndex(this.activeIndex);
-          return;
-        }
-        return;
-      }
       if (e.key === 'Escape') { this.close(); return; }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -10786,9 +10596,6 @@
     async open() {
       if (!this.backdropEl) this.mount();
       await this.fetchContext();
-      this._dynamicCmds = await this.getDynamicCommands(this.ctx);
-      this._mode = 'search';
-      this._modeData = null;
       this.backdropEl.style.display = 'flex';
       this.isOpen = true;
       this.filter('');
