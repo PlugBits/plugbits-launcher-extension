@@ -556,6 +556,55 @@
     return crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
   }
 
+  function smartDateToYMD(raw) {
+    const s = String(raw || '').trim().toLowerCase();
+    if (!s) return null;
+    const today = new Date();
+    const ymd = (d) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dd}`;
+    };
+    const shift = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+
+    // today / yesterday / tomorrow
+    if (s === 't' || s === 'today') return ymd(today);
+    if (s === 'yesterday') return ymd(shift(today, -1));
+    if (s === 'tomorrow') return ymd(shift(today, 1));
+
+    // relative days: +N / -N
+    const plusMatch = s.match(/^\+(\d+)$/);
+    if (plusMatch) return ymd(shift(today, Number(plusMatch[1])));
+    const minusMatch = s.match(/^-(\d+)$/);
+    if (minusMatch) return ymd(shift(today, -Number(minusMatch[1])));
+
+    // end of month: end / end+N / end-N  (N = months offset)
+    const endMatch = s.match(/^end([+-]\d+)?$/);
+    if (endMatch) {
+      const mo = endMatch[1] ? Number(endMatch[1]) : 0;
+      return ymd(new Date(today.getFullYear(), today.getMonth() + mo + 1, 0));
+    }
+
+    // first of month: first / first+N / first-N  (N = months offset)
+    const firstMatch = s.match(/^first([+-]\d+)?$/);
+    if (firstMatch) {
+      const mo = firstMatch[1] ? Number(firstMatch[1]) : 0;
+      return ymd(new Date(today.getFullYear(), today.getMonth() + mo, 1));
+    }
+
+    // weekdays: 今週ベース  mon / tue+1(来週火) / fri-1(先週金)
+    const WEEKDAYS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+    const wdMatch = s.match(/^(sun|mon|tue|wed|thu|fri|sat)([+-]\d+)?$/);
+    if (wdMatch) {
+      const baseDiff = WEEKDAYS[wdMatch[1]] - today.getDay(); // 今週の該当曜日（負=過去）
+      const weekOffset = wdMatch[2] ? Number(wdMatch[2]) : 0;
+      return ymd(shift(today, baseDiff + weekOffset * 7));
+    }
+
+    return null;
+  }
+
   window.addEventListener('message', (ev) => {
     if (ev.origin !== location.origin) return;
     const data = ev.data || {};
@@ -5689,6 +5738,39 @@
           const input = this.createInputBase(field);
           this.bindInputToRow(input, field, row, rowIndex, colIndex);
           cell.appendChild(input);
+          if (field.type === 'DATE') {
+            // label で native date input を包む → クリックで確実にピッカーが開く
+            const pickerLabel = document.createElement('label');
+            pickerLabel.className = 'pb-overlay__date-pick-btn';
+            pickerLabel.textContent = '▾';
+            const nativePicker = document.createElement('input');
+            nativePicker.type = 'date';
+            nativePicker.className = 'pb-overlay__date-pick-native';
+            nativePicker.tabIndex = -1;
+            pickerLabel.appendChild(nativePicker);
+            pickerLabel.addEventListener('mousedown', (e) => {
+              e.stopPropagation();
+              nativePicker.value = input.value || '';
+              if (input.readOnly) {
+                e.preventDefault(); // label→input の自動クリックを止める
+                const ri = Number(input.dataset.rowIndex || '0');
+                const ci = Number(input.dataset.colIndex || '0');
+                this.enterEditMode(ri, ci, input, false);
+                requestAnimationFrame(() => {
+                  if (nativePicker.showPicker) nativePicker.showPicker();
+                });
+              }
+              // readOnly でなければ label が nativePicker を自動クリック → ピッカー開く
+            });
+            nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+            nativePicker.addEventListener('change', () => {
+              if (nativePicker.value) {
+                input.value = nativePicker.value;
+                this.onInputChanged(input);
+              }
+            });
+            cell.appendChild(pickerLabel);
+          }
           this.applyCellVisualState(input, row, field.code);
           rowLine.appendChild(cell);
           inputsRow[colIndex] = input;
@@ -5710,8 +5792,12 @@
       input.spellcheck = false;
       if (field.type === 'NUMBER') input.inputMode = 'decimal';
       if (field.type === 'LINK') input.inputMode = 'url';
-      if (field.type === 'DATE') input.type = 'date';
-      else input.type = 'text';
+      if (field.type === 'DATE') {
+        input.type = 'text';
+        input.placeholder = 't · +3 · end · end+1 · first · mon · mon+1';
+      } else {
+        input.type = 'text';
+      }
       if (this.isChoiceField(field)) {
         input.placeholder = field.choices?.[0] || '';
       }
@@ -8230,6 +8316,8 @@
       }
       if (type === 'DATE') {
         if (!trimmed) return { ok: true, value: '' };
+        const smart = smartDateToYMD(trimmed);
+        if (smart) return { ok: true, value: smart };
         const re = /^\d{4}-\d{2}-\d{2}$/;
         if (!re.test(trimmed)) return { ok: false, error: 'Invalid date' };
         return { ok: true, value: trimmed };
@@ -8817,6 +8905,10 @@
           event.preventDefault();
           event.stopPropagation();
           event.stopImmediatePropagation();
+          if (field?.type === 'DATE' && targetInput) {
+            const smart = smartDateToYMD(targetInput.value);
+            if (smart) { targetInput.value = smart; this.onInputChanged(targetInput); }
+          }
           const isTabKey = event.key === 'Tab';
           const rowDelta = isTabKey ? 0 : (event.shiftKey ? -1 : 1);
           const colDelta = isTabKey ? (event.shiftKey ? -1 : 1) : 0;
@@ -10273,6 +10365,323 @@
       canSaveOverlay: overlayController.canSaveOverlay()
     };
   }
+
+  // ── Command Palette ──────────────────────────────────────────────────────
+
+  const CP_COMMANDS = [
+    // ─ Admin: navigation ─
+    {
+      id: 'open-form-settings',
+      label: 'フォーム設定を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: 'form',
+      keywords: ['form', 'フォーム', '設定', 'admin'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/app/flow?app=${ctx.appId}#section=form`; }
+    },
+    {
+      id: 'open-process-settings',
+      label: 'プロセス管理設定を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: 'status',
+      keywords: ['process', 'status', 'プロセス', '管理', 'workflow'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/app/status?app=${ctx.appId}`; }
+    },
+    {
+      id: 'open-api-token-settings',
+      label: 'APIトークン設定を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: 'apitoken',
+      keywords: ['api', 'token', 'apitoken', 'トークン'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/app/apitoken?app=${ctx.appId}`; }
+    },
+    // ─ Developer: clipboard ─
+    {
+      id: 'copy-app-id',
+      label: 'App IDをコピー',
+      icon: '#',
+      category: 'dev',
+      badge: 'appid',
+      keywords: ['app', 'id', 'appid', 'copy'],
+      requiresApp: true,
+      action(ctx) {
+        navigator.clipboard.writeText(String(ctx.appId));
+      }
+    },
+    {
+      id: 'copy-record-id',
+      label: 'Record IDをコピー',
+      icon: '#',
+      category: 'dev',
+      badge: 'recid',
+      keywords: ['record', 'id', 'recid', 'recordid', 'copy'],
+      requiresRecord: true,
+      action(ctx) {
+        navigator.clipboard.writeText(String(ctx.recordId));
+      }
+    },
+    {
+      id: 'copy-query',
+      label: 'クエリ条件をコピー',
+      icon: 'Q',
+      category: 'dev',
+      badge: 'query',
+      keywords: ['query', 'クエリ', 'condition', '条件', 'copy'],
+      requiresApp: true,
+      action(ctx) {
+        navigator.clipboard.writeText(ctx.query || '');
+      }
+    },
+    {
+      id: 'copy-field-codes',
+      label: 'フィールドコード一覧をコピー',
+      icon: '{}',
+      category: 'dev',
+      badge: 'fields',
+      keywords: ['field', 'code', 'fields', 'copy'],
+      requiresApp: true,
+      isAsync: true,
+      async action(ctx, palette) {
+        await palette.copyFieldCodes(ctx);
+      }
+    },
+  ];
+
+  class CommandPalette {
+    constructor(postFn) {
+      this.postFn = postFn;
+      this.backdropEl = null;
+      this.inputEl = null;
+      this.listEl = null;
+      this.isOpen = false;
+      this.ctx = { appId: null, recordId: null, query: '' };
+      this.filtered = [];
+      this.activeIndex = 0;
+    }
+
+    async fetchContext() {
+      try {
+        const res = await this.postFn('CP_GET_CONTEXT', {});
+        if (res?.ok) this.ctx = { ...this.ctx, ...res.result };
+      } catch (_) { /* ignore */ }
+    }
+
+    async copyFieldCodes(ctx) {
+      try {
+        const res = await this.postFn('CP_GET_FIELDS', { appId: ctx.appId });
+        if (!res?.ok) return;
+        const fields = Array.isArray(res.result?.fields) ? res.result.fields : [];
+        const text = fields.map((f) => `${f.code}\t${f.label || ''}\t${f.type || ''}`).join('\n');
+        await navigator.clipboard.writeText(text);
+      } catch (_) { /* ignore */ }
+    }
+
+    mount() {
+      const backdrop = document.createElement('div');
+      backdrop.id = 'pb-command-palette-backdrop';
+      backdrop.addEventListener('mousedown', (e) => {
+        if (e.target === backdrop) this.close();
+      });
+
+      const panel = document.createElement('div');
+      panel.id = 'pb-command-palette';
+
+      const searchWrap = document.createElement('div');
+      searchWrap.className = 'pb-cp__search-wrap';
+
+      const icon = document.createElement('span');
+      icon.className = 'pb-cp__search-icon';
+      icon.textContent = '⌕';
+
+      const input = document.createElement('input');
+      input.className = 'pb-cp__search-input';
+      input.type = 'text';
+      input.placeholder = 'コマンドを検索...';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.addEventListener('input', () => this.filter(input.value));
+      input.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        this.handleKey(e);
+      });
+      this.inputEl = input;
+
+      searchWrap.append(icon, input);
+
+      const list = document.createElement('div');
+      list.className = 'pb-cp__list';
+      this.listEl = list;
+
+      const footer = document.createElement('div');
+      footer.className = 'pb-cp__footer';
+      footer.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
+
+      const style = document.createElement('style');
+      style.textContent = `
+        #pb-command-palette-backdrop{position:fixed!important;inset:0!important;background:rgba(0,0,0,.4)!important;z-index:2147483647!important;display:none!important;align-items:flex-start!important;justify-content:center!important;padding-top:12vh!important}
+        #pb-command-palette-backdrop[style*="flex"]{display:flex!important}
+        #pb-command-palette{width:560px!important;max-width:calc(100vw - 32px)!important;background:#fff!important;border-radius:12px!important;box-shadow:0 24px 64px rgba(0,0,0,.25),0 4px 16px rgba(0,0,0,.12)!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;max-height:72vh!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;font-size:14px!important;line-height:1.5!important;color:#374151!important}
+        #pb-command-palette *{box-sizing:border-box!important;margin:0!important;padding:0!important}
+        #pb-command-palette .pb-cp__search-wrap{display:flex!important;align-items:center!important;padding:0 14px!important;border-bottom:1px solid #e5e7eb!important;gap:10px!important;flex-shrink:0!important}
+        #pb-command-palette .pb-cp__search-icon{color:#9ca3af!important;font-size:20px!important;flex-shrink:0!important;line-height:1!important}
+        #pb-command-palette .pb-cp__search-input{flex:1!important;border:none!important;outline:none!important;height:48px!important;font-size:15px!important;color:#111827!important;background:transparent!important;font-family:inherit!important;box-shadow:none!important;width:auto!important}
+        #pb-command-palette .pb-cp__search-input::placeholder{color:#9ca3af!important}
+        #pb-command-palette .pb-cp__list{overflow-y:auto!important;padding:6px 0!important;flex:1!important;min-height:0!important}
+        #pb-command-palette .pb-cp__group-label{padding:10px 16px 4px!important;font-size:10px!important;font-weight:700!important;color:#9ca3af!important;letter-spacing:.1em!important;text-transform:uppercase!important;display:block!important}
+        #pb-command-palette .pb-cp__item{display:flex!important;align-items:center!important;gap:10px!important;padding:8px 14px!important;cursor:pointer!important;font-size:13px!important;color:#374151!important;background:transparent!important;width:100%!important}
+        #pb-command-palette .pb-cp__item:hover,#pb-command-palette .pb-cp__item--active{background:#eff6ff!important;color:#1d4ed8!important}
+        #pb-command-palette .pb-cp__item-icon{width:28px!important;height:28px!important;display:flex!important;align-items:center!important;justify-content:center!important;background:#f3f4f6!important;border-radius:6px!important;font-size:13px!important;flex-shrink:0!important;color:#6b7280!important}
+        #pb-command-palette .pb-cp__item--active .pb-cp__item-icon{background:#dbeafe!important;color:#1d4ed8!important}
+        #pb-command-palette .pb-cp__item-label{flex:1!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+        #pb-command-palette .pb-cp__item-badge{font-size:10px!important;padding:2px 8px!important;border-radius:9999px!important;background:#f3f4f6!important;color:#6b7280!important;font-weight:600!important;font-family:ui-monospace,monospace!important;flex-shrink:0!important;white-space:nowrap!important;letter-spacing:.02em!important}
+        #pb-command-palette .pb-cp__item--active .pb-cp__item-badge{background:#dbeafe!important;color:#3b82f6!important}
+        #pb-command-palette .pb-cp__empty{padding:32px 16px!important;text-align:center!important;color:#9ca3af!important;font-size:13px!important;display:block!important}
+        #pb-command-palette .pb-cp__footer{border-top:1px solid #f3f4f6!important;padding:8px 16px!important;display:flex!important;gap:16px!important;font-size:11px!important;color:#9ca3af!important;flex-shrink:0!important}
+        #pb-command-palette .pb-cp__footer kbd{display:inline-block!important;background:#f3f4f6!important;border:1px solid #e5e7eb!important;border-radius:4px!important;padding:1px 5px!important;font-size:10px!important;color:#6b7280!important;font-family:inherit!important}
+      `;
+
+      panel.append(searchWrap, list, footer);
+      backdrop.append(style, panel);
+      document.body.appendChild(backdrop);
+      this.backdropEl = backdrop;
+    }
+
+    filter(query) {
+      const q = String(query || '').trim().toLowerCase();
+      const cmds = CP_COMMANDS.filter((cmd) => {
+        if (cmd.requiresApp && !this.ctx.appId) return false;
+        if (cmd.requiresRecord && !this.ctx.recordId) return false;
+        if (!q) return true;
+        if (cmd.label.toLowerCase().includes(q)) return true;
+        return cmd.keywords.some((k) => k.toLowerCase().includes(q));
+      });
+      this.filtered = cmds;
+      this.activeIndex = 0;
+      this.renderList();
+    }
+
+    renderList() {
+      if (!this.listEl) return;
+      this.listEl.innerHTML = '';
+      if (!this.filtered.length) {
+        const empty = document.createElement('div');
+        empty.className = 'pb-cp__empty';
+        empty.textContent = '該当するコマンドが見つかりません';
+        this.listEl.appendChild(empty);
+        return;
+      }
+      const CATEGORY_LABELS = { admin: 'ADMIN', dev: 'DEV' };
+      let lastCategory = null;
+      this.filtered.forEach((cmd, i) => {
+        if (cmd.category && cmd.category !== lastCategory) {
+          const grp = document.createElement('div');
+          grp.className = 'pb-cp__group-label';
+          grp.textContent = CATEGORY_LABELS[cmd.category] || cmd.category.toUpperCase();
+          this.listEl.appendChild(grp);
+          lastCategory = cmd.category;
+        }
+
+        const item = document.createElement('div');
+        item.className = 'pb-cp__item' + (i === this.activeIndex ? ' pb-cp__item--active' : '');
+
+        const icon = document.createElement('span');
+        icon.className = 'pb-cp__item-icon';
+        icon.textContent = cmd.icon || '›';
+
+        const label = document.createElement('span');
+        label.className = 'pb-cp__item-label';
+        label.textContent = cmd.label;
+
+        const badge = document.createElement('span');
+        badge.className = 'pb-cp__item-badge';
+        badge.textContent = cmd.badge || '';
+
+        item.append(icon, label, badge);
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          this.execute(i);
+        });
+        item.addEventListener('mousemove', () => {
+          if (this.activeIndex !== i) {
+            this.activeIndex = i;
+            this.renderList();
+          }
+        });
+        this.listEl.appendChild(item);
+      });
+      const activeEl = this.listEl.querySelector('.pb-cp__item--active');
+      if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+    }
+
+    handleKey(e) {
+      if (e.key === 'Escape') { this.close(); return; }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this.activeIndex = Math.min(this.activeIndex + 1, this.filtered.length - 1);
+        this.renderList();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.activeIndex = Math.max(this.activeIndex - 1, 0);
+        this.renderList();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.execute(this.activeIndex);
+      }
+    }
+
+    execute(index) {
+      const cmd = this.filtered[index];
+      if (!cmd) return;
+      this.close();
+      if (cmd.isAsync) {
+        cmd.action(this.ctx, this);
+      } else {
+        cmd.action(this.ctx, this);
+      }
+    }
+
+    async open() {
+      if (!this.backdropEl) this.mount();
+      await this.fetchContext();
+      this.backdropEl.style.display = 'flex';
+      this.isOpen = true;
+      this.filter('');
+      if (this.inputEl) {
+        this.inputEl.value = '';
+        this.inputEl.placeholder = 'コマンドを検索...';
+        this.inputEl.focus();
+      }
+    }
+
+    close() {
+      if (this.backdropEl) this.backdropEl.style.display = 'none';
+      this.isOpen = false;
+    }
+
+    toggle() {
+      if (this.isOpen) this.close(); else this.open();
+    }
+  }
+
+  const commandPalette = new CommandPalette(postToPage);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      commandPalette.toggle();
+    }
+  }, true);
+
+  // ── End Command Palette ──────────────────────────────────────────────────
 
   spaLifecycleReady = true;
   handleSpaLifecycle('boot_ready', location.href);
