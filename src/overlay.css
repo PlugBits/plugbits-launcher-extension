@@ -1620,6 +1620,16 @@
   cursor: default;
 }
 
+.pb-subtable__cell:hover .pb-overlay__date-pick-btn--subtable,
+.pb-subtable__cell:focus-within .pb-overlay__date-pick-btn--subtable {
+  opacity: 1;
+}
+
+.pb-overlay__date-pick-btn--subtable {
+  vertical-align: middle;
+  margin-left: 2px;
+}
+
 .pb-subtable__col-op {
   width: 44px;
   min-width: 44px;

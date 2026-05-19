@@ -6887,8 +6887,10 @@
             } else {
               const input = document.createElement('input');
               input.className = 'pb-overlay__subtable-input';
-              input.type = String(child.type || '').toUpperCase() === 'DATE' ? 'date' : 'text';
+              const isDateField = String(child.type || '').toUpperCase() === 'DATE';
+              input.type = 'text';
               if (String(child.type || '').toUpperCase() === 'NUMBER') input.inputMode = 'decimal';
+              if (isDateField) input.placeholder = 't · +3 · end · end+1 · first · mon';
               input.style.width = `${Math.max(80, width - 16)}px`;
               if (interaction === 'inline-edit') {
                 input.value = rawCell === undefined || rawCell === null ? '' : String(rawCell);
@@ -6898,6 +6900,17 @@
                   if (!permission.editable) return;
                   setSubtableCellValue(item, child, input.value);
                 });
+                if (isDateField && permission.editable) {
+                  input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === 'Tab') {
+                      const smart = smartDateToYMD(input.value);
+                      if (smart) {
+                        input.value = smart;
+                        setSubtableCellValue(item, child, smart);
+                      }
+                    }
+                  });
+                }
               } else {
                 input.value = displayValue;
                 input.readOnly = true;
@@ -6927,6 +6940,28 @@
                 }
               }
               cell.appendChild(input);
+              if (isDateField && interaction === 'inline-edit' && permission.editable) {
+                const pickerLabel = document.createElement('label');
+                pickerLabel.className = 'pb-overlay__date-pick-btn pb-overlay__date-pick-btn--subtable';
+                pickerLabel.textContent = '▾';
+                const nativePicker = document.createElement('input');
+                nativePicker.type = 'date';
+                nativePicker.className = 'pb-overlay__date-pick-native';
+                nativePicker.tabIndex = -1;
+                pickerLabel.appendChild(nativePicker);
+                pickerLabel.addEventListener('mousedown', (e) => {
+                  e.stopPropagation();
+                  nativePicker.value = input.value || '';
+                });
+                nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+                nativePicker.addEventListener('change', () => {
+                  if (nativePicker.value) {
+                    input.value = nativePicker.value;
+                    setSubtableCellValue(item, child, nativePicker.value);
+                  }
+                });
+                cell.appendChild(pickerLabel);
+              }
             }
             rowEl.appendChild(cell);
           });
