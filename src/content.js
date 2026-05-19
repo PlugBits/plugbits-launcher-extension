@@ -10609,7 +10609,10 @@
       input.autocomplete = 'off';
       input.spellcheck = false;
       input.addEventListener('input', () => this.filter(input.value));
-      input.addEventListener('keydown', (e) => this.handleKey(e));
+      input.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        this.handleKey(e);
+      });
       this.inputEl = input;
 
       searchWrap.append(icon, input);
@@ -10622,8 +10625,32 @@
       footer.className = 'pb-cp__footer';
       footer.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
 
+      const style = document.createElement('style');
+      style.textContent = `
+        #pb-command-palette-backdrop{position:fixed!important;inset:0!important;background:rgba(0,0,0,.4)!important;z-index:2147483647!important;display:none!important;align-items:flex-start!important;justify-content:center!important;padding-top:12vh!important}
+        #pb-command-palette-backdrop[style*="flex"]{display:flex!important}
+        #pb-command-palette{width:560px!important;max-width:calc(100vw - 32px)!important;background:#fff!important;border-radius:12px!important;box-shadow:0 24px 64px rgba(0,0,0,.25),0 4px 16px rgba(0,0,0,.12)!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;max-height:72vh!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;font-size:14px!important;line-height:1.5!important;color:#374151!important}
+        #pb-command-palette *{box-sizing:border-box!important;margin:0!important;padding:0!important}
+        #pb-command-palette .pb-cp__search-wrap{display:flex!important;align-items:center!important;padding:0 14px!important;border-bottom:1px solid #e5e7eb!important;gap:10px!important;flex-shrink:0!important}
+        #pb-command-palette .pb-cp__search-icon{color:#9ca3af!important;font-size:20px!important;flex-shrink:0!important;line-height:1!important}
+        #pb-command-palette .pb-cp__search-input{flex:1!important;border:none!important;outline:none!important;height:48px!important;font-size:15px!important;color:#111827!important;background:transparent!important;font-family:inherit!important;box-shadow:none!important;width:auto!important}
+        #pb-command-palette .pb-cp__search-input::placeholder{color:#9ca3af!important}
+        #pb-command-palette .pb-cp__list{overflow-y:auto!important;padding:6px 0!important;flex:1!important;min-height:0!important}
+        #pb-command-palette .pb-cp__group-label{padding:10px 16px 4px!important;font-size:10px!important;font-weight:700!important;color:#9ca3af!important;letter-spacing:.1em!important;text-transform:uppercase!important;display:block!important}
+        #pb-command-palette .pb-cp__item{display:flex!important;align-items:center!important;gap:10px!important;padding:8px 14px!important;cursor:pointer!important;font-size:13px!important;color:#374151!important;background:transparent!important;width:100%!important}
+        #pb-command-palette .pb-cp__item:hover,#pb-command-palette .pb-cp__item--active{background:#eff6ff!important;color:#1d4ed8!important}
+        #pb-command-palette .pb-cp__item-icon{width:28px!important;height:28px!important;display:flex!important;align-items:center!important;justify-content:center!important;background:#f3f4f6!important;border-radius:6px!important;font-size:13px!important;flex-shrink:0!important;color:#6b7280!important}
+        #pb-command-palette .pb-cp__item--active .pb-cp__item-icon{background:#dbeafe!important;color:#1d4ed8!important}
+        #pb-command-palette .pb-cp__item-label{flex:1!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+        #pb-command-palette .pb-cp__item-badge{font-size:10px!important;padding:2px 8px!important;border-radius:9999px!important;background:#f3f4f6!important;color:#6b7280!important;font-weight:600!important;font-family:ui-monospace,monospace!important;flex-shrink:0!important;white-space:nowrap!important;letter-spacing:.02em!important}
+        #pb-command-palette .pb-cp__item--active .pb-cp__item-badge{background:#dbeafe!important;color:#3b82f6!important}
+        #pb-command-palette .pb-cp__empty{padding:32px 16px!important;text-align:center!important;color:#9ca3af!important;font-size:13px!important;display:block!important}
+        #pb-command-palette .pb-cp__footer{border-top:1px solid #f3f4f6!important;padding:8px 16px!important;display:flex!important;gap:16px!important;font-size:11px!important;color:#9ca3af!important;flex-shrink:0!important}
+        #pb-command-palette .pb-cp__footer kbd{display:inline-block!important;background:#f3f4f6!important;border:1px solid #e5e7eb!important;border-radius:4px!important;padding:1px 5px!important;font-size:10px!important;color:#6b7280!important;font-family:inherit!important}
+      `;
+
       panel.append(searchWrap, list, footer);
-      backdrop.appendChild(panel);
+      backdrop.append(style, panel);
       document.body.appendChild(backdrop);
       this.backdropEl = backdrop;
     }
@@ -10654,7 +10681,17 @@
         this.listEl.appendChild(empty);
         return;
       }
+      const CATEGORY_LABELS = { admin: 'ADMIN', dev: 'DEV', filter: 'FILTER' };
+      let lastCategory = null;
       this.filtered.forEach((cmd, i) => {
+        if (cmd.category && cmd.category !== lastCategory) {
+          const grp = document.createElement('div');
+          grp.className = 'pb-cp__group-label';
+          grp.textContent = CATEGORY_LABELS[cmd.category] || cmd.category.toUpperCase();
+          this.listEl.appendChild(grp);
+          lastCategory = cmd.category;
+        }
+
         const item = document.createElement('div');
         item.className = 'pb-cp__item' + (i === this.activeIndex ? ' pb-cp__item--active' : '');
 
@@ -10683,8 +10720,7 @@
         });
         this.listEl.appendChild(item);
       });
-      // scroll active item into view
-      const activeEl = this.listEl.children[this.activeIndex];
+      const activeEl = this.listEl.querySelector('.pb-cp__item--active');
       if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
     }
 
