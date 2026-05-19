@@ -567,15 +567,39 @@
       return `${y}-${m}-${dd}`;
     };
     const shift = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
-    if (s === '/today' || s === 'today') return ymd(today);
-    if (s === '/yesterday' || s === 'yesterday') return ymd(shift(today, -1));
-    if (s === '/tomorrow' || s === 'tomorrow') return ymd(shift(today, 1));
-    if (s === '/bom') return ymd(new Date(today.getFullYear(), today.getMonth(), 1));
-    if (s === '/eom') return ymd(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+
+    // today / yesterday / tomorrow
+    if (s === 't' || s === 'today') return ymd(today);
+    if (s === 'yesterday') return ymd(shift(today, -1));
+    if (s === 'tomorrow') return ymd(shift(today, 1));
+
+    // relative days: +N / -N
     const plusMatch = s.match(/^\+(\d+)$/);
     if (plusMatch) return ymd(shift(today, Number(plusMatch[1])));
     const minusMatch = s.match(/^-(\d+)$/);
     if (minusMatch) return ymd(shift(today, -Number(minusMatch[1])));
+
+    // end of month: end / end+N / end-N  (N = months offset)
+    const endMatch = s.match(/^end([+-]\d+)?$/);
+    if (endMatch) {
+      const mo = endMatch[1] ? Number(endMatch[1]) : 0;
+      return ymd(new Date(today.getFullYear(), today.getMonth() + mo + 1, 0));
+    }
+
+    // first of month: first / first+N / first-N  (N = months offset)
+    const firstMatch = s.match(/^first([+-]\d+)?$/);
+    if (firstMatch) {
+      const mo = firstMatch[1] ? Number(firstMatch[1]) : 0;
+      return ymd(new Date(today.getFullYear(), today.getMonth() + mo, 1));
+    }
+
+    // weekdays: next occurrence including today
+    const WEEKDAYS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+    if (Object.prototype.hasOwnProperty.call(WEEKDAYS, s)) {
+      const diff = (WEEKDAYS[s] - today.getDay() + 7) % 7;
+      return ymd(shift(today, diff));
+    }
+
     return null;
   }
 
@@ -5735,7 +5759,7 @@
       if (field.type === 'LINK') input.inputMode = 'url';
       if (field.type === 'DATE') {
         input.type = 'text';
-        input.placeholder = 'YYYY-MM-DD / /today / +7';
+        input.placeholder = 't / +3 / -1 / end / end+1 / first / mon';
       } else {
         input.type = 'text';
       }
