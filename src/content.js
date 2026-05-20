@@ -605,6 +605,58 @@
     return null;
   }
 
+  // YYYY-MM-DD HH:mm 表示用（UTC ISO → ローカル時刻）
+  function utcToLocalDisplay(utcStr) {
+    if (!utcStr) return '';
+    const d = new Date(utcStr);
+    if (isNaN(d.getTime())) return String(utcStr);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  // "YYYY-MM-DD HH:mm" 等のローカル入力 → UTC ISO（null = 解釈不能）
+  function smartDateTimeToUtc(raw) {
+    const s = String(raw || '').trim().toLowerCase();
+    if (!s) return null;
+
+    const now = new Date();
+    const toIso = (d) => isNaN(d.getTime()) ? null : d.toISOString();
+    const shift = (d, ms) => new Date(d.getTime() + ms);
+
+    if (s === 'now') return toIso(now);
+    if (s === 't' || s === 'today') {
+      return toIso(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0));
+    }
+
+    // +Nd / -Nd (days)
+    const dayMatch = s.match(/^([+-])(\d+)d?$/);
+    if (dayMatch) {
+      const n = (dayMatch[1] === '+' ? 1 : -1) * Number(dayMatch[2]);
+      return toIso(shift(now, n * 86400000));
+    }
+
+    // +Nh / -Nh (hours)
+    const hourMatch = s.match(/^([+-])(\d+)h$/);
+    if (hourMatch) {
+      const n = (hourMatch[1] === '+' ? 1 : -1) * Number(hourMatch[2]);
+      return toIso(shift(now, n * 3600000));
+    }
+
+    // +Nm / -Nm (minutes)
+    const minMatch = s.match(/^([+-])(\d+)m$/);
+    if (minMatch) {
+      const n = (minMatch[1] === '+' ? 1 : -1) * Number(minMatch[2]);
+      return toIso(shift(now, n * 60000));
+    }
+
+    // "YYYY-MM-DD HH:mm" or "YYYY-MM-DDTHH:mm"
+    const norm = s.replace('t', ' ').replace(/\s+/, ' ').trim();
+    const explicit = new Date(norm.includes('t') ? norm : norm.replace(' ', 'T'));
+    if (!isNaN(explicit.getTime())) return toIso(explicit);
+
+    return null;
+  }
+
   window.addEventListener('message', (ev) => {
     if (ev.origin !== location.origin) return;
     const data = ev.data || {};
@@ -4413,7 +4465,7 @@
       if (this.isChoiceField(field)) return editable ? 'inline-choice-single' : 'readonly';
       if (this.isFileField(field)) return editable ? 'file-drop' : 'readonly';
       if (this.isLinkField(field) || this.isCalcField(field) || this.isUserSelectField(field)) return editable ? 'inline-edit' : 'readonly';
-      if (String(field?.type || '').toUpperCase() === 'NUMBER' || String(field?.type || '').toUpperCase() === 'DATE' || String(field?.type || '').toUpperCase() === 'SINGLE_LINE_TEXT') {
+      if (['NUMBER', 'DATE', 'DATETIME', 'SINGLE_LINE_TEXT'].includes(String(field?.type || '').toUpperCase())) {
         return editable ? 'inline-edit' : 'readonly';
       }
       return 'readonly';
@@ -4702,6 +4754,9 @@
       if (this.isMultiLineField(field)) {
         return this.formatMultiLinePreview(value);
       }
+      if (String(field?.type || '').toUpperCase() === 'DATETIME') {
+        return utcToLocalDisplay(value);
+      }
       return value === undefined || value === null ? '' : String(value);
     }
 
@@ -4763,6 +4818,7 @@
       const t = String(type || '').toUpperCase();
       if (t === 'NUMBER' || t === 'CALC') return { min: 100, max: 140, base: 112 };
       if (t === 'DATE') return { min: 120, max: 140, base: 128 };
+      if (t === 'DATETIME') return { min: 148, max: 180, base: 155 };
       if (t === 'DROP_DOWN' || t === 'RADIO_BUTTON') return { min: 160, max: 200, base: 176 };
       if (t === 'CHECK_BOX' || t === 'MULTI_SELECT') return { min: 180, max: 240, base: 200 };
       if (t === 'MULTI_LINE_TEXT' || t === 'RICH_TEXT') return { min: 220, max: 280, base: 240 };
@@ -5798,6 +5854,38 @@
               }
             });
             cell.appendChild(pickerLabel);
+          } else if (field.type === 'DATETIME') {
+            const pickerLabel = document.createElement('label');
+            pickerLabel.className = 'pb-overlay__date-pick-btn';
+            pickerLabel.textContent = '▾';
+            const nativePicker = document.createElement('input');
+            nativePicker.type = 'datetime-local';
+            nativePicker.className = 'pb-overlay__date-pick-native';
+            nativePicker.tabIndex = -1;
+            pickerLabel.appendChild(nativePicker);
+            pickerLabel.addEventListener('mousedown', (e) => {
+              e.stopPropagation();
+              // "YYYY-MM-DD HH:mm" → "YYYY-MM-DDTHH:mm" for datetime-local
+              nativePicker.value = input.value ? input.value.replace(' ', 'T') : '';
+              if (input.readOnly) {
+                e.preventDefault();
+                const ri = Number(input.dataset.rowIndex || '0');
+                const ci = Number(input.dataset.colIndex || '0');
+                this.enterEditMode(ri, ci, input, false);
+                requestAnimationFrame(() => {
+                  if (nativePicker.showPicker) nativePicker.showPicker();
+                });
+              }
+            });
+            nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+            nativePicker.addEventListener('change', () => {
+              if (nativePicker.value) {
+                // "YYYY-MM-DDTHH:mm" → "YYYY-MM-DD HH:mm" for text input display
+                input.value = nativePicker.value.replace('T', ' ');
+                this.onInputChanged(input);
+              }
+            });
+            cell.appendChild(pickerLabel);
           }
           this.applyCellVisualState(input, row, field.code);
           rowLine.appendChild(cell);
@@ -5823,6 +5911,9 @@
       if (field.type === 'DATE') {
         input.type = 'text';
         input.placeholder = 't · +3 · end · end+1 · first · mon · mon+1';
+      } else if (field.type === 'DATETIME') {
+        input.type = 'text';
+        input.placeholder = 'now · t · +1d · +2h · +30m';
       } else {
         input.type = 'text';
       }
@@ -6194,7 +6285,7 @@
         });
         this.setInputEditingVisual(input, editing);
         const field = this.fields[colIndex];
-        const shouldSelectAll = field?.type === 'DATE' || (editing && this.editingCell && this.editingCell.selectAll);
+        const shouldSelectAll = field?.type === 'DATE' || field?.type === 'DATETIME' || (editing && this.editingCell && this.editingCell.selectAll);
         this.applyCaretPlacement(input, shouldSelectAll);
       });
     }
@@ -6901,6 +6992,36 @@
           inputWrap.appendChild(pickerLabel);
           controlWrap.appendChild(inputWrap);
           getValue = () => { const smart = smartDateToYMD(input.value); return smart || input.value || ''; };
+        } else if (type === 'DATETIME') {
+          const inputWrap = document.createElement('div');
+          inputWrap.className = 'pb-newrec__date-wrap';
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'pb-newrec__input';
+          input.placeholder = 'now · t · +1d · +2h · +30m';
+          input.addEventListener('focus', () => { if (input.value) input.select(); });
+          input.addEventListener('keydown', (e) => {
+            if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+              const utc = smartDateTimeToUtc(input.value);
+              if (utc) input.value = utcToLocalDisplay(utc);
+              if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
+            }
+          });
+          const pickerLabel = document.createElement('label');
+          pickerLabel.className = 'pb-newrec__date-btn';
+          pickerLabel.textContent = '▾';
+          const nativePicker = document.createElement('input');
+          nativePicker.type = 'datetime-local';
+          nativePicker.className = 'pb-overlay__date-pick-native';
+          nativePicker.tabIndex = -1;
+          pickerLabel.appendChild(nativePicker);
+          pickerLabel.addEventListener('mousedown', (e) => { e.stopPropagation(); nativePicker.value = input.value ? input.value.replace(' ', 'T') : ''; });
+          nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+          nativePicker.addEventListener('change', () => { if (nativePicker.value) input.value = nativePicker.value.replace('T', ' '); });
+          inputWrap.appendChild(input);
+          inputWrap.appendChild(pickerLabel);
+          controlWrap.appendChild(inputWrap);
+          getValue = () => { const utc = smartDateTimeToUtc(input.value); return utc || input.value || ''; };
         } else {
           const input = document.createElement('input');
           input.type = 'text';
@@ -8367,7 +8488,7 @@
         this.openMultiChoicePicker(r, c, targetInput);
         return;
       }
-      this.editingCell = this.createEditingState(r, c, !!selectAll || field?.type === 'DATE');
+      this.editingCell = this.createEditingState(r, c, !!selectAll || field?.type === 'DATE' || field?.type === 'DATETIME');
       if (targetInput) {
         this.setInputEditingVisual(targetInput, true);
         requestAnimationFrame(() => {
@@ -8686,6 +8807,12 @@
         const re = /^\d{4}-\d{2}-\d{2}$/;
         if (!re.test(trimmed)) return { ok: false, error: 'Invalid date' };
         return { ok: true, value: trimmed };
+      }
+      if (type === 'DATETIME') {
+        if (!trimmed) return { ok: true, value: '' };
+        const utc = smartDateTimeToUtc(trimmed);
+        if (utc) return { ok: true, value: utc };
+        return { ok: false, error: 'Invalid datetime' };
       }
       if (type === 'RADIO_BUTTON' || type === 'DROP_DOWN') {
         if (!trimmed) return { ok: true, value: '' };
@@ -11483,6 +11610,36 @@
             wrap.appendChild(pickerLabel);
             controlWrap.appendChild(wrap);
             getValue = () => { const smart = smartDateToYMD(input.value); return smart || input.value || ''; };
+          } else if (type === 'DATETIME') {
+            const wrap = document.createElement('div');
+            wrap.className = 'pb-newrec__date-wrap';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'pb-newrec__input';
+            input.placeholder = 'now · t · +1d · +2h · +30m';
+            input.addEventListener('focus', () => { if (input.value) input.select(); });
+            input.addEventListener('keydown', (e) => {
+              if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+                const utc = smartDateTimeToUtc(input.value);
+                if (utc) input.value = utcToLocalDisplay(utc);
+                if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
+              }
+            });
+            const pickerLabel = document.createElement('label');
+            pickerLabel.className = 'pb-newrec__date-btn';
+            pickerLabel.textContent = '▾';
+            const nativePicker = document.createElement('input');
+            nativePicker.type = 'datetime-local';
+            nativePicker.className = 'pb-overlay__date-pick-native';
+            nativePicker.tabIndex = -1;
+            pickerLabel.appendChild(nativePicker);
+            pickerLabel.addEventListener('mousedown', (e) => { e.stopPropagation(); nativePicker.value = input.value ? input.value.replace(' ', 'T') : ''; });
+            nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+            nativePicker.addEventListener('change', () => { if (nativePicker.value) input.value = nativePicker.value.replace('T', ' '); });
+            wrap.appendChild(input);
+            wrap.appendChild(pickerLabel);
+            controlWrap.appendChild(wrap);
+            getValue = () => { const utc = smartDateTimeToUtc(input.value); return utc || input.value || ''; };
           } else {
             const input = document.createElement('input');
             input.type = 'text';
@@ -11514,7 +11671,7 @@
       panel.appendChild(foot);
 
       requestAnimationFrame(() => {
-        const first = panel.querySelector('input:not([type="date"]), textarea, select:not(.pb-newrec__preset-select)');
+        const first = panel.querySelector('input:not([type="date"]):not([type="datetime-local"]), textarea, select:not(.pb-newrec__preset-select)');
         if (first) first.focus();
       });
     }
