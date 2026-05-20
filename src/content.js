@@ -1362,7 +1362,15 @@
       toastLayoutPresetRenamed: "レイアウト名を変更しました",
       toastLayoutPresetDuplicated: "レイアウトを複製しました",
       errorUnsupportedFilter: "この一覧には一時的なフィルター/ソートが含まれているため、Excelモードを起動できません。ビューを標準状態に戻してから再試行してください。",
-      overlayUnsupportedPage: "この画面では Excel Overlay を利用できません。一覧/詳細画面で利用できます。"
+      overlayUnsupportedPage: "この画面では Excel Overlay を利用できません。一覧/詳細画面で利用できます。",
+      btnNewRecord: "＋ 新規",
+      newRecordTitle: "新規レコード作成",
+      newRecordSave: "保存",
+      newRecordCancel: "キャンセル",
+      newRecordSaving: "保存中...",
+      toastNewRecordSaved: "レコードを作成しました",
+      toastNewRecordFailed: "レコードの作成に失敗しました",
+      newRecordRequiredMissing: "必須項目を入力してください"
     },
     en: {
       title: "Excel mode",
@@ -1489,7 +1497,15 @@
       toastLayoutPresetRenamed: "Layout renamed",
       toastLayoutPresetDuplicated: "Layout duplicated",
       errorUnsupportedFilter: "This list has ad-hoc filters/sorting that cannot be replayed in Excel mode. Clear the filter and try again.",
-      overlayUnsupportedPage: "Excel Overlay is only available on list/detail pages."
+      overlayUnsupportedPage: "Excel Overlay is only available on list/detail pages.",
+      btnNewRecord: "+ New",
+      newRecordTitle: "Create New Record",
+      newRecordSave: "Save",
+      newRecordCancel: "Cancel",
+      newRecordSaving: "Saving...",
+      toastNewRecordSaved: "Record created",
+      toastNewRecordFailed: "Failed to create record",
+      newRecordRequiredMissing: "Please fill in all required fields"
     }
   };
 
@@ -1680,6 +1696,8 @@
       this.redoButton = null;
       this.closeButton = null;
       this.addRowButton = null;
+      this.newRecordButton = null;
+      this.newRecordModal = null;
       this.titleElement = null;
       this.layoutToggleWrap = null;
       this.gridLayoutButton = null;
@@ -2119,6 +2137,14 @@
       this.saveButtonSpinner = saveSpinner;
       this.saveButtonLabel = saveLabel;
 
+      const newRecordBtn = document.createElement('button');
+      newRecordBtn.type = 'button';
+      newRecordBtn.className = 'pb-overlay__btn pb-overlay__btn--new-record';
+      newRecordBtn.textContent = resolveText(this.language, 'btnNewRecord');
+      newRecordBtn.title = resolveText(this.language, 'newRecordTitle');
+      newRecordBtn.addEventListener('click', () => this.openNewRecordModal());
+      this.newRecordButton = newRecordBtn;
+
       const addRowBtn = document.createElement('button');
       addRowBtn.type = 'button';
       addRowBtn.className = 'pb-overlay__btn';
@@ -2160,6 +2186,7 @@
       secondaryActions.className = 'pb-overlay__toolbar-secondary';
       secondaryActions.appendChild(columnsBtn);
       secondaryActions.appendChild(dirty);
+      secondaryActions.appendChild(newRecordBtn);
       secondaryActions.appendChild(addRowBtn);
       secondaryActions.appendChild(undoBtn);
       secondaryActions.appendChild(redoBtn);
@@ -4619,6 +4646,13 @@
           ? ''
           : blockedReason;
       }
+      if (this.newRecordButton) {
+        const allowed = canEdit && this.permissionService.canAddRow();
+        this.newRecordButton.disabled = this.saving || !allowed;
+        this.newRecordButton.title = allowed
+          ? resolveText(this.language, 'newRecordTitle')
+          : resolveText(this.language, canEdit ? 'permNoAdd' : 'toastViewOnlyBlocked');
+      }
       if (this.saveButton && !this.saving) {
         let dirtyCount = 0;
         this.diff.forEach((entry) => {
@@ -6671,6 +6705,255 @@
         || normalized === 'GROUP_SELECT'
       ) return [];
       return '';
+    }
+
+    closeNewRecordModal() {
+      if (this.newRecordModal) {
+        this.newRecordModal.remove();
+        this.newRecordModal = null;
+      }
+    }
+
+    openNewRecordModal() {
+      if (!this.root || !this.isOverlayEditable() || !this.permissionService.canAddRow()) return;
+      this.closeNewRecordModal();
+
+      const NON_EDITABLE_TYPES = new Set([
+        'RECORD_NUMBER', 'CREATED_TIME', 'UPDATED_TIME', 'CREATOR', 'MODIFIER',
+        'STATUS', 'STATUS_ASSIGNEE', 'CALC', 'REFERENCE_TABLE', 'RICH_TEXT',
+        'SUBTABLE', 'LOOKUP', 'FILE'
+      ]);
+      const formFields = this.fields.filter((f) => {
+        if (!f || !f.type) return false;
+        if (NON_EDITABLE_TYPES.has(String(f.type).toUpperCase())) return false;
+        if (f.lookup || f.lookupAuto) return false;
+        return true;
+      });
+
+      const layer = document.createElement('div');
+      layer.className = 'pb-newrec__layer';
+      layer.addEventListener('mousedown', (e) => {
+        if (e.target === layer) this.closeNewRecordModal();
+      });
+
+      const panel = document.createElement('div');
+      panel.className = 'pb-newrec__panel';
+      panel.addEventListener('click', (e) => e.stopPropagation());
+
+      const head = document.createElement('div');
+      head.className = 'pb-newrec__head';
+      const title = document.createElement('div');
+      title.className = 'pb-newrec__title';
+      title.textContent = resolveText(this.language, 'newRecordTitle');
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'pb-newrec__close';
+      closeBtn.textContent = '×';
+      closeBtn.setAttribute('aria-label', resolveText(this.language, 'newRecordCancel'));
+      closeBtn.addEventListener('click', () => this.closeNewRecordModal());
+      head.appendChild(title);
+      head.appendChild(closeBtn);
+
+      const body = document.createElement('div');
+      body.className = 'pb-newrec__body';
+
+      const fieldInputMap = new Map();
+
+      formFields.forEach((field) => {
+        const row = document.createElement('div');
+        row.className = 'pb-newrec__field-row';
+
+        const labelEl = document.createElement('label');
+        labelEl.className = 'pb-newrec__label';
+        const labelText = document.createElement('span');
+        labelText.textContent = field.label || field.code;
+        if (field.required) {
+          const req = document.createElement('span');
+          req.className = 'pb-newrec__required';
+          req.textContent = ' *';
+          labelText.appendChild(req);
+        }
+        labelEl.appendChild(labelText);
+
+        const controlWrap = document.createElement('div');
+        controlWrap.className = 'pb-newrec__control';
+
+        const type = String(field.type || '').toUpperCase();
+        let getValue;
+
+        if (type === 'MULTI_LINE_TEXT') {
+          const ta = document.createElement('textarea');
+          ta.className = 'pb-newrec__textarea';
+          ta.rows = 3;
+          controlWrap.appendChild(ta);
+          getValue = () => ta.value;
+        } else if (type === 'DROP_DOWN' || type === 'RADIO_BUTTON') {
+          const select = document.createElement('select');
+          select.className = 'pb-newrec__select';
+          const emptyOpt = document.createElement('option');
+          emptyOpt.value = '';
+          emptyOpt.textContent = '';
+          select.appendChild(emptyOpt);
+          (Array.isArray(field.choices) ? field.choices : []).forEach((c) => {
+            const opt = document.createElement('option');
+            opt.value = String(c || '');
+            opt.textContent = String(c || '');
+            select.appendChild(opt);
+          });
+          controlWrap.appendChild(select);
+          getValue = () => select.value;
+        } else if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
+          const checkWrap = document.createElement('div');
+          checkWrap.className = 'pb-newrec__checkgroup';
+          const checkboxes = [];
+          (Array.isArray(field.choices) ? field.choices : []).forEach((c) => {
+            const item = document.createElement('label');
+            item.className = 'pb-newrec__check-item';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.value = String(c || '');
+            checkboxes.push(cb);
+            item.appendChild(cb);
+            item.appendChild(document.createTextNode(String(c || '')));
+            checkWrap.appendChild(item);
+          });
+          controlWrap.appendChild(checkWrap);
+          getValue = () => checkboxes.filter((cb) => cb.checked).map((cb) => cb.value);
+        } else if (type === 'DATE') {
+          const inputWrap = document.createElement('div');
+          inputWrap.className = 'pb-newrec__date-wrap';
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'pb-newrec__input';
+          input.placeholder = 't · +3 · end · end+1 · first · mon';
+          input.addEventListener('focus', () => { if (input.value) input.select(); });
+          input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === 'Tab') {
+              const smart = smartDateToYMD(input.value);
+              if (smart) input.value = smart;
+            }
+          });
+          const pickerLabel = document.createElement('label');
+          pickerLabel.className = 'pb-newrec__date-btn';
+          pickerLabel.textContent = '▾';
+          const nativePicker = document.createElement('input');
+          nativePicker.type = 'date';
+          nativePicker.className = 'pb-overlay__date-pick-native';
+          nativePicker.tabIndex = -1;
+          pickerLabel.appendChild(nativePicker);
+          pickerLabel.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            nativePicker.value = input.value || '';
+          });
+          nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+          nativePicker.addEventListener('change', () => {
+            if (nativePicker.value) input.value = nativePicker.value;
+          });
+          inputWrap.appendChild(input);
+          inputWrap.appendChild(pickerLabel);
+          controlWrap.appendChild(inputWrap);
+          getValue = () => {
+            const smart = smartDateToYMD(input.value);
+            return smart || input.value || '';
+          };
+        } else {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'pb-newrec__input';
+          if (type === 'NUMBER') input.inputMode = 'decimal';
+          if (type === 'LINK') input.inputMode = 'url';
+          controlWrap.appendChild(input);
+          getValue = () => input.value;
+        }
+
+        fieldInputMap.set(field.code, { field, getValue });
+        labelEl.htmlFor = '';
+        row.appendChild(labelEl);
+        row.appendChild(controlWrap);
+        body.appendChild(row);
+      });
+
+      const foot = document.createElement('div');
+      foot.className = 'pb-newrec__foot';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'pb-overlay__btn';
+      cancelBtn.textContent = resolveText(this.language, 'newRecordCancel');
+      cancelBtn.addEventListener('click', () => this.closeNewRecordModal());
+
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
+      saveBtn.textContent = resolveText(this.language, 'newRecordSave');
+      saveBtn.addEventListener('click', () => this.submitNewRecord(fieldInputMap, saveBtn, cancelBtn));
+
+      foot.appendChild(cancelBtn);
+      foot.appendChild(saveBtn);
+
+      panel.appendChild(head);
+      panel.appendChild(body);
+      panel.appendChild(foot);
+      layer.appendChild(panel);
+      this.root.appendChild(layer);
+      this.newRecordModal = layer;
+
+      // focus first editable input
+      requestAnimationFrame(() => {
+        const first = panel.querySelector('input:not([type="date"]), textarea, select');
+        if (first) first.focus();
+      });
+    }
+
+    async submitNewRecord(fieldInputMap, saveBtn, cancelBtn) {
+      if (!this.appId) return;
+      const record = {};
+      let hasRequiredMissing = false;
+
+      fieldInputMap.forEach(({ field, getValue }) => {
+        const raw = getValue();
+        const type = String(field.type || '').toUpperCase();
+        let value;
+        if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
+          value = Array.isArray(raw) ? raw : [];
+        } else {
+          value = String(raw ?? '');
+        }
+        if (field.required) {
+          const isEmpty = Array.isArray(value) ? value.length === 0 : value === '';
+          if (isEmpty) hasRequiredMissing = true;
+        }
+        record[field.code] = { value };
+      });
+
+      if (hasRequiredMissing) {
+        this.notify(resolveText(this.language, 'newRecordRequiredMissing'));
+        return;
+      }
+
+      saveBtn.disabled = true;
+      cancelBtn.disabled = true;
+      saveBtn.textContent = resolveText(this.language, 'newRecordSaving');
+
+      try {
+        const response = await this.postFn('EXCEL_POST_RECORDS', {
+          appId: this.appId,
+          records: [record],
+          __pbTrigger: 'new_record_modal'
+        });
+        if (!response?.ok) {
+          throw new Error(response?.error || 'create failed');
+        }
+        this.closeNewRecordModal();
+        this.notify(resolveText(this.language, 'toastNewRecordSaved'));
+        await this.reloadPage();
+      } catch (err) {
+        console.error('[kintone-excel-overlay] new record create failed', err);
+        this.notify(resolveText(this.language, 'toastNewRecordFailed'));
+        saveBtn.disabled = false;
+        cancelBtn.disabled = false;
+        saveBtn.textContent = resolveText(this.language, 'newRecordSave');
+      }
     }
 
     async openSubtableEditor(rowIndex, colIndex, anchorInput = null) {
@@ -9966,6 +10249,8 @@
       this.saveButtonSpinner = null;
       this.saveButtonLabel = null;
       this.addRowButton = null;
+      this.newRecordButton = null;
+      this.newRecordModal = null;
       this.undoButton = null;
       this.redoButton = null;
       this.layoutToggleWrap = null;
