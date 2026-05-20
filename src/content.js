@@ -1370,7 +1370,10 @@
       newRecordSaving: "保存中...",
       toastNewRecordSaved: "レコードを作成しました",
       toastNewRecordFailed: "レコードの作成に失敗しました",
-      newRecordRequiredMissing: "必須項目を入力してください"
+      newRecordRequiredMissing: "必須項目を入力してください",
+      quickNewPresetLabel: "レイアウト",
+      quickNewNoFields: "表示するフィールドがありません",
+      quickNewLoading: "読み込み中..."
     },
     en: {
       title: "Excel mode",
@@ -1505,7 +1508,10 @@
       newRecordSaving: "Saving...",
       toastNewRecordSaved: "Record created",
       toastNewRecordFailed: "Failed to create record",
-      newRecordRequiredMissing: "Please fill in all required fields"
+      newRecordRequiredMissing: "Please fill in all required fields",
+      quickNewPresetLabel: "Layout",
+      quickNewNoFields: "No fields to display",
+      quickNewLoading: "Loading..."
     }
   };
 
@@ -1557,6 +1563,17 @@
   const MAX_COLUMN_WIDTH = 320;
 
   let overlayCssLoaded = false;
+
+  function ensureOverlayCss() {
+    if (overlayCssLoaded) return;
+    overlayCssLoaded = true;
+    const href = chrome.runtime.getURL('overlay.css');
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    link.dataset.pbOverlay = 'true';
+    document.head.appendChild(link);
+  }
 
   function normalizeUiLanguage(raw) {
     const value = String(raw || '').trim().toLowerCase();
@@ -1930,14 +1947,7 @@
     }
 
     async ensureStyles() {
-      if (overlayCssLoaded) return;
-      overlayCssLoaded = true;
-      const href = chrome.runtime.getURL('overlay.css');
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = href;
-      link.dataset.pbOverlay = 'true';
-      document.head.appendChild(link);
+      ensureOverlayCss();
     }
 
     mountShell() {
@@ -11004,6 +11014,372 @@
   }, true);
 
   // ── End Command Palette ──────────────────────────────────────────────────
+
+  // ── Quick New Record Modal ───────────────────────────────────────────────
+
+  const NON_EDITABLE_QNR_TYPES = new Set([
+    'RECORD_NUMBER', 'CREATED_TIME', 'UPDATED_TIME', 'CREATOR', 'MODIFIER',
+    'STATUS', 'STATUS_ASSIGNEE', 'CALC', 'REFERENCE_TABLE', 'RICH_TEXT',
+    'SUBTABLE', 'LOOKUP', 'FILE'
+  ]);
+
+  class QuickNewRecordModal {
+    constructor(postFn) {
+      this.postFn = postFn;
+      this.el = null;
+    }
+
+    isVisible() { return Boolean(this.el); }
+
+    close() {
+      if (this.el) { this.el.remove(); this.el = null; }
+    }
+
+    async open() {
+      if (this.el) { this.close(); return; }
+      const listCtx = parseListOverlayContext(location.href);
+      if (!listCtx?.appId) return;
+      const appId = listCtx.appId;
+      const listUrl = listCtx.href;
+
+      ensureOverlayCss();
+      const { language } = await resolveOverlayUiLanguage();
+      const t = (key) => resolveText(language, key);
+
+      // Loading backdrop
+      const layer = this._buildLayer();
+      const panel = document.createElement('div');
+      panel.className = 'pb-newrec__panel';
+      const loadingEl = document.createElement('div');
+      loadingEl.className = 'pb-newrec__body';
+      loadingEl.style.alignItems = 'center';
+      loadingEl.style.justifyContent = 'center';
+      loadingEl.style.minHeight = '80px';
+      loadingEl.textContent = t('quickNewLoading');
+      panel.appendChild(loadingEl);
+      layer.appendChild(panel);
+      document.body.appendChild(layer);
+      this.el = layer;
+
+      try {
+        // Load fields
+        const fieldsRes = await this.postFn('EXCEL_GET_FIELDS_META', { appId });
+        const allFieldsMeta = (fieldsRes?.ok && Array.isArray(fieldsRes.fieldsMeta))
+          ? fieldsRes.fieldsMeta
+          : [];
+        const allFieldsMap = new Map(allFieldsMeta.map((f) => [f.code, f]));
+
+        // Load layout presets
+        const appKey = `${String(location.origin || '').trim()}::${appId}`;
+        let presets = [];
+        let activePresetId = '';
+        try {
+          const stored = await chrome.storage.local.get(OVERLAY_LAYOUT_PRESETS_KEY);
+          const presetsMap = stored?.[OVERLAY_LAYOUT_PRESETS_KEY];
+          const state = presetsMap && typeof presetsMap === 'object' ? presetsMap[appKey] : null;
+          presets = Array.isArray(state?.presets) ? state.presets : [];
+          activePresetId = String(state?.activePresetId || '').trim();
+        } catch (_err) { /* use defaults */ }
+
+        if (!presets.length) {
+          // fallback: show all editable fields
+          const fallback = allFieldsMeta.filter((f) => !NON_EDITABLE_QNR_TYPES.has(String(f.type || '').toUpperCase()) && !f.lookup && !f.lookupAuto);
+          presets = [{ id: 'default', name: t('layoutPresetDefault'), columnOrder: fallback.map((f) => f.code), visibleColumns: fallback.map((f) => f.code) }];
+          activePresetId = 'default';
+        }
+
+        // Rebuild panel
+        panel.innerHTML = '';
+        this._buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl);
+      } catch (err) {
+        console.error('[kintone-excel-overlay] quick new record load failed', err);
+        this.close();
+      }
+    }
+
+    _buildLayer() {
+      const layer = document.createElement('div');
+      layer.className = 'pb-newrec__layer pb-newrec__layer--standalone';
+      layer.addEventListener('mousedown', (e) => { if (e.target === layer) this.close(); });
+      return layer;
+    }
+
+    _getFieldsForPreset(preset, allFieldsMap) {
+      const visible = new Set(Array.isArray(preset.visibleColumns) ? preset.visibleColumns : []);
+      const order = Array.isArray(preset.columnOrder) ? preset.columnOrder : [];
+      const codes = order.filter((c) => visible.size === 0 || visible.has(c));
+      return codes
+        .map((code) => allFieldsMap.get(code))
+        .filter((f) => {
+          if (!f) return false;
+          const type = String(f.type || '').toUpperCase();
+          if (NON_EDITABLE_QNR_TYPES.has(type)) return false;
+          if (f.lookup || f.lookupAuto) return false;
+          return true;
+        });
+    }
+
+    _buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl) {
+      const t = (key) => resolveText(language, key);
+
+      // Header
+      const head = document.createElement('div');
+      head.className = 'pb-newrec__head';
+      const title = document.createElement('div');
+      title.className = 'pb-newrec__title';
+      title.textContent = t('newRecordTitle');
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'pb-newrec__close';
+      closeBtn.textContent = '×';
+      closeBtn.setAttribute('aria-label', t('newRecordCancel'));
+      closeBtn.addEventListener('click', () => this.close());
+      head.appendChild(title);
+      head.appendChild(closeBtn);
+
+      // Preset selector
+      const presetRow = document.createElement('div');
+      presetRow.className = 'pb-newrec__preset-row';
+      const presetLabelEl = document.createElement('label');
+      presetLabelEl.className = 'pb-newrec__preset-label';
+      presetLabelEl.textContent = t('quickNewPresetLabel');
+      const presetSelect = document.createElement('select');
+      presetSelect.className = 'pb-newrec__select pb-newrec__preset-select';
+      presets.forEach((p) => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name || p.id;
+        opt.selected = p.id === activePresetId;
+        presetSelect.appendChild(opt);
+      });
+      presetRow.appendChild(presetLabelEl);
+      presetRow.appendChild(presetSelect);
+
+      // Body (form fields)
+      const body = document.createElement('div');
+      body.className = 'pb-newrec__body';
+
+      // Footer
+      const foot = document.createElement('div');
+      foot.className = 'pb-newrec__foot';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'pb-overlay__btn';
+      cancelBtn.textContent = t('newRecordCancel');
+      cancelBtn.addEventListener('click', () => this.close());
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
+      saveBtn.textContent = t('newRecordSave');
+      foot.appendChild(cancelBtn);
+      foot.appendChild(saveBtn);
+
+      let fieldInputMap = new Map();
+      const renderBody = (presetId) => {
+        body.innerHTML = '';
+        fieldInputMap = new Map();
+        const preset = presets.find((p) => p.id === presetId) || presets[0];
+        const fields = this._getFieldsForPreset(preset, allFieldsMap);
+        if (!fields.length) {
+          const empty = document.createElement('div');
+          empty.className = 'pb-newrec__empty';
+          empty.textContent = t('quickNewNoFields');
+          body.appendChild(empty);
+          return;
+        }
+        fields.forEach((field) => {
+          const row = document.createElement('div');
+          row.className = 'pb-newrec__field-row';
+          const labelEl = document.createElement('label');
+          labelEl.className = 'pb-newrec__label';
+          const labelText = document.createElement('span');
+          labelText.textContent = field.label || field.code;
+          if (field.required) {
+            const req = document.createElement('span');
+            req.className = 'pb-newrec__required';
+            req.textContent = ' *';
+            labelText.appendChild(req);
+          }
+          labelEl.appendChild(labelText);
+          const controlWrap = document.createElement('div');
+          controlWrap.className = 'pb-newrec__control';
+          const type = String(field.type || '').toUpperCase();
+          let getValue;
+
+          if (type === 'MULTI_LINE_TEXT') {
+            const ta = document.createElement('textarea');
+            ta.className = 'pb-newrec__textarea';
+            ta.rows = 3;
+            controlWrap.appendChild(ta);
+            getValue = () => ta.value;
+          } else if (type === 'DROP_DOWN' || type === 'RADIO_BUTTON') {
+            const sel = document.createElement('select');
+            sel.className = 'pb-newrec__select';
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = '';
+            sel.appendChild(empty);
+            (Array.isArray(field.choices) ? field.choices : []).forEach((c) => {
+              const opt = document.createElement('option');
+              opt.value = String(c || '');
+              opt.textContent = String(c || '');
+              sel.appendChild(opt);
+            });
+            controlWrap.appendChild(sel);
+            getValue = () => sel.value;
+          } else if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
+            const checkWrap = document.createElement('div');
+            checkWrap.className = 'pb-newrec__checkgroup';
+            const checkboxes = [];
+            (Array.isArray(field.choices) ? field.choices : []).forEach((c) => {
+              const item = document.createElement('label');
+              item.className = 'pb-newrec__check-item';
+              const cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.value = String(c || '');
+              checkboxes.push(cb);
+              item.appendChild(cb);
+              item.appendChild(document.createTextNode(String(c || '')));
+              checkWrap.appendChild(item);
+            });
+            controlWrap.appendChild(checkWrap);
+            getValue = () => checkboxes.filter((cb) => cb.checked).map((cb) => cb.value);
+          } else if (type === 'DATE') {
+            const wrap = document.createElement('div');
+            wrap.className = 'pb-newrec__date-wrap';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'pb-newrec__input';
+            input.placeholder = 't · +3 · end · end+1 · first · mon';
+            input.addEventListener('focus', () => { if (input.value) input.select(); });
+            input.addEventListener('keydown', (e) => {
+              if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+                const smart = smartDateToYMD(input.value);
+                if (smart) input.value = smart;
+                if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
+              }
+            });
+            const pickerLabel = document.createElement('label');
+            pickerLabel.className = 'pb-newrec__date-btn';
+            pickerLabel.textContent = '▾';
+            const nativePicker = document.createElement('input');
+            nativePicker.type = 'date';
+            nativePicker.className = 'pb-overlay__date-pick-native';
+            nativePicker.tabIndex = -1;
+            pickerLabel.appendChild(nativePicker);
+            pickerLabel.addEventListener('mousedown', (e) => { e.stopPropagation(); nativePicker.value = input.value || ''; });
+            nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+            nativePicker.addEventListener('change', () => { if (nativePicker.value) input.value = nativePicker.value; });
+            wrap.appendChild(input);
+            wrap.appendChild(pickerLabel);
+            controlWrap.appendChild(wrap);
+            getValue = () => { const smart = smartDateToYMD(input.value); return smart || input.value || ''; };
+          } else {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'pb-newrec__input';
+            if (type === 'NUMBER') input.inputMode = 'decimal';
+            if (type === 'LINK') input.inputMode = 'url';
+            controlWrap.appendChild(input);
+            getValue = () => input.value;
+          }
+
+          fieldInputMap.set(field.code, { field, getValue });
+          row.appendChild(labelEl);
+          row.appendChild(controlWrap);
+          body.appendChild(row);
+        });
+      };
+
+      renderBody(activePresetId || (presets[0]?.id || ''));
+
+      presetSelect.addEventListener('change', () => renderBody(presetSelect.value));
+
+      saveBtn.addEventListener('click', () => {
+        void this._submit(appId, language, fieldInputMap, saveBtn, cancelBtn, listUrl);
+      });
+
+      panel.appendChild(head);
+      panel.appendChild(presetRow);
+      panel.appendChild(body);
+      panel.appendChild(foot);
+
+      requestAnimationFrame(() => {
+        const first = panel.querySelector('input:not([type="date"]), textarea, select:not(.pb-newrec__preset-select)');
+        if (first) first.focus();
+      });
+    }
+
+    async _submit(appId, language, fieldInputMap, saveBtn, cancelBtn, listUrl) {
+      const t = (key) => resolveText(language, key);
+      const record = {};
+      let hasRequiredMissing = false;
+
+      fieldInputMap.forEach(({ field, getValue }) => {
+        const raw = getValue();
+        const type = String(field.type || '').toUpperCase();
+        let value;
+        if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
+          value = Array.isArray(raw) ? raw : [];
+        } else {
+          value = String(raw ?? '');
+        }
+        if (field.required) {
+          const isEmpty = Array.isArray(value) ? value.length === 0 : value === '';
+          if (isEmpty) hasRequiredMissing = true;
+        }
+        record[field.code] = { value };
+      });
+
+      if (hasRequiredMissing) {
+        this._showNotice(t('newRecordRequiredMissing'));
+        return;
+      }
+
+      saveBtn.disabled = true;
+      cancelBtn.disabled = true;
+      saveBtn.textContent = t('newRecordSaving');
+
+      try {
+        const response = await this.postFn('EXCEL_POST_RECORDS', {
+          appId,
+          records: [record],
+          __pbTrigger: 'quick_new_record'
+        });
+        if (!response?.ok) throw new Error(response?.error || 'create failed');
+        this.close();
+        window.location.href = listUrl;
+      } catch (err) {
+        console.error('[kintone-excel-overlay] quick new record failed', err);
+        this._showNotice(t('toastNewRecordFailed'));
+        saveBtn.disabled = false;
+        cancelBtn.disabled = false;
+        saveBtn.textContent = t('newRecordSave');
+      }
+    }
+
+    _showNotice(message) {
+      showOverlayLaunchNotice(message);
+    }
+  }
+
+  const quickNewRecord = new QuickNewRecordModal(postToPage);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'n' && e.key !== 'N') return;
+    if (!e.shiftKey || (!e.ctrlKey && !e.metaKey) || e.altKey) return;
+    if (!parseListOverlayContext(location.href)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    if (quickNewRecord.isVisible()) {
+      quickNewRecord.close();
+    } else {
+      void quickNewRecord.open();
+    }
+  }, true);
+
+  // ── End Quick New Record Modal ───────────────────────────────────────────
 
   spaLifecycleReady = true;
   handleSpaLifecycle('boot_ready', location.href);

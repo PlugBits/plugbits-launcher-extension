@@ -2803,3 +2803,49 @@
   border-top: 1px solid #e5e7eb;
   flex-shrink: 0;
 }
+
+/* standalone mode (Ctrl+Shift+N / on top of kintone) */
+
+.pb-newrec__layer--standalone {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.pb-newrec__layer--standalone .pb-newrec__panel {
+  margin-top: 48px;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+.pb-newrec__preset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-bottom: 1px solid #f3f4f6;
+  background: #f9fafb;
+  flex-shrink: 0;
+}
+
+.pb-newrec__preset-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.pb-newrec__preset-select {
+  flex: 1;
+  height: 28px;
+  font-size: 13px;
+}
+
+.pb-newrec__empty {
+  color: #9ca3af;
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 0;
+}
