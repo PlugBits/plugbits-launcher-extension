@@ -2849,3 +2849,117 @@
   text-align: center;
   padding: 24px 0;
 }
+
+/* Lookup field */
+.pb-newrec__lookup-wrap {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pb-newrec__lookup-wrap .pb-newrec__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.pb-newrec__lookup-btn {
+  flex-shrink: 0;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.15s;
+}
+
+.pb-newrec__lookup-btn:hover {
+  background: #e5e7eb;
+}
+
+.pb-newrec__input--lookup-auto {
+  background: #f9fafb;
+  color: #6b7280;
+  cursor: default;
+}
+
+.pb-newrec__field-row--lookup-auto .pb-newrec__label {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Lookup picker floating panel */
+.pb-newrec__lookup-picker {
+  position: absolute;
+  z-index: 99999;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  width: 320px;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pb-newrec__lookup-search {
+  padding: 8px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.pb-newrec__lookup-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  outline: none;
+}
+
+.pb-newrec__lookup-search-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.15);
+}
+
+.pb-newrec__lookup-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.pb-newrec__lookup-status {
+  color: #9ca3af;
+  font-size: 13px;
+  text-align: center;
+  padding: 16px 0;
+}
+
+.pb-newrec__lookup-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+  transition: background 0.1s;
+}
+
+.pb-newrec__lookup-item:last-child {
+  border-bottom: none;
+}
+
+.pb-newrec__lookup-item:hover {
+  background: #eff6ff;
+}
+
+.pb-newrec__lookup-item-main {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.pb-newrec__lookup-item-sub {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 2px;
+}

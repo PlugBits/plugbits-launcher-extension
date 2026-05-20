@@ -1637,6 +1637,20 @@ function markLookupAutoFields(properties, metas) {
         return;
       }
 
+      if (type === 'EXCEL_GET_LOOKUP_CANDIDATES') {
+        const relatedAppId = String(payload?.relatedAppId || '').trim();
+        if (!relatedAppId) throw new Error('relatedAppId is required');
+        const sort = String(payload?.sort || '').trim();
+        const query = sort ? `order by ${sort} limit 100` : 'limit 100';
+        const resp = await callKintoneApi('/k/v1/records', 'GET', { app: relatedAppId, query }, {
+          feature: 'lookup_candidates',
+          source: 'new_record',
+          logGroup: 'overlay'
+        });
+        window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { records: resp.records || [] } }, ORIGIN);
+        return;
+      }
+
       if (type === 'EXCEL_UPLOAD_FILE') {
         const files = Array.isArray(payload?.files) ? payload.files : [];
         if (!files.length) {

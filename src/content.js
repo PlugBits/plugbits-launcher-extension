@@ -6731,13 +6731,34 @@
       const NON_EDITABLE_TYPES = new Set([
         'RECORD_NUMBER', 'CREATED_TIME', 'UPDATED_TIME', 'CREATOR', 'MODIFIER',
         'STATUS', 'STATUS_ASSIGNEE', 'CALC', 'REFERENCE_TABLE', 'RICH_TEXT',
-        'SUBTABLE', 'LOOKUP', 'FILE'
+        'SUBTABLE', 'FILE'
       ]);
-      const formFields = this.fields.filter((f) => {
-        if (!f || !f.type) return false;
-        if (NON_EDITABLE_TYPES.has(String(f.type).toUpperCase())) return false;
-        if (f.lookup || f.lookupAuto) return false;
-        return true;
+      const allFieldsMap = new Map(this.fields.map((f) => [f.code, f]));
+      const lookupAutoSet = new Set();
+      this.fields.forEach((f) => {
+        if (String(f.type || '').toUpperCase() === 'LOOKUP' && Array.isArray(f.lookup?.fieldMappings)) {
+          f.lookup.fieldMappings.forEach((m) => { if (m.field) lookupAutoSet.add(m.field); });
+        }
+      });
+      const formFields = [];
+      const addedCodes = new Set();
+      this.fields.forEach((f) => {
+        if (!f || !f.type) return;
+        const type = String(f.type).toUpperCase();
+        if (NON_EDITABLE_TYPES.has(type)) return;
+        if (lookupAutoSet.has(f.code)) return;
+        if (f.lookupAuto) return;
+        formFields.push(f);
+        addedCodes.add(f.code);
+        if (type === 'LOOKUP' && Array.isArray(f.lookup?.fieldMappings)) {
+          f.lookup.fieldMappings.forEach((m) => {
+            const autoField = allFieldsMap.get(m.field);
+            if (autoField && !addedCodes.has(m.field)) {
+              formFields.push({ ...autoField, _isLookupAuto: true, _lookupSourceCode: f.code });
+              addedCodes.add(m.field);
+            }
+          });
+        }
       });
 
       const layer = document.createElement('div');
@@ -6790,8 +6811,44 @@
 
         const type = String(field.type || '').toUpperCase();
         let getValue;
+        let setValue;
 
-        if (type === 'MULTI_LINE_TEXT') {
+        if (field._isLookupAuto) {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'pb-newrec__input pb-newrec__input--lookup-auto';
+          input.readOnly = true;
+          input.placeholder = '—';
+          controlWrap.appendChild(input);
+          getValue = () => input.value;
+          setValue = (v) => { input.value = v; };
+          row.classList.add('pb-newrec__field-row--lookup-auto');
+        } else if (type === 'LOOKUP') {
+          const wrap = document.createElement('div');
+          wrap.className = 'pb-newrec__lookup-wrap';
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'pb-newrec__input';
+          input.readOnly = true;
+          input.placeholder = resolveText(this.language, 'quickNewNoFields').replace('フィールド', '候補');
+          const searchBtn = document.createElement('button');
+          searchBtn.type = 'button';
+          searchBtn.className = 'pb-newrec__lookup-btn';
+          searchBtn.textContent = '🔍';
+          wrap.appendChild(input);
+          wrap.appendChild(searchBtn);
+          controlWrap.appendChild(wrap);
+          getValue = () => input.value;
+          setValue = (v) => { input.value = v; };
+          const lookupInfo = field.lookup || {};
+          const relatedAppId = String(lookupInfo.relatedApp?.app || lookupInfo.relatedApp?.code || '').trim();
+          const relatedKeyField = String(lookupInfo.relatedKeyField || '').trim();
+          const pickerFields = Array.isArray(lookupInfo.lookupPickerFields) ? lookupInfo.lookupPickerFields : [];
+          const mappings = Array.isArray(lookupInfo.fieldMappings) ? lookupInfo.fieldMappings : [];
+          searchBtn.addEventListener('click', () => {
+            buildNewRecordLookupPicker(wrap, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, input, this.postFn, this.language);
+          });
+        } else if (type === 'MULTI_LINE_TEXT') {
           const ta = document.createElement('textarea');
           ta.className = 'pb-newrec__textarea';
           ta.rows = 3;
@@ -6851,21 +6908,13 @@
           nativePicker.className = 'pb-overlay__date-pick-native';
           nativePicker.tabIndex = -1;
           pickerLabel.appendChild(nativePicker);
-          pickerLabel.addEventListener('mousedown', (e) => {
-            e.stopPropagation();
-            nativePicker.value = input.value || '';
-          });
+          pickerLabel.addEventListener('mousedown', (e) => { e.stopPropagation(); nativePicker.value = input.value || ''; });
           nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
-          nativePicker.addEventListener('change', () => {
-            if (nativePicker.value) input.value = nativePicker.value;
-          });
+          nativePicker.addEventListener('change', () => { if (nativePicker.value) input.value = nativePicker.value; });
           inputWrap.appendChild(input);
           inputWrap.appendChild(pickerLabel);
           controlWrap.appendChild(inputWrap);
-          getValue = () => {
-            const smart = smartDateToYMD(input.value);
-            return smart || input.value || '';
-          };
+          getValue = () => { const smart = smartDateToYMD(input.value); return smart || input.value || ''; };
         } else {
           const input = document.createElement('input');
           input.type = 'text';
@@ -6876,7 +6925,7 @@
           getValue = () => input.value;
         }
 
-        fieldInputMap.set(field.code, { field, getValue });
+        fieldInputMap.set(field.code, { field, getValue, setValue });
         labelEl.htmlFor = '';
         row.appendChild(labelEl);
         row.appendChild(controlWrap);
@@ -11015,12 +11064,124 @@
 
   // ── End Command Palette ──────────────────────────────────────────────────
 
+  // ── Lookup Picker (shared by overlay modal and QuickNewRecordModal) ───────
+
+  function buildNewRecordLookupPicker(anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, keyInput, postFn, language) {
+    document.querySelectorAll('.pb-newrec__lookup-picker').forEach((el) => el.remove());
+    if (!relatedAppId) return;
+
+    const picker = document.createElement('div');
+    picker.className = 'pb-newrec__lookup-picker';
+
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'pb-newrec__lookup-search';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'pb-newrec__lookup-search-input';
+    searchInput.placeholder = '検索...';
+    searchWrap.appendChild(searchInput);
+
+    const list = document.createElement('div');
+    list.className = 'pb-newrec__lookup-list';
+    const loadingEl = document.createElement('div');
+    loadingEl.className = 'pb-newrec__lookup-status';
+    loadingEl.textContent = resolveText(language, 'quickNewLoading');
+    list.appendChild(loadingEl);
+
+    picker.appendChild(searchWrap);
+    picker.appendChild(list);
+    anchorEl.appendChild(picker);
+
+    let allRecords = [];
+
+    function getDisplayValue(record, fieldCode) {
+      const v = record[fieldCode];
+      if (!v) return '';
+      const val = v.value;
+      if (Array.isArray(val)) return val.map((item) => (typeof item === 'object' ? item.value || '' : String(item))).join(', ');
+      return String(val ?? '');
+    }
+
+    function renderList(records) {
+      list.innerHTML = '';
+      if (!records.length) {
+        const empty = document.createElement('div');
+        empty.className = 'pb-newrec__lookup-status';
+        empty.textContent = 'レコードがありません';
+        list.appendChild(empty);
+        return;
+      }
+      records.forEach((record) => {
+        const item = document.createElement('div');
+        item.className = 'pb-newrec__lookup-item';
+        const mainVal = getDisplayValue(record, relatedKeyField);
+        const main = document.createElement('div');
+        main.className = 'pb-newrec__lookup-item-main';
+        main.textContent = mainVal;
+        item.appendChild(main);
+        const subFields = pickerFields.filter((f) => f !== relatedKeyField);
+        if (subFields.length) {
+          const sub = document.createElement('div');
+          sub.className = 'pb-newrec__lookup-item-sub';
+          sub.textContent = subFields.map((f) => getDisplayValue(record, f)).filter(Boolean).join('　');
+          item.appendChild(sub);
+        }
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          keyInput.value = mainVal;
+          const entry = fieldInputMap.get(keyInput.closest('[data-field-code]')?.dataset.fieldCode || '');
+          mappings.forEach((m) => {
+            const autoEntry = fieldInputMap.get(m.field);
+            if (autoEntry?.setValue) autoEntry.setValue(getDisplayValue(record, m.relatedField));
+          });
+          picker.remove();
+        });
+        list.appendChild(item);
+      });
+    }
+
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.toLowerCase();
+      if (!q) { renderList(allRecords); return; }
+      const filtered = allRecords.filter((record) => {
+        const checkFields = pickerFields.length ? pickerFields : [relatedKeyField];
+        return checkFields.some((f) => getDisplayValue(record, f).toLowerCase().includes(q));
+      });
+      renderList(filtered);
+    });
+
+    document.addEventListener('mousedown', function onOutside(e) {
+      if (!picker.contains(e.target) && e.target !== anchorEl) {
+        picker.remove();
+        document.removeEventListener('mousedown', onOutside, true);
+      }
+    }, true);
+
+    void (async () => {
+      try {
+        const resp = await postFn('EXCEL_GET_LOOKUP_CANDIDATES', {
+          relatedAppId,
+          sort: ''
+        });
+        allRecords = Array.isArray(resp?.result?.records) ? resp.result.records.map((r) => r.fields || r) : [];
+        renderList(allRecords);
+        searchInput.focus();
+      } catch (err) {
+        list.innerHTML = '';
+        const errEl = document.createElement('div');
+        errEl.className = 'pb-newrec__lookup-status';
+        errEl.textContent = '取得に失敗しました';
+        list.appendChild(errEl);
+      }
+    })();
+  }
+
   // ── Quick New Record Modal ───────────────────────────────────────────────
 
   const NON_EDITABLE_QNR_TYPES = new Set([
     'RECORD_NUMBER', 'CREATED_TIME', 'UPDATED_TIME', 'CREATOR', 'MODIFIER',
     'STATUS', 'STATUS_ASSIGNEE', 'CALC', 'REFERENCE_TABLE', 'RICH_TEXT',
-    'SUBTABLE', 'LOOKUP', 'FILE'
+    'SUBTABLE', 'FILE'
   ]);
 
   class QuickNewRecordModal {
@@ -11108,15 +11269,38 @@
       const visible = new Set(Array.isArray(preset.visibleColumns) ? preset.visibleColumns : []);
       const order = Array.isArray(preset.columnOrder) ? preset.columnOrder : [];
       const codes = order.filter((c) => visible.size === 0 || visible.has(c));
-      return codes
-        .map((code) => allFieldsMap.get(code))
-        .filter((f) => {
-          if (!f) return false;
-          const type = String(f.type || '').toUpperCase();
-          if (NON_EDITABLE_QNR_TYPES.has(type)) return false;
-          if (f.lookup || f.lookupAuto) return false;
-          return true;
-        });
+
+      // Build set of auto-fill destinations so we can inject them after their LOOKUP
+      const lookupAutoSet = new Set();
+      allFieldsMap.forEach((f) => {
+        if (String(f.type || '').toUpperCase() === 'LOOKUP' && Array.isArray(f.lookup?.fieldMappings)) {
+          f.lookup.fieldMappings.forEach((m) => { if (m.field) lookupAutoSet.add(m.field); });
+        }
+      });
+
+      const result = [];
+      const added = new Set();
+      codes.forEach((code) => {
+        const f = allFieldsMap.get(code);
+        if (!f) return;
+        const type = String(f.type || '').toUpperCase();
+        if (NON_EDITABLE_QNR_TYPES.has(type)) return;
+        if (lookupAutoSet.has(f.code)) return;
+        if (f.lookupAuto) return;
+        if (added.has(f.code)) return;
+        result.push(f);
+        added.add(f.code);
+        if (type === 'LOOKUP' && Array.isArray(f.lookup?.fieldMappings)) {
+          f.lookup.fieldMappings.forEach((m) => {
+            const autoField = allFieldsMap.get(m.field);
+            if (autoField && !added.has(m.field)) {
+              result.push({ ...autoField, _isLookupAuto: true, _lookupSourceCode: f.code });
+              added.add(m.field);
+            }
+          });
+        }
+      });
+      return result;
     }
 
     _buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl) {
@@ -11205,8 +11389,43 @@
           controlWrap.className = 'pb-newrec__control';
           const type = String(field.type || '').toUpperCase();
           let getValue;
+          let setValue;
 
-          if (type === 'MULTI_LINE_TEXT') {
+          if (field._isLookupAuto) {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'pb-newrec__input pb-newrec__input--lookup-auto';
+            input.readOnly = true;
+            input.placeholder = '—';
+            controlWrap.appendChild(input);
+            getValue = () => input.value;
+            setValue = (v) => { input.value = v; };
+            row.classList.add('pb-newrec__field-row--lookup-auto');
+          } else if (type === 'LOOKUP') {
+            const wrap = document.createElement('div');
+            wrap.className = 'pb-newrec__lookup-wrap';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'pb-newrec__input';
+            input.readOnly = true;
+            const searchBtn = document.createElement('button');
+            searchBtn.type = 'button';
+            searchBtn.className = 'pb-newrec__lookup-btn';
+            searchBtn.textContent = '🔍';
+            wrap.appendChild(input);
+            wrap.appendChild(searchBtn);
+            controlWrap.appendChild(wrap);
+            getValue = () => input.value;
+            setValue = (v) => { input.value = v; };
+            const lookupInfo = field.lookup || {};
+            const relatedAppId = String(lookupInfo.relatedApp?.app || lookupInfo.relatedApp?.code || '').trim();
+            const relatedKeyField = String(lookupInfo.relatedKeyField || '').trim();
+            const pickerFields = Array.isArray(lookupInfo.lookupPickerFields) ? lookupInfo.lookupPickerFields : [];
+            const mappings = Array.isArray(lookupInfo.fieldMappings) ? lookupInfo.fieldMappings : [];
+            searchBtn.addEventListener('click', () => {
+              buildNewRecordLookupPicker(wrap, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, input, this.postFn, language);
+            });
+          } else if (type === 'MULTI_LINE_TEXT') {
             const ta = document.createElement('textarea');
             ta.className = 'pb-newrec__textarea';
             ta.rows = 3;
@@ -11284,7 +11503,7 @@
             getValue = () => input.value;
           }
 
-          fieldInputMap.set(field.code, { field, getValue });
+          fieldInputMap.set(field.code, { field, getValue, setValue });
           row.appendChild(labelEl);
           row.appendChild(controlWrap);
           body.appendChild(row);
