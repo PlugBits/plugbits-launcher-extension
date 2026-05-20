@@ -2147,14 +2147,6 @@
       this.saveButtonSpinner = saveSpinner;
       this.saveButtonLabel = saveLabel;
 
-      const newRecordBtn = document.createElement('button');
-      newRecordBtn.type = 'button';
-      newRecordBtn.className = 'pb-overlay__btn pb-overlay__btn--new-record';
-      newRecordBtn.textContent = resolveText(this.language, 'btnNewRecord');
-      newRecordBtn.title = resolveText(this.language, 'newRecordTitle');
-      newRecordBtn.addEventListener('click', () => this.openNewRecordModal());
-      this.newRecordButton = newRecordBtn;
-
       const addRowBtn = document.createElement('button');
       addRowBtn.type = 'button';
       addRowBtn.className = 'pb-overlay__btn';
@@ -2196,7 +2188,6 @@
       secondaryActions.className = 'pb-overlay__toolbar-secondary';
       secondaryActions.appendChild(columnsBtn);
       secondaryActions.appendChild(dirty);
-      secondaryActions.appendChild(newRecordBtn);
       secondaryActions.appendChild(addRowBtn);
       secondaryActions.appendChild(undoBtn);
       secondaryActions.appendChild(redoBtn);
@@ -4655,13 +4646,6 @@
         this.addRowButton.title = allowed
           ? ''
           : blockedReason;
-      }
-      if (this.newRecordButton) {
-        const allowed = canEdit && this.permissionService.canAddRow();
-        this.newRecordButton.disabled = this.saving || !allowed;
-        this.newRecordButton.title = allowed
-          ? resolveText(this.language, 'newRecordTitle')
-          : resolveText(this.language, canEdit ? 'permNoAdd' : 'toastViewOnlyBlocked');
       }
       if (this.saveButton && !this.saving) {
         let dirtyCount = 0;
