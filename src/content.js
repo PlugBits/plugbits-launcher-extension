@@ -11367,7 +11367,7 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'n' && e.key !== 'N') return;
-    if (!e.shiftKey || (!e.ctrlKey && !e.metaKey) || e.altKey) return;
+    if (!e.shiftKey || !e.altKey || e.ctrlKey || e.metaKey) return;
     if (!parseListOverlayContext(location.href)) return;
     e.preventDefault();
     e.stopPropagation();
