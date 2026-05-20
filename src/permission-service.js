@@ -20,6 +20,7 @@
     'MULTI_LINE_TEXT',
     'NUMBER',
     'DATE',
+    'DATETIME',
     'LINK',
     'DROP_DOWN',
     'RADIO_BUTTON',
