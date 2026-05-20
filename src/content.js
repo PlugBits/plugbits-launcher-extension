@@ -6734,9 +6734,10 @@
         'SUBTABLE', 'FILE'
       ]);
       const allFieldsMap = new Map(this.fields.map((f) => [f.code, f]));
+      const isLookupKeyField = (f) => !f.lookupAuto && (String(f.type || '').toUpperCase() === 'LOOKUP' || (f.lookup && !f.lookupAuto));
       const lookupAutoSet = new Set();
       this.fields.forEach((f) => {
-        if (String(f.type || '').toUpperCase() === 'LOOKUP' && Array.isArray(f.lookup?.fieldMappings)) {
+        if (isLookupKeyField(f) && Array.isArray(f.lookup?.fieldMappings)) {
           f.lookup.fieldMappings.forEach((m) => { if (m.field) lookupAutoSet.add(m.field); });
         }
       });
@@ -6750,7 +6751,7 @@
         if (f.lookupAuto) return;
         formFields.push(f);
         addedCodes.add(f.code);
-        if (type === 'LOOKUP' && Array.isArray(f.lookup?.fieldMappings)) {
+        if (isLookupKeyField(f) && Array.isArray(f.lookup?.fieldMappings)) {
           f.lookup.fieldMappings.forEach((m) => {
             const autoField = allFieldsMap.get(m.field);
             if (autoField && !addedCodes.has(m.field)) {
@@ -6823,14 +6824,13 @@
           getValue = () => input.value;
           setValue = (v) => { input.value = v; };
           row.classList.add('pb-newrec__field-row--lookup-auto');
-        } else if (type === 'LOOKUP') {
+        } else if (isLookupKeyField(field)) {
           const wrap = document.createElement('div');
           wrap.className = 'pb-newrec__lookup-wrap';
           const input = document.createElement('input');
           input.type = 'text';
           input.className = 'pb-newrec__input';
           input.readOnly = true;
-          input.placeholder = resolveText(this.language, 'quickNewNoFields').replace('フィールド', '候補');
           const searchBtn = document.createElement('button');
           searchBtn.type = 'button';
           searchBtn.className = 'pb-newrec__lookup-btn';
@@ -6841,8 +6841,10 @@
           getValue = () => input.value;
           setValue = (v) => { input.value = v; };
           const lookupInfo = field.lookup || {};
-          const relatedAppId = String(lookupInfo.relatedApp?.app || lookupInfo.relatedApp?.code || '').trim();
-          const relatedKeyField = String(lookupInfo.relatedKeyField || '').trim();
+          const relatedAppId = String(
+            lookupInfo.relatedApp?.app || lookupInfo.relatedApp?.code || lookupInfo.relatedApp || ''
+          ).trim();
+          const relatedKeyField = String(lookupInfo.relatedKeyField || lookupInfo.keyField || '').trim();
           const pickerFields = Array.isArray(lookupInfo.lookupPickerFields) ? lookupInfo.lookupPickerFields : [];
           const mappings = Array.isArray(lookupInfo.fieldMappings) ? lookupInfo.fieldMappings : [];
           searchBtn.addEventListener('click', () => {
@@ -11244,7 +11246,7 @@
 
         if (!presets.length) {
           // fallback: show all editable fields
-          const fallback = allFieldsMeta.filter((f) => !NON_EDITABLE_QNR_TYPES.has(String(f.type || '').toUpperCase()) && !f.lookup && !f.lookupAuto);
+          const fallback = allFieldsMeta.filter((f) => !NON_EDITABLE_QNR_TYPES.has(String(f.type || '').toUpperCase()) && !f.lookupAuto);
           presets = [{ id: 'default', name: t('layoutPresetDefault'), columnOrder: fallback.map((f) => f.code), visibleColumns: fallback.map((f) => f.code) }];
           activePresetId = 'default';
         }
@@ -11270,10 +11272,12 @@
       const order = Array.isArray(preset.columnOrder) ? preset.columnOrder : [];
       const codes = order.filter((c) => visible.size === 0 || visible.has(c));
 
+      const isLookupKey = (f) => !f.lookupAuto && (String(f.type || '').toUpperCase() === 'LOOKUP' || Boolean(f.lookup));
+
       // Build set of auto-fill destinations so we can inject them after their LOOKUP
       const lookupAutoSet = new Set();
       allFieldsMap.forEach((f) => {
-        if (String(f.type || '').toUpperCase() === 'LOOKUP' && Array.isArray(f.lookup?.fieldMappings)) {
+        if (isLookupKey(f) && Array.isArray(f.lookup?.fieldMappings)) {
           f.lookup.fieldMappings.forEach((m) => { if (m.field) lookupAutoSet.add(m.field); });
         }
       });
@@ -11290,7 +11294,7 @@
         if (added.has(f.code)) return;
         result.push(f);
         added.add(f.code);
-        if (type === 'LOOKUP' && Array.isArray(f.lookup?.fieldMappings)) {
+        if (isLookupKey(f) && Array.isArray(f.lookup?.fieldMappings)) {
           f.lookup.fieldMappings.forEach((m) => {
             const autoField = allFieldsMap.get(m.field);
             if (autoField && !added.has(m.field)) {
@@ -11401,7 +11405,7 @@
             getValue = () => input.value;
             setValue = (v) => { input.value = v; };
             row.classList.add('pb-newrec__field-row--lookup-auto');
-          } else if (type === 'LOOKUP') {
+          } else if (type === 'LOOKUP' || (!field._isLookupAuto && field.lookup)) {
             const wrap = document.createElement('div');
             wrap.className = 'pb-newrec__lookup-wrap';
             const input = document.createElement('input');
@@ -11418,8 +11422,10 @@
             getValue = () => input.value;
             setValue = (v) => { input.value = v; };
             const lookupInfo = field.lookup || {};
-            const relatedAppId = String(lookupInfo.relatedApp?.app || lookupInfo.relatedApp?.code || '').trim();
-            const relatedKeyField = String(lookupInfo.relatedKeyField || '').trim();
+            const relatedAppId = String(
+              lookupInfo.relatedApp?.app || lookupInfo.relatedApp?.code || lookupInfo.relatedApp || ''
+            ).trim();
+            const relatedKeyField = String(lookupInfo.relatedKeyField || lookupInfo.keyField || '').trim();
             const pickerFields = Array.isArray(lookupInfo.lookupPickerFields) ? lookupInfo.lookupPickerFields : [];
             const mappings = Array.isArray(lookupInfo.fieldMappings) ? lookupInfo.fieldMappings : [];
             searchBtn.addEventListener('click', () => {

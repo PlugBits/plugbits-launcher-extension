@@ -240,21 +240,32 @@ function normalizeLookupMeta(code, prop) {
   const src = prop && typeof prop === 'object' ? (prop.lookup || null) : null;
   if (!src || typeof src !== 'object') return undefined;
   const relatedAppRaw = src.relatedApp;
-  const relatedApp = (typeof relatedAppRaw === 'string' || typeof relatedAppRaw === 'number')
+  const relatedAppId = (typeof relatedAppRaw === 'string' || typeof relatedAppRaw === 'number')
     ? String(relatedAppRaw)
     : (relatedAppRaw && typeof relatedAppRaw === 'object'
       ? String(relatedAppRaw.app || relatedAppRaw.id || '')
       : '');
-  const keyField = String(
-    src.keyField
+  const relatedKeyField = String(
+    src.relatedKeyField
+    || src.keyField
     || src.lookupField
-    || src.relatedKeyField
     || src.fieldCode
     || ''
   ).trim();
+  const fieldMappings = Array.isArray(src.fieldMappings)
+    ? src.fieldMappings.map((m) => ({
+        field: String(m.field || ''),
+        relatedField: String(m.relatedField || '')
+      })).filter((m) => m.field && m.relatedField)
+    : [];
+  const lookupPickerFields = Array.isArray(src.lookupPickerFields)
+    ? src.lookupPickerFields.map((f) => String(f || '')).filter(Boolean)
+    : [];
   const out = {};
-  if (keyField) out.keyField = keyField;
-  if (relatedApp) out.relatedApp = relatedApp;
+  if (relatedKeyField) out.relatedKeyField = relatedKeyField;
+  if (relatedAppId) out.relatedApp = relatedAppId;
+  if (fieldMappings.length) out.fieldMappings = fieldMappings;
+  if (lookupPickerFields.length) out.lookupPickerFields = lookupPickerFields;
   return Object.keys(out).length ? out : undefined;
 }
 
