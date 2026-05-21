@@ -17,6 +17,7 @@
         <button type="button" class="menu-item" data-pane-target="pins" data-i18n="nav_pins">ピン止め</button>
         <button type="button" class="menu-item" data-pane-target="excel-overlay" data-i18n="nav_excel_overlay">スプレッドシート</button>
         <button type="button" class="menu-item" data-pane-target="api-usage" data-i18n="nav_api_usage">API使用状況</button>
+        <button type="button" class="menu-item menu-item--pro" data-pane-target="pro-license" data-i18n="nav_pro_license">Pro ライセンス</button>
       </nav>
     </aside>
     <main class="content" id="content">
@@ -284,6 +285,54 @@
           </div>
 
           <p id="metadata_cache_status" class="hint" data-i18n="metadata_cache_clear_desc">アプリ・ビュー・フィールド情報のキャッシュを更新します。</p>
+        </section>
+      </section>
+      <!-- Pro ライセンス -->
+      <section class="pane" data-pane="pro-license" aria-labelledby="pane-pro-license-title">
+        <section class="card">
+          <h2 id="pane-pro-license-title" data-i18n="pro_license_title">PlugBits Launcher Pro</h2>
+
+          <!-- ステータスバナー -->
+          <div class="pro-status-banner" id="pro_status_banner" data-status="free">
+            <div class="pro-status-icon" id="pro_status_icon">★</div>
+            <div class="pro-status-body">
+              <div class="pro-status-label" id="pro_status_label" data-i18n="pro_status_free">無料プラン</div>
+              <div class="pro-status-sub" id="pro_status_sub"></div>
+            </div>
+            <div class="pro-badge" id="pro_badge" hidden>PRO</div>
+          </div>
+
+          <!-- ライセンスキー入力 -->
+          <div class="kp-setting-row pro-key-row" id="pro_key_section">
+            <label class="pro-key-label" for="pro_license_key_input" data-i18n="pro_license_key_label">ライセンスキー</label>
+            <div class="pro-key-input-wrap">
+              <input type="text" id="pro_license_key_input" class="pro-key-input"
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                autocomplete="off" spellcheck="false" />
+              <button type="button" id="pro_verify_btn" class="pro-verify-btn" data-i18n="pro_verify_btn">認証する</button>
+            </div>
+            <p class="hint" id="pro_verify_msg"></p>
+          </div>
+
+          <!-- 認証済み情報 -->
+          <div class="pro-info-rows" id="pro_info_section" hidden>
+            <div class="pro-info-row">
+              <span class="pro-info-label" data-i18n="pro_info_email">メールアドレス</span>
+              <span class="pro-info-value" id="pro_info_email">—</span>
+            </div>
+            <div class="pro-info-row">
+              <span class="pro-info-label" data-i18n="pro_info_expiry">次回更新日</span>
+              <span class="pro-info-value" id="pro_info_expiry">—</span>
+            </div>
+          </div>
+
+          <!-- アクションボタン -->
+          <div class="pro-actions" id="pro_actions">
+            <a id="pro_upgrade_btn" class="pro-upgrade-btn" href="https://plugbits.app/pro" target="_blank" rel="noopener" data-i18n="pro_upgrade_btn">Pro にアップグレード</a>
+            <button type="button" id="pro_portal_btn" class="pro-portal-btn" hidden data-i18n="pro_portal_btn">サブスク管理・領収書</button>
+            <button type="button" id="pro_clear_btn" class="pro-clear-btn btn-danger-subtle" hidden data-i18n="pro_clear_btn">ライセンス解除</button>
+          </div>
+          <p class="hint" data-i18n="pro_portal_hint">解約・プラン変更・領収書の発行は「サブスク管理」から行えます。</p>
         </section>
       </section>
     </main>

@@ -646,6 +646,146 @@ function updateDeveloperProOverrideVisibility() {
   return enabled;
 }
 
+// ── Pro ライセンス UI ────────────────────────────────────────────────────────
+
+const proStatusBanner = document.getElementById('pro_status_banner');
+const proStatusLabel = document.getElementById('pro_status_label');
+const proStatusSub = document.getElementById('pro_status_sub');
+const proBadge = document.getElementById('pro_badge');
+const proLicenseKeyInput = document.getElementById('pro_license_key_input');
+const proVerifyBtn = document.getElementById('pro_verify_btn');
+const proVerifyMsg = document.getElementById('pro_verify_msg');
+const proInfoSection = document.getElementById('pro_info_section');
+const proInfoEmail = document.getElementById('pro_info_email');
+const proInfoExpiry = document.getElementById('pro_info_expiry');
+const proUpgradeBtn = document.getElementById('pro_upgrade_btn');
+const proPortalBtn = document.getElementById('pro_portal_btn');
+const proClearBtn = document.getElementById('pro_clear_btn');
+
+let proPortalUrl = '';
+
+function updateProStatusUI(cache, key) {
+  if (!proStatusBanner) return;
+  const isActive = cache?.status === 'active';
+  const hasKey = Boolean(key);
+
+  proStatusBanner.dataset.status = isActive ? 'active' : (hasKey ? 'inactive' : 'free');
+  if (proBadge) proBadge.hidden = !isActive;
+
+  if (isActive) {
+    if (proStatusLabel) proStatusLabel.textContent = 'PlugBits Launcher Pro 有効';
+    if (proStatusSub) proStatusSub.textContent = cache.email ? `登録メール: ${cache.email}` : '';
+    if (proInfoEmail) proInfoEmail.textContent = cache.email || '—';
+    if (proInfoExpiry && cache.expiry) {
+      const d = new Date(cache.expiry);
+      proInfoExpiry.textContent = isNaN(d.getTime()) ? cache.expiry : d.toLocaleDateString('ja-JP');
+    }
+    if (proInfoSection) proInfoSection.hidden = false;
+    if (proUpgradeBtn) proUpgradeBtn.hidden = true;
+    if (proPortalBtn) proPortalBtn.hidden = false;
+    if (proClearBtn) proClearBtn.hidden = false;
+    proPortalUrl = cache.portalUrl || '';
+  } else {
+    if (proStatusLabel) proStatusLabel.textContent = hasKey ? 'ライセンスキー未認証' : '無料プラン';
+    if (proStatusSub) proStatusSub.textContent = hasKey ? 'キーを認証してください' : '';
+    if (proInfoSection) proInfoSection.hidden = true;
+    if (proUpgradeBtn) proUpgradeBtn.hidden = false;
+    if (proPortalBtn) proPortalBtn.hidden = true;
+    if (proClearBtn) proClearBtn.hidden = !hasKey;
+  }
+
+  if (proLicenseKeyInput && key && !proLicenseKeyInput.value) {
+    proLicenseKeyInput.value = key;
+  }
+}
+
+function setProVerifyState(state, message) {
+  if (!proVerifyBtn) return;
+  if (state === 'loading') {
+    proVerifyBtn.disabled = true;
+    proVerifyBtn.textContent = '認証中...';
+    if (proVerifyMsg) { proVerifyMsg.textContent = ''; proVerifyMsg.className = 'hint'; }
+  } else if (state === 'ok') {
+    proVerifyBtn.disabled = false;
+    proVerifyBtn.textContent = '再認証';
+    if (proVerifyMsg) { proVerifyMsg.textContent = message || '認証成功'; proVerifyMsg.className = 'hint hint--success'; }
+  } else if (state === 'error') {
+    proVerifyBtn.disabled = false;
+    proVerifyBtn.textContent = '認証する';
+    if (proVerifyMsg) { proVerifyMsg.textContent = message || '認証に失敗しました'; proVerifyMsg.className = 'hint hint--error'; }
+  } else {
+    proVerifyBtn.disabled = false;
+    proVerifyBtn.textContent = '認証する';
+    if (proVerifyMsg) { proVerifyMsg.textContent = ''; proVerifyMsg.className = 'hint'; }
+  }
+}
+
+async function loadProLicenseUI() {
+  try {
+    const stored = await chrome.storage.local.get([PRO_LICENSE_KEY, PRO_LICENSE_CACHE_KEY]);
+    const key = String(stored?.[PRO_LICENSE_KEY] || '').trim();
+    const cache = stored?.[PRO_LICENSE_CACHE_KEY] || null;
+    const cacheValid = cache && typeof cache.cachedAt === 'number' && (Date.now() - cache.cachedAt) < PRO_CACHE_TTL_MS;
+    updateProStatusUI(cacheValid ? cache : null, key);
+    if (key) setProVerifyState(cacheValid && cache?.status === 'active' ? 'ok' : 'idle');
+  } catch (_err) {
+    updateProStatusUI(null, '');
+  }
+}
+
+async function doVerifyLicense(key) {
+  if (!key) { setProVerifyState('error', 'ライセンスキーを入力してください'); return; }
+  setProVerifyState('loading');
+  try {
+    const url = `${VERIFY_ENDPOINT}?key=${encodeURIComponent(key)}`;
+    const resp = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
+    const body = await resp.json().catch(() => ({}));
+    if (resp.ok && body?.status === 'active') {
+      const cache = { ...body, cachedAt: Date.now() };
+      await chrome.storage.local.set({ [PRO_LICENSE_KEY]: key, [PRO_LICENSE_CACHE_KEY]: cache });
+      updateProStatusUI(cache, key);
+      setProVerifyState('ok', 'Pro が有効になりました 🎉');
+    } else {
+      const reason = body?.reason || body?.status || `HTTP ${resp.status}`;
+      setProVerifyState('error', `認証失敗: ${reason}`);
+    }
+  } catch (err) {
+    setProVerifyState('error', 'ネットワークエラーが発生しました。接続を確認してください。');
+  }
+}
+
+if (proVerifyBtn) {
+  proVerifyBtn.addEventListener('click', () => {
+    const key = proLicenseKeyInput ? proLicenseKeyInput.value.trim() : '';
+    void doVerifyLicense(key);
+  });
+}
+
+if (proLicenseKeyInput) {
+  proLicenseKeyInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); proVerifyBtn?.click(); }
+  });
+}
+
+if (proPortalBtn) {
+  proPortalBtn.addEventListener('click', () => {
+    const url = proPortalUrl || 'https://billing.stripe.com/p/login/plugbits';
+    window.open(url, '_blank', 'noopener');
+  });
+}
+
+if (proClearBtn) {
+  proClearBtn.addEventListener('click', async () => {
+    if (!confirm('ライセンスを解除しますか？Pro 機能が無効になります。')) return;
+    await chrome.storage.local.remove([PRO_LICENSE_KEY, PRO_LICENSE_CACHE_KEY]);
+    if (proLicenseKeyInput) proLicenseKeyInput.value = '';
+    updateProStatusUI(null, '');
+    setProVerifyState('idle');
+  });
+}
+
+// ── End Pro ライセンス UI ──────────────────────────────────────────────────
+
 async function loadDeveloperProOverride() {
   if (!developerProOverrideEl) return;
   const visible = updateDeveloperProOverrideVisibility();
@@ -718,6 +858,10 @@ const MAX_WATCHLIST_LIMIT = 5;
 const WATCHLIST_LIMIT_VALUES = [DEFAULT_WATCHLIST_LIMIT, MAX_WATCHLIST_LIMIT];
 const PIN_VISIBLE_KEY = 'kfavRecordPinsVisible';
 const API_USAGE_DAILY_KEY = 'apiUsageDaily';
+const PRO_LICENSE_KEY = 'pbLicenseKey';
+const PRO_LICENSE_CACHE_KEY = 'pbLicenseCache';
+const PRO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const VERIFY_ENDPOINT = 'https://api.plugbits.app/verify';
 const PB_METADATA_CACHE_PREFIX = 'pb:meta:v1:';
 const API_USAGE_RETENTION_DAYS = 31;
 const API_USAGE_FEATURE_ORDER = [
@@ -2732,6 +2876,7 @@ addBtn.addEventListener('click', async () => {
     loadWatchlistRefreshPreset(),
     loadDeveloperProOverride(),
     loadApiUsageStats(),
+    loadProLicenseUI(),
   ]);
   optionsDataReady = true;
 
