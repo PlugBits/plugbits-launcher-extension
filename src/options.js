@@ -575,9 +575,6 @@ const I18N_MESSAGES = {
 const UI_LANGUAGE_KEY = 'uiLanguage';
 const UI_LANGUAGE_VALUES = ['auto', 'ja', 'en'];
 const DEFAULT_UI_LANGUAGE = 'auto';
-const DEVELOPER_PRO_OVERRIDE_KEY = 'pbDeveloperProOverride';
-const DEVELOPER_UI_QUERY_PARAM = 'dev';
-
 let currentLang = 'ja';
 let currentUiLanguageSetting = DEFAULT_UI_LANGUAGE;
 let optionsDataReady = false;
@@ -654,19 +651,7 @@ async function initializeI18n() {
   await applyUiLanguageSetting(setting, { persist: false });
 }
 
-function isDeveloperUiEnabled() {
-  try {
-    const params = new URLSearchParams(window.location.search || '');
-    if (params.get(DEVELOPER_UI_QUERY_PARAM) === '1') return true;
-    const manifest = chrome.runtime.getManifest();
-    return manifest?.plugbits_dev_tools === true;
-  } catch (_err) {
-    return false;
-  }
-}
-
 async function isProActive() {
-  if (isDeveloperUiEnabled()) return true;
   try {
     const stored = await chrome.storage.local.get(PRO_LICENSE_CACHE_KEY);
     const cache = stored?.[PRO_LICENSE_CACHE_KEY];
@@ -676,13 +661,6 @@ async function isProActive() {
   } catch (_err) {
     return false;
   }
-}
-
-function updateDeveloperProOverrideVisibility() {
-  if (!developerProOverrideRowEl) return false;
-  const enabled = isDeveloperUiEnabled();
-  developerProOverrideRowEl.hidden = !enabled;
-  return enabled;
 }
 
 // ── Pro ライセンス UI ────────────────────────────────────────────────────────
@@ -825,18 +803,6 @@ if (proClearBtn) {
 
 // ── End Pro ライセンス UI ──────────────────────────────────────────────────
 
-async function loadDeveloperProOverride() {
-  if (!developerProOverrideEl) return;
-  const visible = updateDeveloperProOverrideVisibility();
-  if (!visible) return;
-  try {
-    const stored = await chrome.storage.local.get(DEVELOPER_PRO_OVERRIDE_KEY);
-    developerProOverrideEl.checked = Boolean(stored?.[DEVELOPER_PRO_OVERRIDE_KEY]);
-  } catch (_err) {
-    developerProOverrideEl.checked = false;
-  }
-}
-
 const labelEl = document.getElementById('label');
 const urlEl = document.getElementById('url');
 const appIdEl = document.getElementById('appId');
@@ -873,8 +839,6 @@ const apiUsage30dTotalEl = document.getElementById('api_usage_30d_total');
 const apiUsage30dSuccessEl = document.getElementById('api_usage_30d_success');
 const apiUsage30dErrorEl = document.getElementById('api_usage_30d_error');
 const uiLanguageEl = document.getElementById('ui_language');
-const developerProOverrideRowEl = document.getElementById('developer_pro_override_row');
-const developerProOverrideEl = document.getElementById('developer_pro_override');
 const excelModeInputs = Array.from(document.querySelectorAll('input[name="excel_overlay_mode"]'));
 const excelModeNoticeEl = document.getElementById('excel_mode_notice');
 const OVERLAY_LAYOUT_PRESETS_KEY = 'kfavOverlayLayoutPresets';
@@ -2913,7 +2877,6 @@ addBtn.addEventListener('click', async () => {
     loadExcelOverlayMode(),
     loadShortcutSearchOpenMode(),
     loadWatchlistRefreshPreset(),
-    loadDeveloperProOverride(),
     loadApiUsageStats(),
     loadProLicenseUI(),
   ]);
@@ -2925,11 +2888,6 @@ if (chrome?.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && Object.prototype.hasOwnProperty.call(changes, UI_LANGUAGE_KEY)) {
       void applyUiLanguageSetting(changes[UI_LANGUAGE_KEY].newValue, { persist: false });
-    }
-    if (area === 'local' && Object.prototype.hasOwnProperty.call(changes, DEVELOPER_PRO_OVERRIDE_KEY)) {
-      if (developerProOverrideEl && isDeveloperUiEnabled()) {
-        developerProOverrideEl.checked = Boolean(changes[DEVELOPER_PRO_OVERRIDE_KEY].newValue);
-      }
     }
     if (area === 'local' && Object.prototype.hasOwnProperty.call(changes, WATCHLIST_REFRESH_PRESET_KEY)) {
       if (watchlistRefreshPresetEl) {
@@ -3048,7 +3006,6 @@ async function applyUiLanguageSetting(settingValue, { persist = false } = {}) {
     await chrome.storage.local.set({ [UI_LANGUAGE_KEY]: setting });
   }
   applyI18n(document);
-  updateDeveloperProOverrideVisibility();
   if (uiLanguageEl) {
     uiLanguageEl.value = setting;
   }
@@ -3190,18 +3147,6 @@ watchlistRefreshPresetEl?.addEventListener('change', async () => {
 uiLanguageEl?.addEventListener('change', async () => {
   const setting = normalizeUiLanguageSetting(uiLanguageEl.value);
   await applyUiLanguageSetting(setting, { persist: true });
-});
-
-developerProOverrideEl?.addEventListener('change', async () => {
-  if (!isDeveloperUiEnabled()) return;
-  if (developerProOverrideEl.checked) {
-    await chrome.storage.local.set({
-      [DEVELOPER_PRO_OVERRIDE_KEY]: true,
-      pbDeveloperProOverrideAt: Date.now()
-    });
-  } else {
-    await chrome.storage.local.remove([DEVELOPER_PRO_OVERRIDE_KEY, 'pbDeveloperProOverrideAt']);
-  }
 });
 
 apiUsageResetBtn?.addEventListener('click', async () => {
@@ -4018,34 +3963,3 @@ pinEditUrlEl?.addEventListener('change', () => {
   if (parsed.appId && pinEditAppIdEl && !pinEditAppIdEl.value) pinEditAppIdEl.value = parsed.appId;
   if (parsed.recordId && pinEditRecordIdEl && !pinEditRecordIdEl.value) pinEditRecordIdEl.value = parsed.recordId;
 });
-// ------------------------------------------------------------
-// Developer tools loader (DEV build only)
-// Store build では読み込まない
-// 
-function loadDevToolsIfNeeded() {
-  try {
-    const manifest = chrome.runtime.getManifest();
-    const isDevToolsEnabled = manifest?.plugbits_dev_tools === true;
-
-    if (!isDevToolsEnabled) {
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('dev-tools.js');
-
-    script.onload = () => {
-      console.log('[PlugBits] Developer tools loaded');
-    };
-
-    script.onerror = () => {
-      console.warn('[PlugBits] Failed to load dev-tools.js');
-    };
-
-    document.head.appendChild(script);
-  } catch (err) {
-    console.warn('[PlugBits] dev-tools init failed', err);
-  }
-}
-
-loadDevToolsIfNeeded();

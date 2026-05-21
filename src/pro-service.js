@@ -3,12 +3,6 @@
 (function registerProService(globalScope) {
   if (typeof globalScope.createProService === 'function') return;
 
-  const DEVELOPER_OVERRIDE_KEY = 'pbDeveloperProOverride';
-  const DEVELOPER_OVERRIDE_AT_KEY = 'pbDeveloperProOverrideAt';
-  const DEVELOPER_OVERRIDE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-  const INSTALL_TYPE_CACHE_TTL_MS = 30 * 1000;
-
   const LICENSE_KEY_STORAGE_KEY = 'pbLicenseKey';
   const LICENSE_CACHE_STORAGE_KEY = 'pbLicenseCache';
   const LICENSE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -25,12 +19,7 @@
     return fallback;
   }
 
-  function createInstallTypeCache() {
-    return { value: '', source: 'none', reason: '', expiresAt: 0 };
-  }
-
   function createProService() {
-    let installTypeCache = createInstallTypeCache();
     let debug = false;
 
     function debugLog(message, payload) {
@@ -39,91 +28,6 @@
     }
 
     function setDebug(value) { debug = Boolean(value); }
-
-    // ── Developer override ──────────────────────────────────────────────────
-
-    async function getDeveloperOverride() {
-      try {
-        const stored = await chrome.storage.local.get([
-          DEVELOPER_OVERRIDE_KEY,
-          DEVELOPER_OVERRIDE_AT_KEY
-        ]);
-        const enabled = toBoolean(stored?.[DEVELOPER_OVERRIDE_KEY], false);
-        const enabledAt = Number(stored?.[DEVELOPER_OVERRIDE_AT_KEY] || 0);
-        if (!enabled) return false;
-        if (!enabledAt) {
-          await chrome.storage.local.set({ [DEVELOPER_OVERRIDE_AT_KEY]: Date.now() });
-          return true;
-        }
-        const alive = (Date.now() - enabledAt) < DEVELOPER_OVERRIDE_TTL_MS;
-        if (!alive) {
-          await chrome.storage.local.remove([DEVELOPER_OVERRIDE_KEY, DEVELOPER_OVERRIDE_AT_KEY]);
-          return false;
-        }
-        return true;
-      } catch (_err) { return false; }
-    }
-
-    async function setDeveloperOverride(value) {
-      if (Boolean(value)) {
-        await chrome.storage.local.set({
-          [DEVELOPER_OVERRIDE_KEY]: true,
-          [DEVELOPER_OVERRIDE_AT_KEY]: Date.now()
-        });
-        return;
-      }
-      await chrome.storage.local.remove([DEVELOPER_OVERRIDE_KEY, DEVELOPER_OVERRIDE_AT_KEY]);
-    }
-
-    // ── Install type ────────────────────────────────────────────────────────
-
-    function getFallbackDevelopmentGuess() {
-      try {
-        const manifest = chrome.runtime?.getManifest?.() || {};
-        return !Object.prototype.hasOwnProperty.call(manifest, 'update_url');
-      } catch (_err) { return false; }
-    }
-
-    async function fetchInstallType() {
-      const now = Date.now();
-      if (installTypeCache.expiresAt > now) {
-        return {
-          ok: Boolean(installTypeCache.value),
-          installType: installTypeCache.value,
-          source: installTypeCache.source,
-          reason: installTypeCache.reason
-        };
-      }
-      let next = createInstallTypeCache();
-      if (!chrome?.runtime?.sendMessage) {
-        next.reason = 'runtime_unavailable';
-      } else {
-        try {
-          const response = await chrome.runtime.sendMessage({ type: 'PB_GET_INSTALL_TYPE' });
-          if (response?.ok && response.installType) {
-            next.value = String(response.installType);
-            next.source = String(response.source || 'management');
-            next.reason = '';
-          } else {
-            next.reason = String(response?.reason || 'install_type_unavailable');
-            if (response?.fallbackDevelopment === true) {
-              next.value = 'development';
-              next.source = 'fallback';
-            }
-          }
-        } catch (error) {
-          next.reason = String(error?.message || error || 'install_type_request_failed');
-        }
-      }
-      if (!next.value && getFallbackDevelopmentGuess()) {
-        next.value = 'development';
-        next.source = 'fallback';
-        next.reason = next.reason || 'manifest_fallback';
-      }
-      next.expiresAt = now + INSTALL_TYPE_CACHE_TTL_MS;
-      installTypeCache = next;
-      return { ok: Boolean(next.value), installType: next.value, source: next.source, reason: next.reason };
-    }
 
     // ── License key management ──────────────────────────────────────────────
 
@@ -249,36 +153,16 @@
 
     async function getProAccessState(options = {}) {
       const featureName = String(options?.featureName || '').trim() || 'default';
-      const allowDevelopmentInstall = toBoolean(options?.allowDevelopmentInstall, false);
-
-      const developerOverride = await getDeveloperOverride();
-      if (developerOverride) {
-        const state = { enabled: true, reason: 'developer_override', featureName, developerOverride: true, installType: '', source: 'local_override' };
-        debugLog('getProAccessState', state);
-        return state;
-      }
-
-      const installTypeInfo = await fetchInstallType();
-      if (allowDevelopmentInstall && installTypeInfo.installType === 'development') {
-        const state = { enabled: true, reason: 'development_install', featureName, developerOverride: false, installType: 'development', source: installTypeInfo.source || 'management' };
-        debugLog('getProAccessState', state);
-        return state;
-      }
-
       const entitlement = await evaluateProductionEntitlement(options);
-      if (entitlement?.enabled) {
-        const state = { enabled: true, reason: 'entitled', featureName, developerOverride: false, installType: installTypeInfo.installType || '', source: entitlement.source || 'entitlement', email: entitlement.email, expiry: entitlement.expiry, portalUrl: entitlement.portalUrl };
-        debugLog('getProAccessState', state);
-        return state;
-      }
-
-      if (!allowDevelopmentInstall && installTypeInfo.installType === 'development') {
-        const state = { enabled: false, reason: 'development_requires_override', featureName, developerOverride: false, installType: 'development', source: installTypeInfo.source || 'management' };
-        debugLog('getProAccessState', state);
-        return state;
-      }
-
-      const state = { enabled: false, reason: installTypeInfo.reason || entitlement?.reason || 'not_entitled', featureName, developerOverride: false, installType: installTypeInfo.installType || '', source: 'none' };
+      const state = {
+        enabled: Boolean(entitlement?.enabled),
+        reason: entitlement?.enabled ? 'entitled' : (entitlement?.reason || 'not_entitled'),
+        featureName,
+        source: entitlement?.source || 'none',
+        email: entitlement?.email,
+        expiry: entitlement?.expiry,
+        portalUrl: entitlement?.portalUrl
+      };
       debugLog('getProAccessState', state);
       return state;
     }
@@ -293,16 +177,8 @@
       return Boolean(state.enabled);
     }
 
-    function clearCaches() {
-      installTypeCache = createInstallTypeCache();
-    }
-
     return {
       setDebug,
-      clearCaches,
-      getDeveloperOverride,
-      setDeveloperOverride,
-      fetchInstallType,
       getProAccessState,
       isProEnabled,
       canUseProFeature,
