@@ -216,10 +216,8 @@ async function handleWebhook(request, env) {
     const customerId = obj?.customer;
     if (!subscriptionId || !customerId) return json({ ok: true, skipped: 'missing_ids' });
 
-    const sub = await getSubscription(env, subscriptionId);
-    const expiry = sub?.current_period_end
-      ? new Date(sub.current_period_end * 1000).toISOString()
-      : '';
+    const periodEnd = obj.lines?.data?.[0]?.period?.end;
+    const expiry = periodEnd ? new Date(periodEnd * 1000).toISOString() : '';
 
     // そのサブスクに紐づく全ライセンスキーを更新
     const list = await env.LICENSES.list({ prefix: KV_PREFIX });
