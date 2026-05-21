@@ -1532,6 +1532,7 @@ ul {
 
 /* アクションボタン */
 .pro-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.pro-actions [hidden] { display: none !important; }
 
 .pro-upgrade-btn {
   display: inline-block;

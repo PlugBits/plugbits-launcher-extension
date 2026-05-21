@@ -699,9 +699,9 @@ function updateProStatusUI(cache, key) {
     }
     if (proInfoSection) proInfoSection.hidden = false;
     if (proUpgradeBtn) proUpgradeBtn.hidden = true;
-    if (proPortalBtn) proPortalBtn.hidden = false;
-    if (proClearBtn) proClearBtn.hidden = false;
     proPortalUrl = cache.portalUrl || '';
+    if (proPortalBtn) proPortalBtn.hidden = !proPortalUrl;
+    if (proClearBtn) proClearBtn.hidden = false;
   } else {
     if (proStatusLabel) proStatusLabel.textContent = hasKey ? 'ライセンスキー未認証' : '無料プラン';
     if (proStatusSub) proStatusSub.textContent = hasKey ? 'キーを認証してください' : '';
@@ -786,8 +786,7 @@ if (proLicenseKeyInput) {
 
 if (proPortalBtn) {
   proPortalBtn.addEventListener('click', () => {
-    const url = proPortalUrl || 'https://billing.stripe.com/p/login/plugbits';
-    window.open(url, '_blank', 'noopener');
+    if (proPortalUrl) window.open(proPortalUrl, '_blank', 'noopener');
   });
 }
 
