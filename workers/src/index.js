@@ -274,8 +274,10 @@ async function handleVerify(request, env) {
   const licenseKey = url.searchParams.get('key')?.trim() || '';
   if (!licenseKey) return json({ ok: false, reason: 'missing_key' }, 400);
 
+  const rawKey = licenseKey.startsWith('lic_') ? licenseKey.slice(4) : licenseKey;
+
   // 1. KVキャッシュ確認
-  const cached = await kvGet(env, licenseKey);
+  const cached = await kvGet(env, rawKey);
   if (cached) {
     const portalUrl = cached.stripe_customer_id
       ? await createPortalSession(env, cached.stripe_customer_id)
