@@ -86,8 +86,8 @@ const I18N_MESSAGES = {
     overlay_mode_standard: 'Standard',
     overlay_mode_standard_desc: 'スプレッドシートビュー のフィルタ・ソート・コピー・列レイアウト変更は可能です。編集と保存は利用できません。',
     overlay_mode_pro: 'Pro',
-    overlay_mode_pro_desc: '編集機能を利用できる上位モードです。近日公開予定。',
-    overlay_mode_pro_notice: 'Proモードは近日公開予定です。現在はStandardをご利用ください。',
+    overlay_mode_pro_desc: 'Grid Edit による行内一括編集・新規入力が使えます。Pro ライセンスが必要です。',
+    overlay_mode_pro_notice: 'Pro ライセンスが必要です。「Pro ライセンス」タブからキーを入力してください。',
     overlay_layout_title: '列レイアウト設定',
     overlay_layout_desc: 'アプリごとに保存された Overlay レイアウトプリセットを確認・管理します。Overlay 本体と同じ設定を表示します。',
     overlay_layout_active: 'active',
@@ -347,8 +347,8 @@ const I18N_MESSAGES = {
     overlay_mode_standard: 'Standard',
     overlay_mode_standard_desc: 'Spreadsheet View supports filtering, sorting, copying, and column layout changes. Editing and saving are disabled.',
     overlay_mode_pro: 'Pro',
-    overlay_mode_pro_desc: 'Advanced mode with editing features. Coming soon.',
-    overlay_mode_pro_notice: 'Pro mode is coming soon. Please use Standard for now.',
+    overlay_mode_pro_desc: 'Enables Grid Edit for inline batch editing. Requires a Pro license.',
+    overlay_mode_pro_notice: 'A Pro license is required. Enter your key in the "Pro License" tab.',
     overlay_layout_title: 'Column Layout Settings',
     overlay_layout_desc: 'Review and manage Overlay layout presets saved per app. This view uses the same storage as the Overlay screen.',
     overlay_layout_active: 'Active',
@@ -660,6 +660,19 @@ function isDeveloperUiEnabled() {
     if (params.get(DEVELOPER_UI_QUERY_PARAM) === '1') return true;
     const manifest = chrome.runtime.getManifest();
     return manifest?.plugbits_dev_tools === true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+async function isProActive() {
+  if (isDeveloperUiEnabled()) return true;
+  try {
+    const stored = await chrome.storage.local.get(PRO_LICENSE_CACHE_KEY);
+    const cache = stored?.[PRO_LICENSE_CACHE_KEY];
+    if (!cache) return false;
+    const age = Date.now() - (cache.cachedAt || 0);
+    return cache.status === 'active' && age < PRO_CACHE_TTL_MS;
   } catch (_err) {
     return false;
   }
@@ -2957,15 +2970,17 @@ if (chrome?.storage?.onChanged) {
     }
     if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, EXCEL_OVERLAY_MODE_KEY)) {
       const requestedMode = normalizeExcelOverlayMode(changes[EXCEL_OVERLAY_MODE_KEY].newValue);
-      const mode = getEffectiveExcelOverlayMode(requestedMode);
-      excelModeInputs.forEach((input) => {
-        input.checked = input.value === mode;
+      isProActive().then((proOk) => {
+        const mode = (requestedMode === EXCEL_OVERLAY_MODE_PRO && !proOk)
+          ? EXCEL_OVERLAY_MODE_STANDARD
+          : requestedMode;
+        excelModeInputs.forEach((input) => {
+          input.checked = input.value === mode;
+        });
+        setExcelModeNotice((requestedMode === EXCEL_OVERLAY_MODE_PRO && !proOk)
+          ? t(EXCEL_OVERLAY_MODE_PRO_NOTICE_KEY)
+          : '');
       });
-      if (requestedMode === EXCEL_OVERLAY_MODE_PRO) {
-        setExcelModeNotice(t(EXCEL_OVERLAY_MODE_PRO_NOTICE_KEY));
-      } else {
-        setExcelModeNotice('');
-      }
     }
     if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, SHORTCUT_SEARCH_OPEN_MODE_KEY)) {
       const mode = normalizeShortcutSearchOpenMode(changes[SHORTCUT_SEARCH_OPEN_MODE_KEY].newValue);
@@ -3053,9 +3068,7 @@ function normalizeExcelOverlayMode(value) {
 }
 
 function getEffectiveExcelOverlayMode(value) {
-  const normalized = normalizeExcelOverlayMode(value);
-  if (normalized === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) return EXCEL_OVERLAY_MODE_STANDARD;
-  return normalized;
+  return normalizeExcelOverlayMode(value);
 }
 
 function setExcelModeNotice(message) {
@@ -3092,11 +3105,14 @@ async function loadExcelOverlayMode() {
   if (!excelModeInputs.length) return;
   const stored = await chrome.storage.sync.get(EXCEL_OVERLAY_MODE_KEY);
   const requestedMode = normalizeExcelOverlayMode(stored[EXCEL_OVERLAY_MODE_KEY]);
-  const mode = getEffectiveExcelOverlayMode(requestedMode);
+  const proOk = await isProActive();
+  const mode = (requestedMode === EXCEL_OVERLAY_MODE_PRO && !proOk)
+    ? EXCEL_OVERLAY_MODE_STANDARD
+    : requestedMode;
   excelModeInputs.forEach((input) => {
     input.checked = input.value === mode;
   });
-  if (requestedMode === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) {
+  if (requestedMode === EXCEL_OVERLAY_MODE_PRO && !proOk) {
     await saveExcelOverlayMode(EXCEL_OVERLAY_MODE_STANDARD);
   }
   setExcelModeNotice('');
@@ -3146,7 +3162,7 @@ excelModeInputs.forEach((input) => {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
     const selectedMode = normalizeExcelOverlayMode(input.value);
-    if (selectedMode === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) {
+    if (selectedMode === EXCEL_OVERLAY_MODE_PRO && !(await isProActive())) {
       setExcelModeNotice(t(EXCEL_OVERLAY_MODE_PRO_NOTICE_KEY));
       const fallback = excelModeInputs.find((node) => node.value === EXCEL_OVERLAY_MODE_STANDARD);
       if (fallback) fallback.checked = true;
