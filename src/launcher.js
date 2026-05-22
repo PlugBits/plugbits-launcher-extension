@@ -3662,11 +3662,6 @@ function attachStorageListener() {
       state.watchlistLimit = normalizeWatchlistLimit(changes[WATCHLIST_LIMIT_KEY]?.newValue);
       return;
     }
-    // Dev Pro activation override (temporary until Cloudflare auth)
-    if (area === 'local' && Object.prototype.hasOwnProperty.call(changes, 'pbDeveloperProOverride')) {
-      refreshOverlayLaunchState().catch(() => {});
-      return;
-    }
     if (area !== 'sync') return;
     if (changes.kintoneFavorites) {
       loadFavoritesAndRender().catch((error) => {

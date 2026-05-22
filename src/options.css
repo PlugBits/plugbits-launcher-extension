@@ -1436,3 +1436,126 @@ ul {
 @media (prefers-color-scheme: dark){
   .api-usage-kv strong{color:#f1f1f1;}
 }
+/* ── Pro ライセンス ───────────────────────────────────────────────────────── */
+
+.menu-item--pro {
+  margin-top: auto;
+  border-top: 1px solid var(--border, #e5e7eb);
+  color: #7c3aed;
+  font-weight: 600;
+}
+
+/* ステータスバナー */
+.pro-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 20px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.pro-status-banner[data-status="active"] {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+  border-color: #a78bfa;
+}
+.pro-status-banner[data-status="inactive"] {
+  background: #fff7ed;
+  border-color: #fdba74;
+}
+
+.pro-status-icon {
+  font-size: 24px;
+  width: 36px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.pro-status-body { flex: 1; min-width: 0; }
+.pro-status-label { font-weight: 600; font-size: 14px; color: #111827; }
+.pro-status-sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+
+.pro-badge {
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+
+/* キー入力 */
+.pro-key-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+.pro-key-label { font-weight: 600; font-size: 13px; color: #374151; }
+.pro-key-input-wrap { display: flex; gap: 8px; width: 100%; }
+.pro-key-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: monospace;
+  color: #111827;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.pro-key-input:focus { border-color: #7c3aed; box-shadow: 0 0 0 2px rgba(124,58,237,0.12); }
+
+.pro-verify-btn {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pro-verify-btn:hover:not(:disabled) { background: #6d28d9; }
+.pro-verify-btn:disabled { background: #c4b5fd; cursor: default; }
+
+.hint--success { color: #059669 !important; }
+.hint--error { color: #dc2626 !important; }
+
+/* 認証済み情報 */
+.pro-info-rows { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.pro-info-row { display: flex; gap: 12px; font-size: 13px; }
+.pro-info-label { color: #6b7280; width: 100px; flex-shrink: 0; }
+.pro-info-value { color: #111827; font-weight: 500; }
+
+/* アクションボタン */
+.pro-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.pro-actions [hidden] { display: none !important; }
+
+.pro-upgrade-btn {
+  display: inline-block;
+  padding: 9px 20px;
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: opacity 0.15s;
+}
+.pro-upgrade-btn:hover { opacity: 0.88; }
+
+.pro-portal-btn {
+  padding: 9px 16px;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pro-portal-btn:hover { background: #e5e7eb; }
+
+.pro-clear-btn { font-size: 13px; }

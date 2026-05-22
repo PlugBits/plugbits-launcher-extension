@@ -86,8 +86,8 @@ const I18N_MESSAGES = {
     overlay_mode_standard: 'Standard',
     overlay_mode_standard_desc: 'スプレッドシートビュー のフィルタ・ソート・コピー・列レイアウト変更は可能です。編集と保存は利用できません。',
     overlay_mode_pro: 'Pro',
-    overlay_mode_pro_desc: '編集機能を利用できる上位モードです。近日公開予定。',
-    overlay_mode_pro_notice: 'Proモードは近日公開予定です。現在はStandardをご利用ください。',
+    overlay_mode_pro_desc: 'Grid Edit による行内一括編集・新規入力が使えます。Pro ライセンスが必要です。',
+    overlay_mode_pro_notice: 'Pro ライセンスが必要です。「Pro ライセンス」タブからキーを入力してください。',
     overlay_layout_title: '列レイアウト設定',
     overlay_layout_desc: 'アプリごとに保存された Overlay レイアウトプリセットを確認・管理します。Overlay 本体と同じ設定を表示します。',
     overlay_layout_active: 'active',
@@ -295,6 +295,19 @@ const I18N_MESSAGES = {
     api_usage_group_recent: '最近のレコード',
     api_usage_group_spreadsheet: 'スプレッドシート',
     api_usage_group_admin: '管理',
+    nav_pro_license: 'Pro ライセンス',
+    pro_license_title: 'PlugBits Launcher Pro',
+    pro_status_free: '無料プラン',
+    pro_status_active: 'Pro プラン（有効）',
+    pro_status_expired: 'Pro プラン（期限切れ）',
+    pro_license_key_label: 'ライセンスキー',
+    pro_verify_btn: '認証する',
+    pro_info_email: 'メールアドレス',
+    pro_info_expiry: '次回更新日',
+    pro_upgrade_btn: 'Pro にアップグレード',
+    pro_portal_btn: 'サブスク管理・領収書',
+    pro_clear_btn: 'ライセンス解除',
+    pro_portal_hint: '解約・プラン変更・領収書の発行は「サブスク管理」から行えます。',
   },
   en: {
     settings_title: 'PlugBits Launcher Settings',
@@ -334,8 +347,8 @@ const I18N_MESSAGES = {
     overlay_mode_standard: 'Standard',
     overlay_mode_standard_desc: 'Spreadsheet View supports filtering, sorting, copying, and column layout changes. Editing and saving are disabled.',
     overlay_mode_pro: 'Pro',
-    overlay_mode_pro_desc: 'Advanced mode with editing features. Coming soon.',
-    overlay_mode_pro_notice: 'Pro mode is coming soon. Please use Standard for now.',
+    overlay_mode_pro_desc: 'Enables Grid Edit for inline batch editing. Requires a Pro license.',
+    overlay_mode_pro_notice: 'A Pro license is required. Enter your key in the "Pro License" tab.',
     overlay_layout_title: 'Column Layout Settings',
     overlay_layout_desc: 'Review and manage Overlay layout presets saved per app. This view uses the same storage as the Overlay screen.',
     overlay_layout_active: 'Active',
@@ -543,15 +556,25 @@ const I18N_MESSAGES = {
     api_usage_group_recent: 'Recent Records',
     api_usage_group_spreadsheet: 'Spreadsheet',
     api_usage_group_admin: 'System / Admin',
+    nav_pro_license: 'Pro License',
+    pro_license_title: 'PlugBits Launcher Pro',
+    pro_status_free: 'Free plan',
+    pro_status_active: 'Pro plan (active)',
+    pro_status_expired: 'Pro plan (expired)',
+    pro_license_key_label: 'License Key',
+    pro_verify_btn: 'Verify',
+    pro_info_email: 'Email',
+    pro_info_expiry: 'Next renewal',
+    pro_upgrade_btn: 'Upgrade to Pro',
+    pro_portal_btn: 'Manage subscription',
+    pro_clear_btn: 'Remove license',
+    pro_portal_hint: 'Cancel, change plan, or download receipts from "Manage subscription".',
   }
 };
 
 const UI_LANGUAGE_KEY = 'uiLanguage';
 const UI_LANGUAGE_VALUES = ['auto', 'ja', 'en'];
 const DEFAULT_UI_LANGUAGE = 'auto';
-const DEVELOPER_PRO_OVERRIDE_KEY = 'pbDeveloperProOverride';
-const DEVELOPER_UI_QUERY_PARAM = 'dev';
-
 let currentLang = 'ja';
 let currentUiLanguageSetting = DEFAULT_UI_LANGUAGE;
 let optionsDataReady = false;
@@ -628,35 +651,156 @@ async function initializeI18n() {
   await applyUiLanguageSetting(setting, { persist: false });
 }
 
-function isDeveloperUiEnabled() {
+async function isProActive() {
   try {
-    const params = new URLSearchParams(window.location.search || '');
-    if (params.get(DEVELOPER_UI_QUERY_PARAM) === '1') return true;
-    const manifest = chrome.runtime.getManifest();
-    return manifest?.plugbits_dev_tools === true;
+    const stored = await chrome.storage.local.get(PRO_LICENSE_CACHE_KEY);
+    const cache = stored?.[PRO_LICENSE_CACHE_KEY];
+    if (!cache) return false;
+    const age = Date.now() - (cache.cachedAt || 0);
+    return cache.status === 'active' && age < PRO_CACHE_TTL_MS;
   } catch (_err) {
     return false;
   }
 }
 
-function updateDeveloperProOverrideVisibility() {
-  if (!developerProOverrideRowEl) return false;
-  const enabled = isDeveloperUiEnabled();
-  developerProOverrideRowEl.hidden = !enabled;
-  return enabled;
-}
+// ── Pro ライセンス UI ────────────────────────────────────────────────────────
 
-async function loadDeveloperProOverride() {
-  if (!developerProOverrideEl) return;
-  const visible = updateDeveloperProOverrideVisibility();
-  if (!visible) return;
-  try {
-    const stored = await chrome.storage.local.get(DEVELOPER_PRO_OVERRIDE_KEY);
-    developerProOverrideEl.checked = Boolean(stored?.[DEVELOPER_PRO_OVERRIDE_KEY]);
-  } catch (_err) {
-    developerProOverrideEl.checked = false;
+const proStatusBanner = document.getElementById('pro_status_banner');
+const proStatusLabel = document.getElementById('pro_status_label');
+const proStatusSub = document.getElementById('pro_status_sub');
+const proBadge = document.getElementById('pro_badge');
+const proLicenseKeyInput = document.getElementById('pro_license_key_input');
+const proVerifyBtn = document.getElementById('pro_verify_btn');
+const proVerifyMsg = document.getElementById('pro_verify_msg');
+const proInfoSection = document.getElementById('pro_info_section');
+const proInfoEmail = document.getElementById('pro_info_email');
+const proInfoExpiry = document.getElementById('pro_info_expiry');
+const proUpgradeBtn = document.getElementById('pro_upgrade_btn');
+const proPortalBtn = document.getElementById('pro_portal_btn');
+const proClearBtn = document.getElementById('pro_clear_btn');
+
+let proPortalUrl = '';
+
+function updateProStatusUI(cache, key) {
+  if (!proStatusBanner) return;
+  const isActive = cache?.status === 'active';
+  const hasKey = Boolean(key);
+
+  proStatusBanner.dataset.status = isActive ? 'active' : (hasKey ? 'inactive' : 'free');
+  if (proBadge) proBadge.hidden = !isActive;
+
+  if (isActive) {
+    if (proStatusLabel) proStatusLabel.textContent = 'PlugBits Launcher Pro 有効';
+    if (proStatusSub) proStatusSub.textContent = cache.email ? `登録メール: ${cache.email}` : '';
+    if (proInfoEmail) proInfoEmail.textContent = cache.email || '—';
+    if (proInfoExpiry && cache.expiry) {
+      const d = new Date(cache.expiry);
+      proInfoExpiry.textContent = isNaN(d.getTime()) ? cache.expiry : d.toLocaleDateString('ja-JP');
+    }
+    if (proInfoSection) proInfoSection.hidden = false;
+    if (proUpgradeBtn) proUpgradeBtn.hidden = true;
+    proPortalUrl = cache.portalUrl || '';
+    if (proPortalBtn) proPortalBtn.hidden = !proPortalUrl;
+    if (proClearBtn) proClearBtn.hidden = false;
+  } else {
+    if (proStatusLabel) proStatusLabel.textContent = hasKey ? 'ライセンスキー未認証' : '無料プラン';
+    if (proStatusSub) proStatusSub.textContent = hasKey ? 'キーを認証してください' : '';
+    if (proInfoSection) proInfoSection.hidden = true;
+    if (proUpgradeBtn) proUpgradeBtn.hidden = false;
+    if (proPortalBtn) proPortalBtn.hidden = true;
+    if (proClearBtn) proClearBtn.hidden = !hasKey;
+  }
+
+  if (proLicenseKeyInput && key && !proLicenseKeyInput.value) {
+    proLicenseKeyInput.value = key;
   }
 }
+
+function setProVerifyState(state, message) {
+  if (!proVerifyBtn) return;
+  if (state === 'loading') {
+    proVerifyBtn.disabled = true;
+    proVerifyBtn.textContent = '認証中...';
+    if (proVerifyMsg) { proVerifyMsg.textContent = ''; proVerifyMsg.className = 'hint'; }
+  } else if (state === 'ok') {
+    proVerifyBtn.disabled = false;
+    proVerifyBtn.textContent = '再認証';
+    if (proVerifyMsg) { proVerifyMsg.textContent = message || '認証成功'; proVerifyMsg.className = 'hint hint--success'; }
+  } else if (state === 'error') {
+    proVerifyBtn.disabled = false;
+    proVerifyBtn.textContent = '認証する';
+    if (proVerifyMsg) { proVerifyMsg.textContent = message || '認証に失敗しました'; proVerifyMsg.className = 'hint hint--error'; }
+  } else {
+    proVerifyBtn.disabled = false;
+    proVerifyBtn.textContent = '認証する';
+    if (proVerifyMsg) { proVerifyMsg.textContent = ''; proVerifyMsg.className = 'hint'; }
+  }
+}
+
+async function loadProLicenseUI() {
+  try {
+    const stored = await chrome.storage.local.get([PRO_LICENSE_KEY, PRO_LICENSE_CACHE_KEY]);
+    const key = String(stored?.[PRO_LICENSE_KEY] || '').trim();
+    const cache = stored?.[PRO_LICENSE_CACHE_KEY] || null;
+    const cacheValid = cache && typeof cache.cachedAt === 'number' && (Date.now() - cache.cachedAt) < PRO_CACHE_TTL_MS;
+    updateProStatusUI(cacheValid ? cache : null, key);
+    if (key) setProVerifyState(cacheValid && cache?.status === 'active' ? 'ok' : 'idle');
+  } catch (_err) {
+    updateProStatusUI(null, '');
+  }
+}
+
+async function doVerifyLicense(key) {
+  if (!key) { setProVerifyState('error', 'ライセンスキーを入力してください'); return; }
+  setProVerifyState('loading');
+  try {
+    const url = `${VERIFY_ENDPOINT}?key=${encodeURIComponent(key)}`;
+    const resp = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
+    const body = await resp.json().catch(() => ({}));
+    if (resp.ok && body?.status === 'active') {
+      const cache = { ...body, cachedAt: Date.now() };
+      await chrome.storage.local.set({ [PRO_LICENSE_KEY]: key, [PRO_LICENSE_CACHE_KEY]: cache });
+      updateProStatusUI(cache, key);
+      setProVerifyState('ok', 'Pro が有効になりました 🎉');
+    } else {
+      const reason = body?.reason || body?.status || `HTTP ${resp.status}`;
+      setProVerifyState('error', `認証失敗: ${reason}`);
+    }
+  } catch (err) {
+    setProVerifyState('error', 'ネットワークエラーが発生しました。接続を確認してください。');
+  }
+}
+
+if (proVerifyBtn) {
+  proVerifyBtn.addEventListener('click', () => {
+    const key = proLicenseKeyInput ? proLicenseKeyInput.value.trim() : '';
+    void doVerifyLicense(key);
+  });
+}
+
+if (proLicenseKeyInput) {
+  proLicenseKeyInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); proVerifyBtn?.click(); }
+  });
+}
+
+if (proPortalBtn) {
+  proPortalBtn.addEventListener('click', () => {
+    if (proPortalUrl) window.open(proPortalUrl, '_blank', 'noopener');
+  });
+}
+
+if (proClearBtn) {
+  proClearBtn.addEventListener('click', async () => {
+    if (!confirm('ライセンスを解除しますか？Pro 機能が無効になります。')) return;
+    await chrome.storage.local.remove([PRO_LICENSE_KEY, PRO_LICENSE_CACHE_KEY]);
+    if (proLicenseKeyInput) proLicenseKeyInput.value = '';
+    updateProStatusUI(null, '');
+    setProVerifyState('idle');
+  });
+}
+
+// ── End Pro ライセンス UI ──────────────────────────────────────────────────
 
 const labelEl = document.getElementById('label');
 const urlEl = document.getElementById('url');
@@ -694,8 +838,6 @@ const apiUsage30dTotalEl = document.getElementById('api_usage_30d_total');
 const apiUsage30dSuccessEl = document.getElementById('api_usage_30d_success');
 const apiUsage30dErrorEl = document.getElementById('api_usage_30d_error');
 const uiLanguageEl = document.getElementById('ui_language');
-const developerProOverrideRowEl = document.getElementById('developer_pro_override_row');
-const developerProOverrideEl = document.getElementById('developer_pro_override');
 const excelModeInputs = Array.from(document.querySelectorAll('input[name="excel_overlay_mode"]'));
 const excelModeNoticeEl = document.getElementById('excel_mode_notice');
 const OVERLAY_LAYOUT_PRESETS_KEY = 'kfavOverlayLayoutPresets';
@@ -718,6 +860,10 @@ const MAX_WATCHLIST_LIMIT = 5;
 const WATCHLIST_LIMIT_VALUES = [DEFAULT_WATCHLIST_LIMIT, MAX_WATCHLIST_LIMIT];
 const PIN_VISIBLE_KEY = 'kfavRecordPinsVisible';
 const API_USAGE_DAILY_KEY = 'apiUsageDaily';
+const PRO_LICENSE_KEY = 'pbLicenseKey';
+const PRO_LICENSE_CACHE_KEY = 'pbLicenseCache';
+const PRO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const VERIFY_ENDPOINT = 'https://api.plugbits.app/verify';
 const PB_METADATA_CACHE_PREFIX = 'pb:meta:v1:';
 const API_USAGE_RETENTION_DAYS = 31;
 const API_USAGE_FEATURE_ORDER = [
@@ -2730,8 +2876,8 @@ addBtn.addEventListener('click', async () => {
     loadExcelOverlayMode(),
     loadShortcutSearchOpenMode(),
     loadWatchlistRefreshPreset(),
-    loadDeveloperProOverride(),
     loadApiUsageStats(),
+    loadProLicenseUI(),
   ]);
   optionsDataReady = true;
 
@@ -2741,11 +2887,6 @@ if (chrome?.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && Object.prototype.hasOwnProperty.call(changes, UI_LANGUAGE_KEY)) {
       void applyUiLanguageSetting(changes[UI_LANGUAGE_KEY].newValue, { persist: false });
-    }
-    if (area === 'local' && Object.prototype.hasOwnProperty.call(changes, DEVELOPER_PRO_OVERRIDE_KEY)) {
-      if (developerProOverrideEl && isDeveloperUiEnabled()) {
-        developerProOverrideEl.checked = Boolean(changes[DEVELOPER_PRO_OVERRIDE_KEY].newValue);
-      }
     }
     if (area === 'local' && Object.prototype.hasOwnProperty.call(changes, WATCHLIST_REFRESH_PRESET_KEY)) {
       if (watchlistRefreshPresetEl) {
@@ -2786,15 +2927,17 @@ if (chrome?.storage?.onChanged) {
     }
     if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, EXCEL_OVERLAY_MODE_KEY)) {
       const requestedMode = normalizeExcelOverlayMode(changes[EXCEL_OVERLAY_MODE_KEY].newValue);
-      const mode = getEffectiveExcelOverlayMode(requestedMode);
-      excelModeInputs.forEach((input) => {
-        input.checked = input.value === mode;
+      isProActive().then((proOk) => {
+        const mode = (requestedMode === EXCEL_OVERLAY_MODE_PRO && !proOk)
+          ? EXCEL_OVERLAY_MODE_STANDARD
+          : requestedMode;
+        excelModeInputs.forEach((input) => {
+          input.checked = input.value === mode;
+        });
+        setExcelModeNotice((requestedMode === EXCEL_OVERLAY_MODE_PRO && !proOk)
+          ? t(EXCEL_OVERLAY_MODE_PRO_NOTICE_KEY)
+          : '');
       });
-      if (requestedMode === EXCEL_OVERLAY_MODE_PRO) {
-        setExcelModeNotice(t(EXCEL_OVERLAY_MODE_PRO_NOTICE_KEY));
-      } else {
-        setExcelModeNotice('');
-      }
     }
     if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, SHORTCUT_SEARCH_OPEN_MODE_KEY)) {
       const mode = normalizeShortcutSearchOpenMode(changes[SHORTCUT_SEARCH_OPEN_MODE_KEY].newValue);
@@ -2862,7 +3005,6 @@ async function applyUiLanguageSetting(settingValue, { persist = false } = {}) {
     await chrome.storage.local.set({ [UI_LANGUAGE_KEY]: setting });
   }
   applyI18n(document);
-  updateDeveloperProOverrideVisibility();
   if (uiLanguageEl) {
     uiLanguageEl.value = setting;
   }
@@ -2882,9 +3024,7 @@ function normalizeExcelOverlayMode(value) {
 }
 
 function getEffectiveExcelOverlayMode(value) {
-  const normalized = normalizeExcelOverlayMode(value);
-  if (normalized === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) return EXCEL_OVERLAY_MODE_STANDARD;
-  return normalized;
+  return normalizeExcelOverlayMode(value);
 }
 
 function setExcelModeNotice(message) {
@@ -2921,11 +3061,14 @@ async function loadExcelOverlayMode() {
   if (!excelModeInputs.length) return;
   const stored = await chrome.storage.sync.get(EXCEL_OVERLAY_MODE_KEY);
   const requestedMode = normalizeExcelOverlayMode(stored[EXCEL_OVERLAY_MODE_KEY]);
-  const mode = getEffectiveExcelOverlayMode(requestedMode);
+  const proOk = await isProActive();
+  const mode = (requestedMode === EXCEL_OVERLAY_MODE_PRO && !proOk)
+    ? EXCEL_OVERLAY_MODE_STANDARD
+    : requestedMode;
   excelModeInputs.forEach((input) => {
     input.checked = input.value === mode;
   });
-  if (requestedMode === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) {
+  if (requestedMode === EXCEL_OVERLAY_MODE_PRO && !proOk) {
     await saveExcelOverlayMode(EXCEL_OVERLAY_MODE_STANDARD);
   }
   setExcelModeNotice('');
@@ -2975,7 +3118,7 @@ excelModeInputs.forEach((input) => {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
     const selectedMode = normalizeExcelOverlayMode(input.value);
-    if (selectedMode === EXCEL_OVERLAY_MODE_PRO && !isDeveloperUiEnabled()) {
+    if (selectedMode === EXCEL_OVERLAY_MODE_PRO && !(await isProActive())) {
       setExcelModeNotice(t(EXCEL_OVERLAY_MODE_PRO_NOTICE_KEY));
       const fallback = excelModeInputs.find((node) => node.value === EXCEL_OVERLAY_MODE_STANDARD);
       if (fallback) fallback.checked = true;
@@ -3003,18 +3146,6 @@ watchlistRefreshPresetEl?.addEventListener('change', async () => {
 uiLanguageEl?.addEventListener('change', async () => {
   const setting = normalizeUiLanguageSetting(uiLanguageEl.value);
   await applyUiLanguageSetting(setting, { persist: true });
-});
-
-developerProOverrideEl?.addEventListener('change', async () => {
-  if (!isDeveloperUiEnabled()) return;
-  if (developerProOverrideEl.checked) {
-    await chrome.storage.local.set({
-      [DEVELOPER_PRO_OVERRIDE_KEY]: true,
-      pbDeveloperProOverrideAt: Date.now()
-    });
-  } else {
-    await chrome.storage.local.remove([DEVELOPER_PRO_OVERRIDE_KEY, 'pbDeveloperProOverrideAt']);
-  }
 });
 
 apiUsageResetBtn?.addEventListener('click', async () => {
@@ -3831,34 +3962,3 @@ pinEditUrlEl?.addEventListener('change', () => {
   if (parsed.appId && pinEditAppIdEl && !pinEditAppIdEl.value) pinEditAppIdEl.value = parsed.appId;
   if (parsed.recordId && pinEditRecordIdEl && !pinEditRecordIdEl.value) pinEditRecordIdEl.value = parsed.recordId;
 });
-// ------------------------------------------------------------
-// Developer tools loader (DEV build only)
-// Store build では読み込まない
-// 
-function loadDevToolsIfNeeded() {
-  try {
-    const manifest = chrome.runtime.getManifest();
-    const isDevToolsEnabled = manifest?.plugbits_dev_tools === true;
-
-    if (!isDevToolsEnabled) {
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('dev-tools.js');
-
-    script.onload = () => {
-      console.log('[PlugBits] Developer tools loaded');
-    };
-
-    script.onerror = () => {
-      console.warn('[PlugBits] Failed to load dev-tools.js');
-    };
-
-    document.head.appendChild(script);
-  } catch (err) {
-    console.warn('[PlugBits] dev-tools init failed', err);
-  }
-}
-
-loadDevToolsIfNeeded();

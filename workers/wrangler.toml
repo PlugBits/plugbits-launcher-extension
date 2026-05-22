@@ -1,0 +1,18 @@
+name = "plugbits-api"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "306e0240845b49709b3333a7fb3d85ee"
+preview_id = "YOUR_KV_PREVIEW_ID"    # preview 用
+
+[vars]
+ALLOWED_ORIGIN = "chrome-extension://femlefbhnobmpdaabkmkaklobbcgacpa"
+
+# Secrets（wrangler secret put で登録）:
+#   STRIPE_SECRET_KEY       = sk_live_...
+#   STRIPE_WEBHOOK_SECRET   = whsec_...
+#   BREVO_API_KEY           = xkeysib-...
+#   BREVO_SENDER_EMAIL      = no-reply@plugbits.app
+#   BREVO_SENDER_NAME       = PlugBits Launcher
