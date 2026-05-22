@@ -1308,8 +1308,8 @@
       toastNoChanges: "変更はありません",
       toastInvalidCells: "エラーを解消してから保存してください",
       toastRequiredMissing: "必須項目を入力してください",
-      toastViewOnlyBlocked: "Proモードで利用できます",
-      overlayProOnly: "Proモードで利用できます",
+      toastViewOnlyBlocked: "Pro 版のみ",
+      overlayProOnly: "Pro 版のみ",
       overlayStandardReadonly: "Standardでは閲覧のみ利用できます",
       overlayProComingSoon: "Proモードは近日公開予定です",
       lookupAutoReadonly: "LOOKUPにより自動入力されるため編集できません",
@@ -1446,8 +1446,8 @@
       toastNoChanges: "No changes",
       toastInvalidCells: "Fix errors before saving",
       toastRequiredMissing: "Please fill required fields",
-      toastViewOnlyBlocked: "Available in Pro mode",
-      overlayProOnly: "Available in Pro mode",
+      toastViewOnlyBlocked: "Pro plan only",
+      overlayProOnly: "Pro plan only",
       overlayStandardReadonly: "Editing is disabled in Standard mode",
       overlayProComingSoon: "Pro mode is coming soon",
       lookupAutoReadonly: "This field is auto-populated by LOOKUP and cannot be edited",
@@ -8878,11 +8878,15 @@
     }
 
     updateHistoryButtons() {
+      const canEdit = this.canEditOverlay();
+      const proHint = canEdit ? '' : resolveText(this.language, 'toastViewOnlyBlocked');
       if (this.undoButton) {
-        this.undoButton.disabled = this.saving || !this.canEditOverlay() || this.undoStack.length === 0;
+        this.undoButton.disabled = this.saving || !canEdit || this.undoStack.length === 0;
+        if (!canEdit) this.undoButton.title = proHint;
       }
       if (this.redoButton) {
-        this.redoButton.disabled = this.saving || !this.canEditOverlay() || this.redoStack.length === 0;
+        this.redoButton.disabled = this.saving || !canEdit || this.redoStack.length === 0;
+        if (!canEdit) this.redoButton.title = proHint;
       }
     }
 
