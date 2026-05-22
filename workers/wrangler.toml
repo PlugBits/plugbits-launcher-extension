@@ -8,7 +8,8 @@ id = "306e0240845b49709b3333a7fb3d85ee"
 preview_id = "YOUR_KV_PREVIEW_ID"    # preview 用
 
 [vars]
-ALLOWED_ORIGIN = "chrome-extension://femlefbhnobmpdaabkmkaklobbcgacpa"
+# ALLOWED_ORIGIN = "chrome-extension://femlefbhnobmpdaabkmkaklobbcgacpa"
+ALLOWED_ORIGIN = "*"
 
 # Secrets（wrangler secret put で登録）:
 #   STRIPE_SECRET_KEY       = sk_live_...
