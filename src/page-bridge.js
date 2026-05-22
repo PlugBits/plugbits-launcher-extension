@@ -14,6 +14,8 @@ const PB_DEBUG_FLAG_KEY = '__PB_DEBUG_API__';
 const PB_DEBUG_DEFAULT = false;
 const PB_DOM_METADATA_FALLBACK_FLAG_KEY = '__PB_ENABLE_DOM_METADATA_FALLBACK__';
 const PB_DOM_METADATA_FALLBACK_DEFAULT = false;
+const FILE_UPLOAD_MAX_ATTEMPTS = 3;
+const FILE_UPLOAD_RETRY_DELAYS_MS = [500, 1000];
 
 function normalizeEndpointForTelemetry(path) {
   const raw = String(path || '').trim();
@@ -21,6 +23,62 @@ function normalizeEndpointForTelemetry(path) {
   if (!raw.startsWith('/k/v1/')) return raw;
   if (raw.endsWith('.json')) return raw;
   return `${raw}.json`;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, Number(ms) || 0));
+  });
+}
+
+function isRetryableUploadStatus(status) {
+  const code = Number(status || 0);
+  return code === 408 || code === 429 || code >= 500;
+}
+
+async function uploadKintoneFileWithRetry(file, { sdk, uploadEndpoint, trigger }) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= FILE_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const token = sdk.getRequestToken();
+      const form = new FormData();
+      form.append('file', file, file.name);
+      const resp = await fetch(uploadEndpoint, {
+        method: 'POST',
+        headers: { 'X-Cybozu-RequestToken': token, 'X-Requested-With': 'XMLHttpRequest' },
+        body: form
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        const err = new Error(`file upload failed: ${resp.status} ${text}`);
+        err.status = resp.status;
+        emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: false, sent: true, requestCount: 1, requestKind: 'rest', error: err.message });
+        if (!isRetryableUploadStatus(resp.status) || attempt >= FILE_UPLOAD_MAX_ATTEMPTS) {
+          throw err;
+        }
+        lastError = err;
+      } else {
+        const json = await resp.json();
+        emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: true, sent: true, requestCount: 1, requestKind: 'rest' });
+        return json.fileKey;
+      }
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.status || 0);
+      const retryable = status ? isRetryableUploadStatus(status) : true;
+      if (!status) {
+        emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: false, sent: true, requestCount: 1, requestKind: 'rest', error: String(error?.message || error || 'file_upload_failed') });
+      }
+      if (!retryable || attempt >= FILE_UPLOAD_MAX_ATTEMPTS) {
+        throw error;
+      }
+    }
+
+    const delay = FILE_UPLOAD_RETRY_DELAYS_MS[attempt - 1] || FILE_UPLOAD_RETRY_DELAYS_MS[FILE_UPLOAD_RETRY_DELAYS_MS.length - 1] || 0;
+    pbDebug(`[PB][overlay] file upload retry attempt=${attempt + 1} delay=${delay}ms error=${String(lastError?.message || lastError || 'unknown')}`);
+    await wait(delay);
+  }
+  throw lastError || new Error('file upload failed');
 }
 
 function getFormLayoutSessionKey(appId) {
@@ -1674,23 +1732,8 @@ function markLookupAutoFields(properties, metas) {
         const trigger = String(payload?.__pbTrigger || payload?.trigger || 'save_click');
         const fileKeys = [];
         for (const file of files) {
-          const token = sdk.getRequestToken();
-          const form = new FormData();
-          form.append('file', file, file.name);
-          const resp = await fetch(uploadEndpoint, {
-            method: 'POST',
-            headers: { 'X-Cybozu-RequestToken': token, 'X-Requested-With': 'XMLHttpRequest' },
-            body: form
-          });
-          if (!resp.ok) {
-            const text = await resp.text().catch(() => '');
-            const err = new Error(`file upload failed: ${resp.status} ${text}`);
-            emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: false, sent: true, requestCount: 1, requestKind: 'rest', error: err.message });
-            throw err;
-          }
-          const json = await resp.json();
-          emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: true, sent: true, requestCount: 1, requestKind: 'rest' });
-          fileKeys.push(json.fileKey);
+          const fileKey = await uploadKintoneFileWithRetry(file, { sdk, uploadEndpoint, trigger });
+          fileKeys.push(fileKey);
         }
         window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { fileKeys } }, ORIGIN);
         return;

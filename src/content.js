@@ -10128,6 +10128,8 @@
       try {
         await this.flushPendingFileUploads();
         putBatches = this.createPutBatches();
+        postBatches = this.createPostBatches();
+        deleteBatches = this.createDeleteBatches();
         for (let index = 0; index < putBatches.length;) {
           let batch = putBatches[index];
           let attempt = 0;
