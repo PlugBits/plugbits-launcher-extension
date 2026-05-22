@@ -3358,6 +3358,7 @@
     }
 
     canEditOverlay() {
+      if (this.isDetailSingleRowMode()) return true;
       return this.canUseEditFeatures();
     }
 
