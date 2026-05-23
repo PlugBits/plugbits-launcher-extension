@@ -289,29 +289,25 @@
       </section>
       <!-- Pro ライセンス -->
       <section class="pane" data-pane="pro-license" aria-labelledby="pane-pro-license-title">
-        <section class="card">
+
+        <!-- ページヘッダー -->
+        <div class="pro-page-header">
           <h2 id="pane-pro-license-title" data-i18n="pro_license_title">PlugBits Launcher Pro</h2>
+          <p class="pro-page-sub">kintoneの移動・確認・一覧編集を、もっと速く。</p>
+        </div>
 
-          <!-- ステータスバナー -->
+        <!-- 現在のプランカード -->
+        <section class="card pro-plan-card">
           <div class="pro-status-banner" id="pro_status_banner" data-status="free">
-            <div class="pro-status-icon" id="pro_status_icon">★</div>
-            <div class="pro-status-body">
-              <div class="pro-status-label" id="pro_status_label" data-i18n="pro_status_free">無料プラン</div>
-              <div class="pro-status-sub" id="pro_status_sub"></div>
+            <div class="pro-status-header">
+              <span class="pro-status-plan-label">現在のプラン</span>
+              <div class="pro-status-badges">
+                <span class="pro-free-badge">Free</span>
+                <span class="pro-badge" id="pro_badge" hidden>Pro 有効</span>
+              </div>
             </div>
-            <div class="pro-badge" id="pro_badge" hidden>PRO</div>
-          </div>
-
-          <!-- ライセンスキー入力 -->
-          <div class="kp-setting-row pro-key-row" id="pro_key_section">
-            <label class="pro-key-label" for="pro_license_key_input" data-i18n="pro_license_key_label">ライセンスキー</label>
-            <div class="pro-key-input-wrap">
-              <input type="text" id="pro_license_key_input" class="pro-key-input"
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                autocomplete="off" spellcheck="false" />
-              <button type="button" id="pro_verify_btn" class="pro-verify-btn" data-i18n="pro_verify_btn">認証する</button>
-            </div>
-            <p class="hint" id="pro_verify_msg"></p>
+            <div class="pro-status-label" id="pro_status_label">基本機能が利用できます</div>
+            <div class="pro-status-sub" id="pro_status_sub"></div>
           </div>
 
           <!-- 認証済み情報 -->
@@ -334,6 +330,69 @@
           </div>
           <p class="hint" data-i18n="pro_portal_hint">解約・プラン変更・領収書の発行は「サブスク管理」から行えます。</p>
         </section>
+
+        <!-- Proでできることカード -->
+        <section class="card pro-features-card">
+          <h3 class="pro-features-title">Pro でできること</h3>
+          <ul class="pro-features-list">
+            <li class="pro-feature-item">
+              <span class="pro-feature-check pro-feature-check--free">✓</span>
+              <div class="pro-feature-text">
+                <strong>クイックナビゲーション</strong>
+                <span>お気に入り・ウォッチリスト・ピン止めで素早く移動</span>
+              </div>
+              <span class="pro-feature-tier pro-feature-tier--free">無料</span>
+            </li>
+            <li class="pro-feature-item">
+              <span class="pro-feature-check pro-feature-check--free">✓</span>
+              <div class="pro-feature-text">
+                <strong>詳細画面 Grid Edit</strong>
+                <span>1レコードをスプレッドシート形式で編集</span>
+              </div>
+              <span class="pro-feature-tier pro-feature-tier--free">無料</span>
+            </li>
+            <li class="pro-feature-item">
+              <span class="pro-feature-check pro-feature-check--free">✓</span>
+              <div class="pro-feature-text">
+                <strong>Quick New（レコード新規追加）</strong>
+                <span>モーダルからすばやくレコードを新規登録</span>
+              </div>
+              <span class="pro-feature-tier pro-feature-tier--free">無料</span>
+            </li>
+            <li class="pro-feature-item pro-feature-item--pro">
+              <span class="pro-feature-check pro-feature-check--pro">★</span>
+              <div class="pro-feature-text">
+                <strong>一覧 Grid Edit</strong>
+                <span>一覧画面をスプレッドシート形式で一括編集・行追加</span>
+              </div>
+              <span class="pro-feature-tier pro-feature-tier--pro">Pro</span>
+            </li>
+            <li class="pro-feature-item pro-feature-item--pro">
+              <span class="pro-feature-check pro-feature-check--pro">★</span>
+              <div class="pro-feature-text">
+                <strong>スプレッドシート コピー＆ペースト</strong>
+                <span>一覧のセルをExcelへコピー、またはExcelからkintoneへ貼り付けてインポート</span>
+              </div>
+              <span class="pro-feature-tier pro-feature-tier--pro">Pro</span>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ライセンスキー入力 -->
+        <section class="card pro-key-card">
+          <h3 class="pro-key-card-title">すでにライセンスキーをお持ちの方</h3>
+          <div class="kp-setting-row pro-key-row" id="pro_key_section">
+            <label class="pro-key-label" for="pro_license_key_input" data-i18n="pro_license_key_label">ライセンスキー</label>
+            <div class="pro-key-input-wrap">
+              <input type="text" id="pro_license_key_input" class="pro-key-input"
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                autocomplete="off" spellcheck="false" />
+              <button type="button" id="pro_verify_btn" class="pro-verify-btn" data-i18n="pro_verify_btn">認証する</button>
+            </div>
+            <p class="hint" id="pro_verify_msg"></p>
+          </div>
+        </section>
+
       </section>
     </main>
   </div>

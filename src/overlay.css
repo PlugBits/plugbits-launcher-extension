@@ -1626,6 +1626,7 @@
 }
 
 .pb-overlay__date-pick-btn--subtable {
+  display: inline-flex;
   vertical-align: middle;
   margin-left: 2px;
 }

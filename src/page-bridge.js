@@ -835,6 +835,7 @@ function markLookupAutoFields(properties, metas) {
     'MULTI_LINE_TEXT',
     'NUMBER',
     'DATE',
+    'DATETIME',
     'LINK',
     'RADIO_BUTTON',
     'DROP_DOWN',
@@ -1327,7 +1328,9 @@ function markLookupAutoFields(properties, metas) {
         if (appId) {
           appName = await getAppName(appId, { allowApi: false });
         }
-        window.postMessage({ __kfav__: true, replyTo: id, ok: true, appId, query, appName }, ORIGIN);
+        const loginUser = typeof window.kintone?.getLoginUser === 'function' ? window.kintone.getLoginUser() : null;
+        const timezone = String(loginUser?.timezone || '').trim();
+        window.postMessage({ __kfav__: true, replyTo: id, ok: true, appId, query, appName, timezone }, ORIGIN);
         return;
       }
 

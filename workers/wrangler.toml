@@ -1,6 +1,7 @@
 name = "plugbits-api"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
+account_id = "c1b523f7c9512c4e19a953d80a216f57"
 
 [[kv_namespaces]]
 binding = "LICENSES"

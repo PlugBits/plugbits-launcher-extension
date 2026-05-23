@@ -690,7 +690,7 @@ function updateProStatusUI(cache, key) {
   if (proBadge) proBadge.hidden = !isActive;
 
   if (isActive) {
-    if (proStatusLabel) proStatusLabel.textContent = 'PlugBits Launcher Pro 有効';
+    if (proStatusLabel) proStatusLabel.textContent = 'Pro機能が有効です';
     if (proStatusSub) proStatusSub.textContent = cache.email ? `登録メール: ${cache.email}` : '';
     if (proInfoEmail) proInfoEmail.textContent = cache.email || '—';
     if (proInfoExpiry && cache.expiry) {
@@ -703,8 +703,8 @@ function updateProStatusUI(cache, key) {
     if (proPortalBtn) proPortalBtn.hidden = !proPortalUrl;
     if (proClearBtn) proClearBtn.hidden = false;
   } else {
-    if (proStatusLabel) proStatusLabel.textContent = hasKey ? 'ライセンスキー未認証' : '無料プラン';
-    if (proStatusSub) proStatusSub.textContent = hasKey ? 'キーを認証してください' : '';
+    if (proStatusLabel) proStatusLabel.textContent = hasKey ? 'ライセンスキー未認証' : '基本機能が利用できます';
+    if (proStatusSub) proStatusSub.textContent = hasKey ? 'ライセンスキーを入力して認証してください' : '';
     if (proInfoSection) proInfoSection.hidden = true;
     if (proUpgradeBtn) proUpgradeBtn.hidden = false;
     if (proPortalBtn) proPortalBtn.hidden = true;

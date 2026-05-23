@@ -559,6 +559,11 @@
   function smartDateToYMD(raw) {
     const s = String(raw || '').trim().toLowerCase();
     if (!s) return null;
+    // 末尾に誤って "t" を追加した場合 ("2026-05-23t" など) → 有効な日付なら剥ぎ取って返す
+    if (s.length > 1 && s.endsWith('t')) {
+      const candidate = s.slice(0, -1);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return candidate;
+    }
     const today = new Date();
     const ymd = (d) => {
       const y = d.getFullYear();
@@ -606,18 +611,27 @@
   }
 
   // YYYY-MM-DD HH:mm 表示用（UTC ISO → ローカル時刻）
-  function utcToLocalDisplay(utcStr) {
+  const _browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  function utcToLocalDisplay(utcStr, tz) {
     if (!utcStr) return '';
     const d = new Date(utcStr);
     if (isNaN(d.getTime())) return String(utcStr);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const parts = new Intl.DateTimeFormat('ja-JP', {
+      timeZone: tz || _browserTz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(d);
+    const get = (type) => parts.find((p) => p.type === type)?.value || '00';
+    return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
   }
 
-  // "YYYY-MM-DD HH:mm" 等のローカル入力 → UTC ISO（null = 解釈不能）
-  function smartDateTimeToUtc(raw) {
-    const s = String(raw || '').trim().toLowerCase();
+  // "YYYY-MM-DD HH:mm" 等のkintoneタイムゾーン入力 → UTC ISO（null = 解釈不能）
+  function smartDateTimeToUtc(raw, tz) {
+    let s = String(raw || '').trim().toLowerCase();
     if (!s) return null;
+    // 末尾に誤って "t" を追加した場合 ("2026-05-23 00:00t" など) → 剥ぎ取って再試行
+    if (s.length > 1 && s.endsWith('t')) s = s.slice(0, -1).trim();
 
     const now = new Date();
     const toIso = (d) => isNaN(d.getTime()) ? null : d.toISOString();
@@ -649,10 +663,23 @@
       return toIso(shift(now, n * 60000));
     }
 
-    // "YYYY-MM-DD HH:mm" or "YYYY-MM-DDTHH:mm"
-    const norm = s.replace('t', ' ').replace(/\s+/, ' ').trim();
-    const explicit = new Date(norm.includes('t') ? norm : norm.replace(' ', 'T'));
-    if (!isNaN(explicit.getTime())) return toIso(explicit);
+    // "YYYY-MM-DD HH:mm" or "YYYY-MM-DDTHH:mm" → kintoneのタイムゾーンとして解釈してUTC変換
+    const dtMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})[t\s](\d{2}):(\d{2})$/);
+    if (dtMatch) {
+      const [, yr, mo, dy, hr, mn] = dtMatch.map(Number);
+      if (tz) {
+        // tz指定がある場合: ローカル時刻をそのタイムゾーンのものとしてUTC変換
+        const approx = new Date(Date.UTC(yr, mo - 1, dy, hr, mn, 0));
+        const tzParts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', hour12: false
+        }).formatToParts(approx);
+        const g = (type) => Number(tzParts.find((p) => p.type === type)?.value || '0');
+        const tzLocal = new Date(Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute')));
+        return toIso(new Date(Date.UTC(yr, mo - 1, dy, hr, mn) + (approx - tzLocal)));
+      }
+      return toIso(new Date(yr, mo - 1, dy, hr, mn, 0, 0));
+    }
 
     return null;
   }
@@ -1574,6 +1601,7 @@
       'MULTI_LINE_TEXT',
       'NUMBER',
       'DATE',
+      'DATETIME',
       'LINK',
       'RADIO_BUTTON',
       'DROP_DOWN',
@@ -1798,6 +1826,7 @@
         newRows: null
       };
       this.language = 'ja';
+      this.kintoneTimezone = _browserTz;
       this.uiLanguageSetting = DEFAULT_UI_LANGUAGE;
       this.appName = '';
       this.overlayMode = DEFAULT_EXCEL_OVERLAY_MODE;
@@ -1857,6 +1886,7 @@
       this.handleCompositionStart = () => { this.isComposing = true; };
       this.handleCompositionEnd = () => { this.isComposing = false; };
       this.requireReload = false;
+      this._savedInSession = false;
       this.previousFocus = null;
       this.bodyOverflowBackup = '';
       this.reloading = false;
@@ -1972,6 +2002,7 @@
         this.bodyOverflowBackup = document.body.style.overflow || '';
         document.body.style.overflow = 'hidden';
         this.requireReload = false;
+        this._savedInSession = false;
         this.viewOnlyNoticeShown = false;
         await this.ensureStyles();
         await this.loadLanguage();
@@ -3407,6 +3438,7 @@
       if (!contextRes?.ok || !contextRes.appId) {
         throw new Error('Context unavailable');
       }
+      if (contextRes.timezone) this.kintoneTimezone = contextRes.timezone;
       this.appId = contextRes.appId;
       this.appName = contextRes.appName || '';
       const detailContext = this.isDetailSingleRowMode() ? this.resolveDetailRecordContext() : null;
@@ -4488,6 +4520,9 @@
       if (this.isLinkField(field)) {
         return String(value ?? '').trim();
       }
+      if (String(field?.type || '').toUpperCase() === 'DATETIME') {
+        return utcToLocalDisplay(value, this.kintoneTimezone);
+      }
       if (Array.isArray(value)) {
         return value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ');
       }
@@ -4756,7 +4791,7 @@
         return this.formatMultiLinePreview(value);
       }
       if (String(field?.type || '').toUpperCase() === 'DATETIME') {
-        return utcToLocalDisplay(value);
+        return utcToLocalDisplay(value, this.kintoneTimezone);
       }
       return value === undefined || value === null ? '' : String(value);
     }
@@ -4818,7 +4853,7 @@
     getSubtableColumnWidthRange(type) {
       const t = String(type || '').toUpperCase();
       if (t === 'NUMBER' || t === 'CALC') return { min: 100, max: 140, base: 112 };
-      if (t === 'DATE') return { min: 120, max: 140, base: 128 };
+      if (t === 'DATE') return { min: 132, max: 160, base: 140 };
       if (t === 'DATETIME') return { min: 148, max: 180, base: 155 };
       if (t === 'DROP_DOWN' || t === 'RADIO_BUTTON') return { min: 160, max: 200, base: 176 };
       if (t === 'CHECK_BOX' || t === 'MULTI_SELECT') return { min: 180, max: 240, base: 200 };
@@ -6789,6 +6824,7 @@
         || normalized === 'USER_SELECT'
         || normalized === 'ORGANIZATION_SELECT'
         || normalized === 'GROUP_SELECT'
+        || normalized === 'FILE'
       ) return [];
       return '';
     }
@@ -6976,6 +7012,7 @@
             if (e.key === 'Enter' || e.key === 'Tab') {
               const smart = smartDateToYMD(input.value);
               if (smart) input.value = smart;
+              if (e.key === 'Enter') e.preventDefault();
             }
           });
           const pickerLabel = document.createElement('label');
@@ -7002,10 +7039,10 @@
           input.placeholder = 'now · t · +1d · +2h · +30m';
           input.addEventListener('focus', () => { if (input.value) input.select(); });
           input.addEventListener('keydown', (e) => {
-            if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
-              const utc = smartDateTimeToUtc(input.value);
-              if (utc) input.value = utcToLocalDisplay(utc);
-              if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
+            if (e.key === 'Enter' || e.key === 'Tab') {
+              const utc = smartDateTimeToUtc(input.value, this.kintoneTimezone);
+              if (utc) input.value = utcToLocalDisplay(utc, this.kintoneTimezone);
+              if (e.key === 'Enter') e.preventDefault();
             }
           });
           const pickerLabel = document.createElement('label');
@@ -7339,12 +7376,19 @@
               const input = document.createElement('input');
               input.className = 'pb-overlay__subtable-input';
               const isDateField = String(child.type || '').toUpperCase() === 'DATE';
+              const isDateTimeField = String(child.type || '').toUpperCase() === 'DATETIME';
               input.type = 'text';
               if (String(child.type || '').toUpperCase() === 'NUMBER') input.inputMode = 'decimal';
               if (isDateField) input.placeholder = 't · +3 · end · end+1 · first · mon';
-              input.style.width = `${Math.max(80, width - 16)}px`;
+              if (isDateTimeField) input.placeholder = 'now · t · +1d · +2h · +30m';
+              const _willHavePicker = (isDateField || isDateTimeField) && interaction === 'inline-edit' && permission.editable;
+              input.style.width = `${Math.max(70, width - 16 - (_willHavePicker ? 22 : 0))}px`;
               if (interaction === 'inline-edit') {
-                input.value = rawCell === undefined || rawCell === null ? '' : String(rawCell);
+                if (isDateTimeField) {
+                  input.value = rawCell ? utcToLocalDisplay(rawCell, this.kintoneTimezone) : '';
+                } else {
+                  input.value = rawCell === undefined || rawCell === null ? '' : String(rawCell);
+                }
                 input.disabled = !permission.editable;
                 input.readOnly = !permission.editable;
                 input.addEventListener('input', () => {
@@ -7360,6 +7404,20 @@
                         input.value = smart;
                         setSubtableCellValue(item, child, smart);
                       }
+                    }
+                  });
+                }
+                if (isDateTimeField && permission.editable) {
+                  input.addEventListener('focus', () => { input.select(); });
+                  input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === 'Tab') {
+                      const utc = smartDateTimeToUtc(input.value, this.kintoneTimezone);
+                      if (utc) {
+                        const display = utcToLocalDisplay(utc, this.kintoneTimezone);
+                        input.value = display;
+                        setSubtableCellValue(item, child, display);
+                      }
+                      if (e.key === 'Enter') e.preventDefault();
                     }
                   });
                 }
@@ -7410,6 +7468,29 @@
                   if (nativePicker.value) {
                     input.value = nativePicker.value;
                     setSubtableCellValue(item, child, nativePicker.value);
+                  }
+                });
+                cell.appendChild(pickerLabel);
+              }
+              if (isDateTimeField && interaction === 'inline-edit' && permission.editable) {
+                const pickerLabel = document.createElement('label');
+                pickerLabel.className = 'pb-overlay__date-pick-btn pb-overlay__date-pick-btn--subtable';
+                pickerLabel.textContent = '▾';
+                const nativePicker = document.createElement('input');
+                nativePicker.type = 'datetime-local';
+                nativePicker.className = 'pb-overlay__date-pick-native';
+                nativePicker.tabIndex = -1;
+                pickerLabel.appendChild(nativePicker);
+                pickerLabel.addEventListener('mousedown', (e) => {
+                  e.stopPropagation();
+                  nativePicker.value = input.value ? input.value.replace(' ', 'T') : '';
+                });
+                nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+                nativePicker.addEventListener('change', () => {
+                  if (nativePicker.value) {
+                    const display = nativePicker.value.replace('T', ' ');
+                    input.value = display;
+                    setSubtableCellValue(item, child, display);
                   }
                 });
                 cell.appendChild(pickerLabel);
@@ -8811,7 +8892,12 @@
       }
       if (type === 'DATETIME') {
         if (!trimmed) return { ok: true, value: '' };
-        const utc = smartDateTimeToUtc(trimmed);
+        // Already a UTC ISO string (original kintone value, not yet edited)
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(trimmed)) {
+          const d = new Date(trimmed);
+          if (!isNaN(d.getTime())) return { ok: true, value: d.toISOString() };
+        }
+        const utc = smartDateTimeToUtc(trimmed, this.kintoneTimezone);
         if (utc) return { ok: true, value: utc };
         return { ok: false, error: 'Invalid datetime' };
       }
@@ -10223,6 +10309,7 @@
             await this.refetchRowsByIds(Array.from(savedIds));
           }
           this.notify(resolveText(this.language, 'toastSaveSuccess'));
+          this._savedInSession = true;
           this.diff.clear();
           this.pendingDeletes.clear();
           this.pendingFileUploads.clear();
@@ -10547,20 +10634,18 @@
         }, 0);
       }
       this.previousFocus = null;
-      if (this.requireReload) {
+      const shouldReload = this.requireReload || this._savedInSession;
+      this.requireReload = false;
+      this._savedInSession = false;
+      if (shouldReload) {
         setTimeout(() => {
           try {
-            if (typeof window.kintone?.app?.getId === 'function') {
-              window.location.reload();
-            } else {
-              window.location.reload();
-            }
-          } catch (_e) {
             window.location.reload();
+          } catch (_e) {
+            window.location.href = window.location.href;
           }
         }, 50);
       }
-      this.requireReload = false;
     }
 
     showLoading(text) {
@@ -11596,10 +11681,10 @@
             input.placeholder = 't · +3 · end · end+1 · first · mon';
             input.addEventListener('focus', () => { if (input.value) input.select(); });
             input.addEventListener('keydown', (e) => {
-              if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+              if (e.key === 'Enter' || e.key === 'Tab') {
                 const smart = smartDateToYMD(input.value);
                 if (smart) input.value = smart;
-                if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
+                if (e.key === 'Enter') e.preventDefault();
               }
             });
             const pickerLabel = document.createElement('label');
@@ -11626,10 +11711,10 @@
             input.placeholder = 'now · t · +1d · +2h · +30m';
             input.addEventListener('focus', () => { if (input.value) input.select(); });
             input.addEventListener('keydown', (e) => {
-              if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
-                const utc = smartDateTimeToUtc(input.value);
-                if (utc) input.value = utcToLocalDisplay(utc);
-                if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); }
+              if (e.key === 'Enter' || e.key === 'Tab') {
+                const utc = smartDateTimeToUtc(input.value, this.kintoneTimezone);
+                if (utc) input.value = utcToLocalDisplay(utc, this.kintoneTimezone);
+                if (e.key === 'Enter') e.preventDefault();
               }
             });
             const pickerLabel = document.createElement('label');
