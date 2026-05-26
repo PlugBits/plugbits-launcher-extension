@@ -1622,6 +1622,7 @@
 
   const COLUMN_PREF_STORAGE_KEY = 'kfavExcelColumns';
   const OVERLAY_LAYOUT_PRESETS_KEY = 'kfavOverlayLayoutPresets';
+  const OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY = 'kfavOverlayLayoutLegacyMigrated';
   const SUBTABLE_WIDTH_PREF_STORAGE_KEY = 'kfavExcelSubtableWidths';
   const EXCEL_OVERLAY_MODE_KEY = 'kfavExcelOverlayMode';
   const EXCEL_OVERLAY_MODE_STANDARD = 'standard';
@@ -2486,6 +2487,35 @@
       return order;
     }
 
+    getCurrentViewName() {
+      try {
+        return typeof window.kintone?.app?.getViewName === 'function'
+          ? String(window.kintone.app.getViewName() || '').trim()
+          : '';
+      } catch (_err) {
+        return '';
+      }
+    }
+
+    isAllRecordsViewName(value) {
+      const normalized = String(value || '').replace(/[()（）]/g, '').replace(/\s+/g, '').toLowerCase();
+      return normalized === 'すべて' || normalized === 'allrecords' || normalized === 'all';
+    }
+
+    isAllRecordsViewId(value) {
+      const text = String(value || '').trim();
+      return text === '0' || text === '-1';
+    }
+
+    createAllRecordsViewInfo(currentQuery = '') {
+      return {
+        query: String(currentQuery || '').trim(),
+        fieldOrder: [],
+        viewId: '',
+        viewName: this.getCurrentViewName() || 'all_records'
+      };
+    }
+
     pickViewFromViews(viewsObj, preferredViewId = '') {
       const entries = Object.entries(viewsObj || {});
       let selectedView = null;
@@ -2499,9 +2529,10 @@
         }
       }
       if (!selectedView) {
-        const currentName = typeof window.kintone?.app?.getViewName === 'function'
-          ? String(window.kintone.app.getViewName() || '').trim()
-          : '';
+        const currentName = this.getCurrentViewName();
+        if (this.isAllRecordsViewName(currentName)) {
+          return { selectedView: null, selectedViewName: currentName, isAllRecords: true };
+        }
         if (currentName && viewsObj?.[currentName]) {
           selectedView = viewsObj[currentName];
           selectedViewName = currentName;
@@ -2518,7 +2549,11 @@
       if (!viewsObj || typeof viewsObj !== 'object') return null;
       const currentQuery = String(options?.currentQuery || '').trim();
       const preferredViewId = String(options?.viewId || '').trim();
+      if (this.isAllRecordsViewName(this.getCurrentViewName()) || this.isAllRecordsViewId(preferredViewId)) {
+        return this.createAllRecordsViewInfo(currentQuery);
+      }
       const picked = this.pickViewFromViews(viewsObj, preferredViewId);
+      if (picked.isAllRecords) return this.createAllRecordsViewInfo(currentQuery);
       const selectedView = picked.selectedView;
       if (!selectedView) return null;
       const selectedViewName = picked.selectedViewName || '';
@@ -2555,6 +2590,9 @@
             needApp: Boolean(options?.needApp),
             needViews: Boolean(options?.needViews),
             needFields: Boolean(options?.needFields),
+            forceAppRefresh: Boolean(options?.forceAppRefresh),
+            forceViewsRefresh: Boolean(options?.forceViewsRefresh),
+            forceFieldsRefresh: Boolean(options?.forceFieldsRefresh),
             trigger: String(options?.trigger || 'overlay_open'),
             source: String(options?.source || 'overlay'),
             logGroup: String(options?.logGroup || 'overlay')
@@ -2732,6 +2770,25 @@
       this.overlayLayoutPresetCache = { ...map };
     }
 
+    async loadLegacyLayoutMigrationMap() {
+      try {
+        const stored = await chrome.storage.local.get(OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY);
+        const raw = stored?.[OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY];
+        return raw && typeof raw === 'object' ? { ...raw } : {};
+      } catch (_err) {
+        return {};
+      }
+    }
+
+    async markLegacyLayoutMigrated(appKey) {
+      const key = String(appKey || '').trim();
+      if (!key) return;
+      const map = await this.loadLegacyLayoutMigrationMap();
+      if (map[key]) return;
+      map[key] = Date.now();
+      await chrome.storage.local.set({ [OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY]: map });
+    }
+
     async getLatestLegacyColumnPref(baseCodes) {
       const map = await this.loadColumnPrefMap();
       const appPrefix = `${this.appId ? String(this.appId) : '0'}::`;
@@ -2792,7 +2849,9 @@
         nextState = this.normalizeOverlayLayoutState(rawState, baseFields);
       } else {
         const baseCodes = this.getBaseFieldCodeList(baseFields);
-        const legacyPref = await this.getLatestLegacyColumnPref(baseCodes);
+        const migrationMap = await this.loadLegacyLayoutMigrationMap();
+        const canMigrateLegacy = !migrationMap[key];
+        const legacyPref = canMigrateLegacy ? await this.getLatestLegacyColumnPref(baseCodes) : null;
         nextState = {
           host: String(location?.origin || '').trim(),
           appId: String(this.appId || ''),
@@ -2804,6 +2863,7 @@
           )],
           updatedAt: Date.now()
         };
+        await this.markLegacyLayoutMigrated(key);
       }
       this.overlayLayoutState = nextState;
       map[key] = nextState;
@@ -3451,7 +3511,9 @@
       const metadataRes = await this.getMetadataBundle({
         needApp: true,
         needViews: this.isListMode(),
-        needFields: true
+        needFields: true,
+        forceViewsRefresh: this.isListMode(),
+        forceFieldsRefresh: true
       });
       const metadataBundle = metadataRes?.bundle && typeof metadataRes.bundle === 'object'
         ? metadataRes.bundle

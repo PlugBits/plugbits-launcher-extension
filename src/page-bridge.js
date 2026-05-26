@@ -961,6 +961,26 @@ function markLookupAutoFields(properties, metas) {
     }
   }
 
+  function getCurrentViewNameSafe() {
+    try {
+      return typeof window.kintone?.app?.getViewName === 'function'
+        ? String(window.kintone.app.getViewName() || '').trim()
+        : '';
+    } catch (_err) {
+      return '';
+    }
+  }
+
+  function isAllRecordsViewName(value) {
+    const normalized = String(value || '').replace(/[()（）]/g, '').replace(/\s+/g, '').toLowerCase();
+    return normalized === 'すべて' || normalized === 'allrecords' || normalized === 'all';
+  }
+
+  function isAllRecordsViewId(value) {
+    const text = String(value || '').trim();
+    return text === '0' || text === '-1';
+  }
+
   function pickCurrentViewFromViews(viewsObj, preferredViewId = '') {
     const entries = Object.entries(viewsObj || {});
     let selectedView = null;
@@ -974,9 +994,10 @@ function markLookupAutoFields(properties, metas) {
       }
     }
     if (!selectedView) {
-      const currentName = typeof window.kintone?.app?.getViewName === 'function'
-        ? String(window.kintone.app.getViewName() || '').trim()
-        : '';
+      const currentName = getCurrentViewNameSafe();
+      if (isAllRecordsViewName(currentName)) {
+        return { selectedView: null, selectedViewName: currentName, isAllRecords: true };
+      }
       if (currentName && viewsObj?.[currentName]) {
         selectedView = viewsObj[currentName];
         selectedViewName = currentName;
@@ -1571,6 +1592,19 @@ function markLookupAutoFields(properties, metas) {
           source: 'overlay',
           logGroup: 'overlay'
         });
+        const currentViewName = getCurrentViewNameSafe();
+        if (isAllRecordsViewName(currentViewName) || isAllRecordsViewId(viewId)) {
+          window.postMessage({
+            __kfav__: true,
+            replyTo: id,
+            ok: true,
+            query: currentQuery.trim(),
+            fieldOrder: [],
+            viewId: '',
+            viewName: currentViewName || 'all_records'
+          }, ORIGIN);
+          return;
+        }
         const entries = Object.entries(views || {});
         let selectedView = null;
         let selectedViewName = '';
@@ -1582,7 +1616,7 @@ function markLookupAutoFields(properties, metas) {
           }
         }
         if (!selectedView) {
-          const currentName = typeof window.kintone?.app?.getViewName === 'function' ? window.kintone.app.getViewName() : '';
+          const currentName = currentViewName;
           if (currentName && views[currentName]) {
             selectedView = views[currentName];
             selectedViewName = currentName;

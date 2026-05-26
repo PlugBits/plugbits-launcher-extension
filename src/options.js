@@ -841,6 +841,7 @@ const uiLanguageEl = document.getElementById('ui_language');
 const excelModeInputs = Array.from(document.querySelectorAll('input[name="excel_overlay_mode"]'));
 const excelModeNoticeEl = document.getElementById('excel_mode_notice');
 const OVERLAY_LAYOUT_PRESETS_KEY = 'kfavOverlayLayoutPresets';
+const OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY = 'kfavOverlayLayoutLegacyMigrated';
 const EXCEL_OVERLAY_MODE_KEY = 'kfavExcelOverlayMode';
 const EXCEL_OVERLAY_MODE_OFF = 'off';
 const EXCEL_OVERLAY_MODE_STANDARD = 'standard';
@@ -3689,6 +3690,23 @@ async function saveOverlayLayoutPresetsMap(next) {
   }
 }
 
+async function markOverlayLayoutLegacyMigrated(keys) {
+  const list = Array.from(new Set(
+    (Array.isArray(keys) ? keys : [keys])
+      .map((key) => String(key || '').trim())
+      .filter(Boolean)
+  ));
+  if (!list.length) return;
+  const stored = await chrome.storage.local.get(OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY);
+  const raw = stored?.[OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY];
+  const map = raw && typeof raw === 'object' ? { ...raw } : {};
+  const now = Date.now();
+  list.forEach((key) => {
+    map[key] = now;
+  });
+  await chrome.storage.local.set({ [OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY]: map });
+}
+
 async function setOverlayLayoutActivePreset(key, presetId) {
   const state = overlayLayoutPresets[key];
   if (!state || !Array.isArray(state.presets)) return;
@@ -3747,6 +3765,7 @@ async function deleteLayoutById(layoutId, appKeyHint = '') {
     : Object.keys(overlayLayoutPresets || {});
   const next = { ...overlayLayoutPresets };
   let changed = false;
+  const deletedKeys = [];
   candidateKeys.some((key) => {
     const state = next[key];
     if (!state || !Array.isArray(state.presets)) return false;
@@ -3755,6 +3774,7 @@ async function deleteLayoutById(layoutId, appKeyHint = '') {
     if (nextPresets.length === before) return false;
     if (!nextPresets.length) {
       delete next[key];
+      deletedKeys.push(key);
     } else {
       const activePresetId = nextPresets.some((preset) => String(preset?.id || '') === String(state.activePresetId || ''))
         ? state.activePresetId
@@ -3772,6 +3792,7 @@ async function deleteLayoutById(layoutId, appKeyHint = '') {
   if (!changed) return false;
   overlayLayoutPresets = next;
   await saveOverlayLayoutPresetsMap(next);
+  await markOverlayLayoutLegacyMigrated(deletedKeys);
   renderOverlayLayoutPresets();
   return true;
 }
@@ -3783,6 +3804,7 @@ async function removeOverlayLayoutApp(key) {
   delete next[key];
   overlayLayoutPresets = next;
   await saveOverlayLayoutPresetsMap(next);
+  await markOverlayLayoutLegacyMigrated(key);
   renderOverlayLayoutPresets();
 }
 
@@ -3835,6 +3857,7 @@ excelListEl?.addEventListener('click', (event) => {
 excelClearBtn?.addEventListener('click', async () => {
   if (!Object.keys(overlayLayoutPresets).length) return;
   if (!window.confirm(t('confirm_clear_layouts'))) return;
+  await markOverlayLayoutLegacyMigrated(Object.keys(overlayLayoutPresets || {}));
   overlayLayoutPresets = {};
   await chrome.storage.local.remove(OVERLAY_LAYOUT_PRESETS_KEY);
   renderOverlayLayoutPresets();
