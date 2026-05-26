@@ -684,6 +684,35 @@
     return null;
   }
 
+  function normalizeFieldDefaultValue(field, timezone = '') {
+    if (!field || typeof field !== 'object') return undefined;
+    const type = String(field.type || '').toUpperCase();
+    const hasDefaultNow = field.defaultNowValue === true || String(field.defaultNowValue || '').toLowerCase() === 'true';
+    if (hasDefaultNow) {
+      if (type === 'DATE') return smartDateToYMD('today') || '';
+      if (type === 'DATETIME') return utcToLocalDisplay(new Date().toISOString(), timezone || _browserTz);
+      if (type === 'TIME') {
+        const now = new Date();
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      }
+    }
+    if (field.defaultValue === undefined) return undefined;
+    const value = field.defaultValue;
+    if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
+      if (Array.isArray(value)) return value.map((item) => String(item ?? '')).filter(Boolean);
+      const text = String(value ?? '').trim();
+      return text ? [text] : [];
+    }
+    if (Array.isArray(value)) return value.length ? String(value[0] ?? '') : '';
+    return value === undefined || value === null ? '' : String(value);
+  }
+
+  function hasFieldDefaultValue(field) {
+    if (!field || typeof field !== 'object') return false;
+    if (field.defaultNowValue === true || String(field.defaultNowValue || '').toLowerCase() === 'true') return true;
+    return field.defaultValue !== undefined;
+  }
+
   window.addEventListener('message', (ev) => {
     if (ev.origin !== location.origin) return;
     const data = ev.data || {};
@@ -3606,6 +3635,8 @@
             type: f.type || '',
             required: Boolean(f.required),
             choices: Array.isArray(f.choices) ? f.choices : [],
+            defaultValue: Array.isArray(f.defaultValue) ? f.defaultValue.slice() : f.defaultValue,
+            defaultNowValue: Boolean(f.defaultNowValue),
             lookupAuto: Boolean(f.lookupAuto),
             lookup: f.lookup ? { ...f.lookup } : undefined,
             subtable: f.subtable && Array.isArray(f.subtable.fields)
@@ -3613,7 +3644,9 @@
                 fields: f.subtable.fields.map((child) => ({
                   ...child,
                   required: Boolean(child?.required),
-                  choices: Array.isArray(child.choices) ? child.choices : []
+                  choices: Array.isArray(child.choices) ? child.choices : [],
+                  defaultValue: Array.isArray(child.defaultValue) ? child.defaultValue.slice() : child.defaultValue,
+                  defaultNowValue: Boolean(child.defaultNowValue)
                 }))
               }
               : undefined
@@ -3631,6 +3664,8 @@
               type: f.type || '',
               required: Boolean(f.required),
               choices: Array.isArray(f.choices) ? f.choices : [],
+              defaultValue: Array.isArray(f.defaultValue) ? f.defaultValue.slice() : f.defaultValue,
+              defaultNowValue: Boolean(f.defaultNowValue),
               lookupAuto: Boolean(f.lookupAuto),
               lookup: f.lookup ? { ...f.lookup } : undefined,
               subtable: f.subtable && Array.isArray(f.subtable.fields)
@@ -3638,7 +3673,9 @@
                   fields: f.subtable.fields.map((child) => ({
                     ...child,
                     required: Boolean(child?.required),
-                    choices: Array.isArray(child.choices) ? child.choices : []
+                    choices: Array.isArray(child.choices) ? child.choices : [],
+                    defaultValue: Array.isArray(child.defaultValue) ? child.defaultValue.slice() : child.defaultValue,
+                    defaultNowValue: Boolean(child.defaultNowValue)
                   }))
                 }
                 : undefined
@@ -7030,6 +7067,7 @@
           ta.rows = 3;
           controlWrap.appendChild(ta);
           getValue = () => ta.value;
+          setValue = (v) => { ta.value = String(v ?? ''); };
         } else if (type === 'DROP_DOWN' || type === 'RADIO_BUTTON') {
           const select = document.createElement('select');
           select.className = 'pb-newrec__select';
@@ -7045,6 +7083,10 @@
           });
           controlWrap.appendChild(select);
           getValue = () => select.value;
+          setValue = (v) => {
+            const value = String(v ?? '');
+            select.value = value;
+          };
         } else if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
           const checkWrap = document.createElement('div');
           checkWrap.className = 'pb-newrec__checkgroup';
@@ -7062,6 +7104,10 @@
           });
           controlWrap.appendChild(checkWrap);
           getValue = () => checkboxes.filter((cb) => cb.checked).map((cb) => cb.value);
+          setValue = (v) => {
+            const selected = new Set((Array.isArray(v) ? v : [v]).map((item) => String(item ?? '')));
+            checkboxes.forEach((cb) => { cb.checked = selected.has(cb.value); });
+          };
         } else if (type === 'DATE') {
           const inputWrap = document.createElement('div');
           inputWrap.className = 'pb-newrec__date-wrap';
@@ -7092,6 +7138,7 @@
           inputWrap.appendChild(pickerLabel);
           controlWrap.appendChild(inputWrap);
           getValue = () => { const smart = smartDateToYMD(input.value); return smart || input.value || ''; };
+          setValue = (v) => { input.value = String(v ?? ''); };
         } else if (type === 'DATETIME') {
           const inputWrap = document.createElement('div');
           inputWrap.className = 'pb-newrec__date-wrap';
@@ -7121,7 +7168,8 @@
           inputWrap.appendChild(input);
           inputWrap.appendChild(pickerLabel);
           controlWrap.appendChild(inputWrap);
-          getValue = () => { const utc = smartDateTimeToUtc(input.value); return utc || input.value || ''; };
+          getValue = () => { const utc = smartDateTimeToUtc(input.value, this.kintoneTimezone); return utc || input.value || ''; };
+          setValue = (v) => { input.value = String(v ?? ''); };
         } else {
           const input = document.createElement('input');
           input.type = 'text';
@@ -7130,8 +7178,12 @@
           if (type === 'LINK') input.inputMode = 'url';
           controlWrap.appendChild(input);
           getValue = () => input.value;
+          setValue = (v) => { input.value = String(v ?? ''); };
         }
 
+        if (!field._isLookupAuto && hasFieldDefaultValue(field) && typeof setValue === 'function') {
+          setValue(normalizeFieldDefaultValue(field, this.kintoneTimezone));
+        }
         fieldInputMap.set(field.code, { field, getValue, setValue });
         labelEl.htmlFor = '';
         row.appendChild(labelEl);
@@ -11455,6 +11507,7 @@
     constructor(postFn) {
       this.postFn = postFn;
       this.el = null;
+      this.kintoneTimezone = _browserTz;
     }
 
     isVisible() { return Boolean(this.el); }
@@ -11473,6 +11526,13 @@
       ensureOverlayCss();
       const { language } = await resolveOverlayUiLanguage();
       const t = (key) => resolveText(language, key);
+      try {
+        const userRes = await this.postFn('EXCEL_GET_LOGIN_USER');
+        const timezone = String(userRes?.user?.timezone || '').trim();
+        if (timezone) this.kintoneTimezone = timezone;
+      } catch (_err) {
+        this.kintoneTimezone = _browserTz;
+      }
 
       // Loading backdrop
       const layer = this._buildLayer();
@@ -11702,6 +11762,7 @@
             ta.rows = 3;
             controlWrap.appendChild(ta);
             getValue = () => ta.value;
+            setValue = (v) => { ta.value = String(v ?? ''); };
           } else if (type === 'DROP_DOWN' || type === 'RADIO_BUTTON') {
             const sel = document.createElement('select');
             sel.className = 'pb-newrec__select';
@@ -11717,6 +11778,7 @@
             });
             controlWrap.appendChild(sel);
             getValue = () => sel.value;
+            setValue = (v) => { sel.value = String(v ?? ''); };
           } else if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
             const checkWrap = document.createElement('div');
             checkWrap.className = 'pb-newrec__checkgroup';
@@ -11734,6 +11796,10 @@
             });
             controlWrap.appendChild(checkWrap);
             getValue = () => checkboxes.filter((cb) => cb.checked).map((cb) => cb.value);
+            setValue = (v) => {
+              const selected = new Set((Array.isArray(v) ? v : [v]).map((item) => String(item ?? '')));
+              checkboxes.forEach((cb) => { cb.checked = selected.has(cb.value); });
+            };
           } else if (type === 'DATE') {
             const wrap = document.createElement('div');
             wrap.className = 'pb-newrec__date-wrap';
@@ -11764,6 +11830,7 @@
             wrap.appendChild(pickerLabel);
             controlWrap.appendChild(wrap);
             getValue = () => { const smart = smartDateToYMD(input.value); return smart || input.value || ''; };
+            setValue = (v) => { input.value = String(v ?? ''); };
           } else if (type === 'DATETIME') {
             const wrap = document.createElement('div');
             wrap.className = 'pb-newrec__date-wrap';
@@ -11793,7 +11860,8 @@
             wrap.appendChild(input);
             wrap.appendChild(pickerLabel);
             controlWrap.appendChild(wrap);
-            getValue = () => { const utc = smartDateTimeToUtc(input.value); return utc || input.value || ''; };
+            getValue = () => { const utc = smartDateTimeToUtc(input.value, this.kintoneTimezone); return utc || input.value || ''; };
+            setValue = (v) => { input.value = String(v ?? ''); };
           } else {
             const input = document.createElement('input');
             input.type = 'text';
@@ -11802,8 +11870,12 @@
             if (type === 'LINK') input.inputMode = 'url';
             controlWrap.appendChild(input);
             getValue = () => input.value;
+            setValue = (v) => { input.value = String(v ?? ''); };
           }
 
+          if (!field._isLookupAuto && hasFieldDefaultValue(field) && typeof setValue === 'function') {
+            setValue(normalizeFieldDefaultValue(field, this.kintoneTimezone));
+          }
           fieldInputMap.set(field.code, { field, getValue, setValue });
           row.appendChild(labelEl);
           row.appendChild(controlWrap);

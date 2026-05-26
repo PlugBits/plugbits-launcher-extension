@@ -294,6 +294,21 @@ function normalizeChoiceList(prop) {
     .filter((label) => label);
 }
 
+function normalizeDefaultValue(prop) {
+  if (!prop || typeof prop !== 'object') return undefined;
+  if (!Object.prototype.hasOwnProperty.call(prop, 'defaultValue')) return undefined;
+  const value = prop.defaultValue;
+  if (Array.isArray(value)) return value.map((item) => String(item ?? '')).filter(Boolean);
+  if (value === undefined || value === null) return '';
+  return String(value);
+}
+
+function hasDefaultNowValue(prop) {
+  if (!prop || typeof prop !== 'object') return false;
+  const value = prop.defaultNowValue;
+  return value === true || String(value || '').toLowerCase() === 'true';
+}
+
 function normalizeLookupMeta(code, prop) {
   const src = prop && typeof prop === 'object' ? (prop.lookup || null) : null;
   if (!src || typeof src !== 'object') return undefined;
@@ -340,8 +355,11 @@ function normalizeSubtableMeta(prop) {
       type: child.type || '',
       required: Boolean(child.required),
       choices: normalizeChoiceList(child),
+      defaultNowValue: hasDefaultNowValue(child),
       orderIndex: index
     };
+    const defaultValue = normalizeDefaultValue(child);
+    if (defaultValue !== undefined) meta.defaultValue = defaultValue;
     const lookup = normalizeLookupMeta(code, child);
     if (lookup) meta.lookup = lookup;
     return meta;
@@ -359,8 +377,11 @@ function normalizeFieldMetaFromProperties(properties) {
       label: prop.label || '',
       type: prop.type || '',
       required: Boolean(prop.required),
-      choices: normalizeChoiceList(prop)
+      choices: normalizeChoiceList(prop),
+      defaultNowValue: hasDefaultNowValue(prop)
     };
+    const defaultValue = normalizeDefaultValue(prop);
+    if (defaultValue !== undefined) meta.defaultValue = defaultValue;
     const lookup = normalizeLookupMeta(code, prop);
     if (lookup) meta.lookup = lookup;
     if (meta.type === 'SUBTABLE') {
@@ -1403,7 +1424,7 @@ function markLookupAutoFields(properties, metas) {
           __kfav__: true,
           replyTo: id,
           ok: true,
-          user: { language: user.language || '' }
+          user: { language: user.language || '', timezone: user.timezone || '' }
         }, ORIGIN);
         return;
       }
