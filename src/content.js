@@ -5812,6 +5812,63 @@
             valueCell.addEventListener('mousedown', activate);
             valueCell.addEventListener('click', activate);
           }
+          if (field.type === 'DATE') {
+            const pickerLabel = document.createElement('label');
+            pickerLabel.className = 'pb-overlay__date-pick-btn';
+            pickerLabel.textContent = '▾';
+            const nativePicker = document.createElement('input');
+            nativePicker.type = 'date';
+            nativePicker.className = 'pb-overlay__date-pick-native';
+            nativePicker.tabIndex = -1;
+            pickerLabel.appendChild(nativePicker);
+            pickerLabel.addEventListener('mousedown', (e) => {
+              e.stopPropagation();
+              nativePicker.value = input.value || '';
+              if (input.readOnly) {
+                e.preventDefault();
+                this.enterEditMode(0, colIndex, input, false);
+                requestAnimationFrame(() => {
+                  if (nativePicker.showPicker) nativePicker.showPicker();
+                });
+              }
+            });
+            nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+            nativePicker.addEventListener('change', () => {
+              if (nativePicker.value) {
+                input.value = nativePicker.value;
+                this.onInputChanged(input);
+              }
+            });
+            cell.appendChild(pickerLabel);
+          } else if (field.type === 'DATETIME') {
+            const pickerLabel = document.createElement('label');
+            pickerLabel.className = 'pb-overlay__date-pick-btn';
+            pickerLabel.textContent = '▾';
+            const nativePicker = document.createElement('input');
+            nativePicker.type = 'datetime-local';
+            nativePicker.className = 'pb-overlay__date-pick-native';
+            nativePicker.tabIndex = -1;
+            pickerLabel.appendChild(nativePicker);
+            pickerLabel.addEventListener('mousedown', (e) => {
+              e.stopPropagation();
+              nativePicker.value = input.value ? input.value.replace(' ', 'T') : '';
+              if (input.readOnly) {
+                e.preventDefault();
+                this.enterEditMode(0, colIndex, input, false);
+                requestAnimationFrame(() => {
+                  if (nativePicker.showPicker) nativePicker.showPicker();
+                });
+              }
+            });
+            nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
+            nativePicker.addEventListener('change', () => {
+              if (nativePicker.value) {
+                input.value = nativePicker.value.replace('T', ' ');
+                this.onInputChanged(input);
+              }
+            });
+            cell.appendChild(pickerLabel);
+          }
           this.applyCellVisualState(input, row, field.code);
           valueCell.appendChild(cell);
 
