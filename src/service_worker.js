@@ -1509,6 +1509,34 @@ async function fetchAppNamesByIds(host, appIds) {
   return out;
 }
 
+async function getCachedAppSearchCatalog(host) {
+  const safeHost = normalizeHostOrigin(host);
+  if (!safeHost) return { ok: false, host: '', map: {}, source: 'none', error: 'host required' };
+  let cached = { map: {}, fresh: false, savedAt: 0 };
+  try {
+    cached = await loadAppNameMap(safeHost);
+  } catch (_err) {
+    cached = { map: {}, fresh: false, savedAt: 0 };
+  }
+  const cachedMap = cached?.map && typeof cached.map === 'object' ? cached.map : {};
+  if (Object.keys(cachedMap).length) {
+    return {
+      ok: true,
+      host: safeHost,
+      map: cachedMap,
+      source: cached.fresh ? 'cache' : 'stale_cache',
+      savedAt: Number(cached.savedAt || 0)
+    };
+  }
+  try {
+    const map = await fetchAppsMap(safeHost);
+    await saveAppNameMap(safeHost, map);
+    return { ok: true, host: safeHost, map, source: 'network', savedAt: Date.now() };
+  } catch (error) {
+    return { ok: false, host: safeHost, map: {}, source: 'network', error: String(error?.message || error) };
+  }
+}
+
 async function invalidateHostCaches(host, reason = 'permission_changed') {
   const safeHost = normalizeHostOrigin(host);
   if (!safeHost) return null;
@@ -1936,6 +1964,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         sendResponse({ ok: false, host: safeHost, error: String(error?.message || error), map: {} });
       }
+      return;
+    }
+
+    if (msg?.type === 'GET_APP_SEARCH_CATALOG') {
+      const payload = msg?.payload && typeof msg.payload === 'object' ? msg.payload : msg;
+      const safeHost = normalizeHostOrigin(payload?.host || payload?.origin || payload?.url || sender?.tab?.url || '');
+      const result = await getCachedAppSearchCatalog(safeHost);
+      sendResponse(result);
       return;
     }
 

@@ -11126,6 +11126,19 @@
   // ── Command Palette ──────────────────────────────────────────────────────
 
   const CP_COMMANDS = [
+    // ─ App search ─
+    {
+      id: 'start-app-search',
+      label: 'App検索を開始',
+      icon: '⌕',
+      category: 'app',
+      badge: 'search',
+      keywords: ['search', 'app', 'apps', 'アプリ', '検索'],
+      keepOpen: true,
+      action(_ctx, palette) {
+        palette.startAppSearch();
+      }
+    },
     // ─ Admin: navigation ─
     {
       id: 'open-form-settings',
@@ -11219,6 +11232,11 @@
       this.ctx = { appId: null, recordId: null, query: '' };
       this.filtered = [];
       this.activeIndex = 0;
+      this.appCatalog = [];
+      this.appCatalogHost = '';
+      this.appCatalogLoading = false;
+      this.appCatalogLoaded = false;
+      this.appSearchMode = false;
     }
 
     async fetchContext() {
@@ -11236,6 +11254,92 @@
         const text = fields.map((f) => `${f.code}\t${f.label || ''}\t${f.type || ''}`).join('\n');
         await navigator.clipboard.writeText(text);
       } catch (_) { /* ignore */ }
+    }
+
+    normalizeHost(host) {
+      const raw = String(host || '').trim();
+      if (!raw) return '';
+      try {
+        return new URL(raw).origin.replace(/\/$/, '').toLowerCase();
+      } catch (_) {
+        return raw.replace(/\/$/, '').toLowerCase();
+      }
+    }
+
+    async loadAppCatalog() {
+      const host = this.normalizeHost(location.origin || '');
+      if (!host || this.appCatalogLoading || (this.appCatalogLoaded && this.appCatalogHost === host)) return;
+      this.appCatalogLoading = true;
+      this.appCatalogHost = host;
+      try {
+        const res = await chrome.runtime.sendMessage({
+          type: 'GET_APP_SEARCH_CATALOG',
+          payload: { host }
+        });
+        const map = res?.map && typeof res.map === 'object' ? res.map : {};
+        this.appCatalog = Object.entries(map)
+          .map(([appIdRaw, nameRaw]) => {
+            const appId = String(appIdRaw || '').trim();
+            const name = String(nameRaw || '').trim();
+            if (!/^\d+$/.test(appId) || !name) return null;
+            return {
+              id: `app-search-${host}-${appId}`,
+              label: name,
+              icon: '⌕',
+              category: 'app',
+              badge: `app:${appId}`,
+              appId,
+              host,
+              searchText: `${name}\n${appId}`.toLowerCase(),
+              action: () => {
+                window.location.href = `${host}/k/${encodeURIComponent(appId)}/`;
+              }
+            };
+          })
+          .filter(Boolean)
+          .sort((a, b) => {
+            const byName = String(a.label || '').localeCompare(String(b.label || ''), 'ja');
+            if (byName !== 0) return byName;
+            return String(a.appId || '').localeCompare(String(b.appId || ''), 'ja');
+          });
+        this.appCatalogLoaded = true;
+        if (this.isOpen) this.filter(this.inputEl?.value || '');
+      } catch (_) {
+        this.appCatalog = [];
+        this.appCatalogLoaded = true;
+      } finally {
+        this.appCatalogLoading = false;
+      }
+    }
+
+    searchApps(query, limit = 8) {
+      const q = String(query || '').trim().toLowerCase();
+      if (!q) return [];
+      const prefix = [];
+      const partial = [];
+      this.appCatalog.forEach((app) => {
+        const label = String(app.label || '').toLowerCase();
+        const appId = String(app.appId || '').toLowerCase();
+        if (label.startsWith(q) || appId.startsWith(q)) {
+          prefix.push(app);
+          return;
+        }
+        if (app.searchText.includes(q)) {
+          partial.push(app);
+        }
+      });
+      return [...prefix, ...partial].slice(0, limit);
+    }
+
+    startAppSearch() {
+      this.appSearchMode = true;
+      if (this.inputEl) {
+        this.inputEl.value = '';
+        this.inputEl.placeholder = 'App名またはApp IDを検索...';
+        this.inputEl.focus();
+      }
+      this.loadAppCatalog();
+      this.filter('');
     }
 
     mount() {
@@ -11294,7 +11398,10 @@
         #pb-command-palette .pb-cp__item:hover,#pb-command-palette .pb-cp__item--active{background:#eff6ff!important;color:#1d4ed8!important}
         #pb-command-palette .pb-cp__item-icon{width:28px!important;height:28px!important;display:flex!important;align-items:center!important;justify-content:center!important;background:#f3f4f6!important;border-radius:6px!important;font-size:13px!important;flex-shrink:0!important;color:#6b7280!important}
         #pb-command-palette .pb-cp__item--active .pb-cp__item-icon{background:#dbeafe!important;color:#1d4ed8!important}
-        #pb-command-palette .pb-cp__item-label{flex:1!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+        #pb-command-palette .pb-cp__item-text{flex:1!important;min-width:0!important;display:flex!important;flex-direction:column!important;gap:1px!important}
+        #pb-command-palette .pb-cp__item-label{white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+        #pb-command-palette .pb-cp__item-sub{font-size:11px!important;color:#9ca3af!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+        #pb-command-palette .pb-cp__item--active .pb-cp__item-sub{color:#60a5fa!important}
         #pb-command-palette .pb-cp__item-badge{font-size:10px!important;padding:2px 8px!important;border-radius:9999px!important;background:#f3f4f6!important;color:#6b7280!important;font-weight:600!important;font-family:ui-monospace,monospace!important;flex-shrink:0!important;white-space:nowrap!important;letter-spacing:.02em!important}
         #pb-command-palette .pb-cp__item--active .pb-cp__item-badge{background:#dbeafe!important;color:#3b82f6!important}
         #pb-command-palette .pb-cp__empty{padding:32px 16px!important;text-align:center!important;color:#9ca3af!important;font-size:13px!important;display:block!important}
@@ -11310,6 +11417,12 @@
 
     filter(query) {
       const q = String(query || '').trim().toLowerCase();
+      if (this.appSearchMode) {
+        this.filtered = this.searchApps(q);
+        this.activeIndex = 0;
+        this.renderList();
+        return;
+      }
       const cmds = CP_COMMANDS.filter((cmd) => {
         if (cmd.requiresApp && !this.ctx.appId) return false;
         if (cmd.requiresRecord && !this.ctx.recordId) return false;
@@ -11328,11 +11441,18 @@
       if (!this.filtered.length) {
         const empty = document.createElement('div');
         empty.className = 'pb-cp__empty';
-        empty.textContent = '該当するコマンドが見つかりません';
+        if (this.appSearchMode) {
+          const q = String(this.inputEl?.value || '').trim();
+          empty.textContent = this.appCatalogLoading
+            ? 'App一覧を読み込んでいます...'
+            : (q ? '該当するAppが見つかりません' : 'App名またはApp IDを入力してください');
+        } else {
+          empty.textContent = '該当するコマンドが見つかりません';
+        }
         this.listEl.appendChild(empty);
         return;
       }
-      const CATEGORY_LABELS = { admin: 'ADMIN', dev: 'DEV' };
+      const CATEGORY_LABELS = { admin: 'ADMIN', dev: 'DEV', app: 'APP' };
       let lastCategory = null;
       this.filtered.forEach((cmd, i) => {
         if (cmd.category && cmd.category !== lastCategory) {
@@ -11350,15 +11470,26 @@
         icon.className = 'pb-cp__item-icon';
         icon.textContent = cmd.icon || '›';
 
+        const text = document.createElement('span');
+        text.className = 'pb-cp__item-text';
+
         const label = document.createElement('span');
         label.className = 'pb-cp__item-label';
         label.textContent = cmd.label;
+        text.appendChild(label);
+
+        if (cmd.category === 'app' && cmd.appId) {
+          const sub = document.createElement('span');
+          sub.className = 'pb-cp__item-sub';
+          sub.textContent = cmd.host || location.origin || '';
+          text.appendChild(sub);
+        }
 
         const badge = document.createElement('span');
         badge.className = 'pb-cp__item-badge';
         badge.textContent = cmd.badge || '';
 
-        item.append(icon, label, badge);
+        item.append(icon, text, badge);
         item.addEventListener('mousedown', (e) => {
           e.preventDefault();
           this.execute(i);
@@ -11398,7 +11529,7 @@
     execute(index) {
       const cmd = this.filtered[index];
       if (!cmd) return;
-      this.close();
+      if (!cmd.keepOpen) this.close();
       if (cmd.isAsync) {
         cmd.action(this.ctx, this);
       } else {
@@ -11411,6 +11542,7 @@
       await this.fetchContext();
       this.backdropEl.style.display = 'flex';
       this.isOpen = true;
+      this.appSearchMode = false;
       this.filter('');
       if (this.inputEl) {
         this.inputEl.value = '';
