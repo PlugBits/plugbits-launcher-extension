@@ -36,10 +36,23 @@ function isRetryableUploadStatus(status) {
   return code === 408 || code === 429 || code >= 500;
 }
 
+function getFileUploadLogDetail(file, attempt, extra = {}) {
+  return {
+    fileName: String(file?.name || ''),
+    fileSize: Number(file?.size || 0),
+    fileType: String(file?.type || ''),
+    lastModified: Number(file?.lastModified || 0),
+    attempt,
+    maxAttempts: FILE_UPLOAD_MAX_ATTEMPTS,
+    ...extra
+  };
+}
+
 async function uploadKintoneFileWithRetry(file, { sdk, uploadEndpoint, trigger }) {
   let lastError = null;
   for (let attempt = 1; attempt <= FILE_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
     try {
+      console.debug('[PB][overlay] file upload start', getFileUploadLogDetail(file, attempt, { endpoint: uploadEndpoint, trigger }));
       const token = sdk.getRequestToken();
       const form = new FormData();
       form.append('file', file, file.name);
@@ -52,13 +65,39 @@ async function uploadKintoneFileWithRetry(file, { sdk, uploadEndpoint, trigger }
         const text = await resp.text().catch(() => '');
         const err = new Error(`file upload failed: ${resp.status} ${text}`);
         err.status = resp.status;
+        console.warn('[PB][overlay] file upload http failed', getFileUploadLogDetail(file, attempt, {
+          endpoint: uploadEndpoint,
+          trigger,
+          status: resp.status,
+          statusText: String(resp.statusText || ''),
+          responseText: String(text || '').slice(0, 1000)
+        }));
         emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: false, sent: true, requestCount: 1, requestKind: 'rest', error: err.message });
         if (!isRetryableUploadStatus(resp.status) || attempt >= FILE_UPLOAD_MAX_ATTEMPTS) {
           throw err;
         }
         lastError = err;
       } else {
-        const json = await resp.json();
+        let json = null;
+        try {
+          json = await resp.json();
+        } catch (parseError) {
+          console.warn('[PB][overlay] file upload response parse failed', getFileUploadLogDetail(file, attempt, {
+            endpoint: uploadEndpoint,
+            trigger,
+            status: resp.status,
+            statusText: String(resp.statusText || ''),
+            errorName: String(parseError?.name || ''),
+            errorMessage: String(parseError?.message || parseError || '')
+          }));
+          throw parseError;
+        }
+        console.debug('[PB][overlay] file upload succeeded', getFileUploadLogDetail(file, attempt, {
+          endpoint: uploadEndpoint,
+          trigger,
+          status: resp.status,
+          hasFileKey: Boolean(json?.fileKey)
+        }));
         emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: true, sent: true, requestCount: 1, requestKind: 'rest' });
         return json.fileKey;
       }
@@ -66,6 +105,14 @@ async function uploadKintoneFileWithRetry(file, { sdk, uploadEndpoint, trigger }
       lastError = error;
       const status = Number(error?.status || 0);
       const retryable = status ? isRetryableUploadStatus(status) : true;
+      console.warn('[PB][overlay] file upload attempt failed', getFileUploadLogDetail(file, attempt, {
+        endpoint: uploadEndpoint,
+        trigger,
+        status,
+        retryable,
+        errorName: String(error?.name || ''),
+        errorMessage: String(error?.message || error || '')
+      }));
       if (!status) {
         emitApiUsage({ feature: 'overlay_file_upload', endpoint: uploadEndpoint, method: 'POST', trigger, source: 'overlay', ok: false, sent: true, requestCount: 1, requestKind: 'rest', error: String(error?.message || error || 'file_upload_failed') });
       }
