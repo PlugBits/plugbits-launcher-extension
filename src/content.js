@@ -11228,6 +11228,7 @@
       this.backdropEl = null;
       this.inputEl = null;
       this.listEl = null;
+      this.footerEl = null;
       this.isOpen = false;
       this.ctx = { appId: null, recordId: null, query: '' };
       this.filtered = [];
@@ -11291,8 +11292,22 @@
               appId,
               host,
               searchText: `${name}\n${appId}`.toLowerCase(),
-              action: () => {
-                window.location.href = `${host}/k/${encodeURIComponent(appId)}/`;
+              action: async (_ctx, _palette, options = {}) => {
+                const url = `${host}/k/${encodeURIComponent(appId)}/`;
+                if (options.newTab) {
+                  try {
+                    const res = await chrome.runtime.sendMessage({
+                      type: 'PB_OPEN_APP_SEARCH_TAB',
+                      payload: { url }
+                    });
+                    if (res?.ok) return;
+                  } catch (_) {
+                    // Fall back to browser default when the service worker is unavailable.
+                  }
+                  window.open(url, '_blank');
+                  return;
+                }
+                window.location.href = url;
               }
             };
           })
@@ -11381,6 +11396,7 @@
       const footer = document.createElement('div');
       footer.className = 'pb-cp__footer';
       footer.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
+      this.footerEl = footer;
 
       const style = document.createElement('style');
       style.textContent = `
@@ -11420,6 +11436,7 @@
       if (this.appSearchMode) {
         this.filtered = this.searchApps(q);
         this.activeIndex = 0;
+        this.renderFooter();
         this.renderList();
         return;
       }
@@ -11432,7 +11449,15 @@
       });
       this.filtered = cmds;
       this.activeIndex = 0;
+      this.renderFooter();
       this.renderList();
+    }
+
+    renderFooter() {
+      if (!this.footerEl) return;
+      this.footerEl.innerHTML = this.appSearchMode
+        ? '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 開く</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> 新規タブ</span><span><kbd>Esc</kbd> 閉じる</span>'
+        : '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
     }
 
     renderList() {
@@ -11522,18 +11547,18 @@
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        this.execute(this.activeIndex);
+        this.execute(this.activeIndex, { newTab: this.appSearchMode && e.shiftKey });
       }
     }
 
-    execute(index) {
+    execute(index, options = {}) {
       const cmd = this.filtered[index];
       if (!cmd) return;
       if (!cmd.keepOpen) this.close();
       if (cmd.isAsync) {
-        cmd.action(this.ctx, this);
+        cmd.action(this.ctx, this, options);
       } else {
-        cmd.action(this.ctx, this);
+        cmd.action(this.ctx, this, options);
       }
     }
 
