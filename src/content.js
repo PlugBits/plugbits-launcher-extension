@@ -11237,6 +11237,8 @@
       this.appCatalogLoading = false;
       this.appCatalogLoaded = false;
       this.appSearchMode = false;
+      this.shortcutCommands = [];
+      this.shortcutBarEl = null;
     }
 
     async fetchContext() {
@@ -11244,6 +11246,42 @@
         const res = await this.postFn('CP_GET_CONTEXT', {});
         if (res?.ok) this.ctx = { ...this.ctx, ...res.result };
       } catch (_) { /* ignore */ }
+    }
+
+    async fetchShortcutCommands() {
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'CP_GET_SHORTCUTS' });
+        if (!res?.ok) { this.shortcutCommands = []; return; }
+        const list = Array.isArray(res.shortcuts) ? res.shortcuts : [];
+        this.shortcutCommands = list.slice(0, 9).map((entry, i) => ({
+          id: `shortcut-${i}`,
+          label: (entry.label || '').trim() || `ショートカット ${i + 1}`,
+          icon: String(i + 1),
+          category: 'shortcut',
+          badge: `[${i + 1}]`,
+          keywords: ['shortcut', 'ショートカット', String(i + 1)],
+          _url: (() => {
+            const host = String(entry.host || '').replace(/\/$/, '');
+            const appId = String(entry.appId || '').trim();
+            const type = entry.type || 'appTop';
+            if (!host || !appId) return '';
+            if (type === 'create') return `${host}/k/${encodeURIComponent(appId)}/edit`;
+            const base = `${host}/k/${encodeURIComponent(appId)}/`;
+            if (type === 'view') {
+              const view = String(entry.viewIdOrName || '').trim();
+              if (view) return `${base}?view=${encodeURIComponent(view)}`;
+            }
+            return base;
+          })(),
+          action(ctx, palette) {
+            const url = this._url;
+            if (!url) return;
+            window.open(url, '_blank', 'noopener,noreferrer');
+          }
+        }));
+      } catch (_) {
+        this.shortcutCommands = [];
+      }
     }
 
     async copyFieldCodes(ctx) {
@@ -11382,6 +11420,10 @@
       footer.className = 'pb-cp__footer';
       footer.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
 
+      const shortcutBar = document.createElement('div');
+      shortcutBar.className = 'pb-cp__shortcut-bar';
+      this.shortcutBarEl = shortcutBar;
+
       const style = document.createElement('style');
       style.textContent = `
         #pb-command-palette-backdrop{position:fixed!important;inset:0!important;background:rgba(0,0,0,.4)!important;z-index:2147483647!important;display:none!important;align-items:flex-start!important;justify-content:center!important;padding-top:12vh!important}
@@ -11405,14 +11447,48 @@
         #pb-command-palette .pb-cp__item-badge{font-size:10px!important;padding:2px 8px!important;border-radius:9999px!important;background:#f3f4f6!important;color:#6b7280!important;font-weight:600!important;font-family:ui-monospace,monospace!important;flex-shrink:0!important;white-space:nowrap!important;letter-spacing:.02em!important}
         #pb-command-palette .pb-cp__item--active .pb-cp__item-badge{background:#dbeafe!important;color:#3b82f6!important}
         #pb-command-palette .pb-cp__empty{padding:32px 16px!important;text-align:center!important;color:#9ca3af!important;font-size:13px!important;display:block!important}
+        #pb-command-palette .pb-cp__shortcut-bar{border-top:1px solid #e5e7eb!important;padding:8px 12px!important;display:flex!important;gap:6px!important;flex-wrap:wrap!important;flex-shrink:0!important;background:#fafafa!important}
+        #pb-command-palette .pb-cp__shortcut-bar:empty{display:none!important}
+        #pb-command-palette .pb-cp__sc-btn{display:flex!important;align-items:center!important;gap:5px!important;padding:4px 8px!important;border-radius:6px!important;border:1px solid #e5e7eb!important;background:#fff!important;cursor:pointer!important;font-size:12px!important;color:#374151!important;font-family:inherit!important;max-width:100px!important;transition:background .1s,border-color .1s!important}
+        #pb-command-palette .pb-cp__sc-btn:hover{background:#eff6ff!important;border-color:#bfdbfe!important;color:#1d4ed8!important}
+        #pb-command-palette .pb-cp__sc-btn-num{font-size:10px!important;font-weight:700!important;background:#f3f4f6!important;border-radius:3px!important;padding:0 4px!important;color:#9ca3af!important;font-family:ui-monospace,monospace!important;flex-shrink:0!important}
+        #pb-command-palette .pb-cp__sc-btn:hover .pb-cp__sc-btn-num{background:#dbeafe!important;color:#3b82f6!important}
+        #pb-command-palette .pb-cp__sc-btn-label{white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
         #pb-command-palette .pb-cp__footer{border-top:1px solid #f3f4f6!important;padding:8px 16px!important;display:flex!important;gap:16px!important;font-size:11px!important;color:#9ca3af!important;flex-shrink:0!important}
         #pb-command-palette .pb-cp__footer kbd{display:inline-block!important;background:#f3f4f6!important;border:1px solid #e5e7eb!important;border-radius:4px!important;padding:1px 5px!important;font-size:10px!important;color:#6b7280!important;font-family:inherit!important}
       `;
 
-      panel.append(searchWrap, list, footer);
+      panel.append(searchWrap, list, shortcutBar, footer);
       backdrop.append(style, panel);
       document.body.appendChild(backdrop);
       this.backdropEl = backdrop;
+    }
+
+    renderShortcutBar() {
+      if (!this.shortcutBarEl) return;
+      this.shortcutBarEl.innerHTML = '';
+      this.shortcutCommands.forEach((cmd, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pb-cp__sc-btn';
+        btn.title = cmd.label;
+
+        const num = document.createElement('span');
+        num.className = 'pb-cp__sc-btn-num';
+        num.textContent = String(i + 1);
+
+        const label = document.createElement('span');
+        label.className = 'pb-cp__sc-btn-label';
+        label.textContent = cmd.label;
+
+        btn.append(num, label);
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          cmd.action(this.ctx, this);
+          this.close();
+        });
+        this.shortcutBarEl.appendChild(btn);
+      });
     }
 
     filter(query) {
@@ -11423,12 +11499,13 @@
         this.renderList();
         return;
       }
-      const cmds = CP_COMMANDS.filter((cmd) => {
+      const allCmds = [...CP_COMMANDS, ...this.shortcutCommands];
+      const cmds = allCmds.filter((cmd) => {
         if (cmd.requiresApp && !this.ctx.appId) return false;
         if (cmd.requiresRecord && !this.ctx.recordId) return false;
         if (!q) return true;
         if (cmd.label.toLowerCase().includes(q)) return true;
-        return cmd.keywords.some((k) => k.toLowerCase().includes(q));
+        return (cmd.keywords || []).some((k) => k.toLowerCase().includes(q));
       });
       this.filtered = cmds;
       this.activeIndex = 0;
@@ -11452,7 +11529,7 @@
         this.listEl.appendChild(empty);
         return;
       }
-      const CATEGORY_LABELS = { admin: 'ADMIN', dev: 'DEV', app: 'APP' };
+      const CATEGORY_LABELS = { shortcut: 'SHORTCUTS', admin: 'ADMIN', dev: 'DEV', app: 'APP' };
       let lastCategory = null;
       this.filtered.forEach((cmd, i) => {
         if (cmd.category && cmd.category !== lastCategory) {
@@ -11523,6 +11600,7 @@
       if (e.key === 'Enter') {
         e.preventDefault();
         this.execute(this.activeIndex);
+        return;
       }
     }
 
@@ -11539,10 +11617,11 @@
 
     async open() {
       if (!this.backdropEl) this.mount();
-      await this.fetchContext();
+      await Promise.all([this.fetchContext(), this.fetchShortcutCommands()]);
       this.backdropEl.style.display = 'flex';
       this.isOpen = true;
       this.appSearchMode = false;
+      this.renderShortcutBar();
       this.filter('');
       if (this.inputEl) {
         this.inputEl.value = '';
@@ -11567,6 +11646,7 @@
     if (e.key === '/' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       commandPalette.toggle();
+      return;
     }
   }, true);
 

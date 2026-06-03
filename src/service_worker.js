@@ -2045,6 +2045,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
+    if (msg?.type === 'CP_GET_SHORTCUTS') {
+      try {
+        const stored = await chrome.storage.sync.get('kfavShortcuts');
+        const raw = stored['kfavShortcuts'];
+        const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+        sendResponse({ ok: true, shortcuts: list });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
+      }
+      return;
+    }
+
     if (msg?.type !== 'RUN_IN_KINTONE') return;
     const safeHost = normalizeHostOrigin(msg.host);
     const { forward } = msg; // forward: { type: 'LIST_FIELDS' | 'LIST_SCHEDULE' | 'LIST_VIEWS' | ... , payload: {...} }
