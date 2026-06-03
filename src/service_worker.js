@@ -1975,6 +1975,41 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
+    if (msg?.type === 'PB_OPEN_APP_SEARCH_TAB') {
+      const payload = msg?.payload && typeof msg.payload === 'object' ? msg.payload : msg;
+      const rawUrl = String(payload?.url || '').trim();
+      const sourceWindowId = sender?.tab?.windowId;
+      const sourceIndex = Number(sender?.tab?.index);
+      let parsedUrl = null;
+      try {
+        parsedUrl = new URL(rawUrl);
+      } catch (_err) {
+        sendResponse({ ok: false, error: 'invalid_url' });
+        return;
+      }
+      if (!isKintoneUrl(parsedUrl.href)) {
+        sendResponse({ ok: false, error: 'unsupported_url' });
+        return;
+      }
+      try {
+        const createOptions = {
+          url: parsedUrl.href,
+          active: true
+        };
+        if (Number.isInteger(sourceWindowId)) {
+          createOptions.windowId = sourceWindowId;
+        }
+        if (Number.isInteger(sourceIndex) && sourceIndex >= 0) {
+          createOptions.index = sourceIndex + 1;
+        }
+        const tab = await chrome.tabs.create(createOptions);
+        sendResponse({ ok: true, tabId: tab?.id || null });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+      return;
+    }
+
     if (msg?.type === 'GET_APP_NAMES_BY_IDS') {
       const payload = msg?.payload && typeof msg.payload === 'object' ? msg.payload : msg;
       const safeHost = normalizeHostOrigin(payload?.host || payload?.origin || payload?.url || '');
