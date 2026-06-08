@@ -607,6 +607,14 @@
       return ymd(shift(today, baseDiff + weekOffset * 7));
     }
 
+    // YYYYMMDD (8桁数字) → YYYY-MM-DD
+    const compactMatch = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (compactMatch) {
+      const [, y, m, d] = compactMatch;
+      const mn = Number(m), dn = Number(d);
+      if (mn >= 1 && mn <= 12 && dn >= 1 && dn <= 31) return `${y}-${m}-${d}`;
+    }
+
     return null;
   }
 
