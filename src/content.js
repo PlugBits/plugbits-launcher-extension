@@ -7184,7 +7184,7 @@
           input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === 'Tab') {
               const smart = smartDateToYMD(input.value);
-              if (smart) input.value = smart;
+              if (smart) { input.value = smart; input.select(); }
               if (e.key === 'Enter') e.preventDefault();
             }
           });
@@ -7582,6 +7582,7 @@
                       if (smart) {
                         input.value = smart;
                         setSubtableCellValue(item, child, smart);
+                        input.select();
                       }
                     }
                   });
@@ -9669,7 +9670,7 @@
           event.stopImmediatePropagation();
           if (field?.type === 'DATE' && targetInput) {
             const smart = smartDateToYMD(targetInput.value);
-            if (smart) { targetInput.value = smart; this.onInputChanged(targetInput); }
+            if (smart) { targetInput.value = smart; this.onInputChanged(targetInput); targetInput.select(); }
           }
           const isTabKey = event.key === 'Tab';
           const rowDelta = isTabKey ? 0 : (event.shiftKey ? -1 : 1);
@@ -12113,7 +12114,7 @@
             input.addEventListener('keydown', (e) => {
               if (e.key === 'Enter' || e.key === 'Tab') {
                 const smart = smartDateToYMD(input.value);
-                if (smart) input.value = smart;
+                if (smart) { input.value = smart; input.select(); }
                 if (e.key === 'Enter') e.preventDefault();
               }
             });
