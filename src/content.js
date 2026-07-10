@@ -11134,6 +11134,8 @@
 
   // ── Command Palette ──────────────────────────────────────────────────────
 
+  const APP_CATALOG_REFRESH_KEYWORDS = ['refresh', 'reload', 'cache', 'キャッシュ', '更新', 'アプリ一覧'];
+
   const CP_COMMANDS = [
     // ─ App search ─
     {
@@ -11146,19 +11148,6 @@
       keepOpen: true,
       action(_ctx, palette) {
         palette.startAppSearch();
-      }
-    },
-    {
-      id: 'refresh-app-catalog',
-      label: 'アプリ一覧キャッシュを更新',
-      icon: '⟳',
-      category: 'app',
-      badge: 'refresh',
-      keywords: ['refresh', 'reload', 'cache', 'キャッシュ', '更新', 'アプリ一覧'],
-      keepOpen: true,
-      isAsync: true,
-      async action(_ctx, palette) {
-        await palette.refreshAppCatalog();
       }
     },
     // ─ Nav ─
@@ -11669,6 +11658,17 @@
       }
     }
 
+    buildAppCatalogRefreshItem() {
+      return {
+        id: 'refresh-app-catalog-inline',
+        label: 'アプリ一覧キャッシュを更新',
+        icon: '⟳',
+        badge: 'refresh',
+        keepOpen: true,
+        action: async (_ctx, palette) => { await palette.refreshAppCatalog(); }
+      };
+    }
+
     searchApps(query, limit = 8) {
       const q = String(query || '').trim().toLowerCase();
       if (!q) return [];
@@ -11825,6 +11825,9 @@
       const q = String(query || '').trim().toLowerCase();
       if (this.appSearchMode) {
         this.filtered = this.searchApps(q);
+        if (q && APP_CATALOG_REFRESH_KEYWORDS.some((k) => k.includes(q))) {
+          this.filtered = [this.buildAppCatalogRefreshItem(), ...this.filtered];
+        }
         this.activeIndex = 0;
         this.renderFooter();
         this.renderList();
