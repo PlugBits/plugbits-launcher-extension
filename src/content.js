@@ -11148,6 +11148,82 @@
         palette.startAppSearch();
       }
     },
+    // ─ Nav ─
+    {
+      id: 'open-app-top',
+      label: 'アプリトップへ',
+      icon: '⌂',
+      category: 'nav',
+      badge: 'top',
+      keywords: ['app', 'top', 'アプリ', 'トップ', 'cd'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `${location.origin}/k/${ctx.appId}/`; }
+    },
+    {
+      id: 'open-portal',
+      label: 'ポータルへ',
+      icon: '⌂',
+      category: 'nav',
+      badge: 'portal',
+      keywords: ['portal', 'ポータル', 'home', 'トップ'],
+      action() { window.location.href = `${location.origin}/k/`; }
+    },
+    // ─ List: view / graph ─
+    {
+      id: 'switch-view',
+      label: 'ビューを切り替え',
+      icon: '▤',
+      category: 'list',
+      badge: 'view',
+      keywords: ['view', 'switch', 'ビュー', '切替', '一覧'],
+      requiresApp: true,
+      keepOpen: true,
+      action(ctx, palette) { palette.startSubPicker('view'); }
+    },
+    {
+      id: 'open-graph-view',
+      label: 'グラフビューへ',
+      icon: '▲',
+      category: 'list',
+      badge: 'graph',
+      keywords: ['graph', 'chart', 'グラフ', 'レポート', 'report'],
+      requiresApp: true,
+      keepOpen: true,
+      action(ctx, palette) { palette.startSubPicker('graph'); }
+    },
+    // ─ Record detail ─
+    {
+      id: 'duplicate-record',
+      label: 'レコードを複製',
+      icon: '⧉',
+      category: 'record',
+      badge: 'dup',
+      keywords: ['duplicate', 'copy', 'reuse', '複製', '再利用'],
+      requiresRecord: true,
+      action(ctx) { window.location.href = `/k/${ctx.appId}/edit?record=${ctx.recordId}`; }
+    },
+    {
+      id: 'copy-record-link',
+      label: 'レコードリンクをコピー',
+      icon: 'L',
+      category: 'record',
+      badge: 'link',
+      keywords: ['link', 'url', 'リンク', 'コピー', 'copy'],
+      requiresRecord: true,
+      action(ctx) {
+        navigator.clipboard.writeText(`${location.origin}/k/${ctx.appId}/show#record=${ctx.recordId}`);
+      }
+    },
+    {
+      id: 'open-print-preview',
+      label: '印刷プレビューへ',
+      icon: 'P',
+      category: 'record',
+      badge: 'print',
+      keywords: ['print', '印刷', 'プレビュー', 'preview'],
+      requiresRecord: true,
+      action(ctx) { window.location.href = `/k/${ctx.appId}/print?record=${ctx.recordId}`; }
+    },
     // ─ Admin: navigation ─
     {
       id: 'open-form-settings',
@@ -11197,7 +11273,8 @@
       badge: 'notify',
       keywords: ['notification', 'notify', '通知', '条件', 'reminder'],
       requiresApp: true,
-      action(ctx) { window.location.href = `/k/admin/app/notification?app=${ctx.appId}`; }
+      keepOpen: true,
+      action(ctx, palette) { palette.startSubPicker('notification'); }
     },
     {
       id: 'open-acl-settings',
@@ -11207,7 +11284,8 @@
       badge: 'acl',
       keywords: ['acl', 'access', 'permission', 'アクセス権', '権限'],
       requiresApp: true,
-      action(ctx) { window.location.href = `/k/admin/app/acl/record?app=${ctx.appId}`; }
+      keepOpen: true,
+      action(ctx, palette) { palette.startSubPicker('acl'); }
     },
     {
       id: 'open-customize-settings',
@@ -11238,82 +11316,6 @@
       keywords: ['deploy', '反映', '運用', '公開', 'release'],
       requiresApp: true,
       action(ctx) { window.location.href = `/k/admin/preview/${ctx.appId}/`; }
-    },
-    // ─ List: view / graph ─
-    {
-      id: 'switch-view',
-      label: 'ビューを切り替え',
-      icon: '▤',
-      category: 'list',
-      badge: 'view',
-      keywords: ['view', 'switch', 'ビュー', '切替', '一覧'],
-      requiresApp: true,
-      keepOpen: true,
-      action(ctx, palette) { palette.startViewPicker('view'); }
-    },
-    {
-      id: 'open-graph-view',
-      label: 'グラフビューへ',
-      icon: '▲',
-      category: 'list',
-      badge: 'graph',
-      keywords: ['graph', 'chart', 'グラフ', 'レポート', 'report'],
-      requiresApp: true,
-      keepOpen: true,
-      action(ctx, palette) { palette.startViewPicker('graph'); }
-    },
-    // ─ Record detail ─
-    {
-      id: 'duplicate-record',
-      label: 'レコードを複製',
-      icon: '⧉',
-      category: 'record',
-      badge: 'dup',
-      keywords: ['duplicate', 'copy', 'reuse', '複製', '再利用'],
-      requiresRecord: true,
-      action(ctx) { window.location.href = `/k/${ctx.appId}/edit?record=${ctx.recordId}`; }
-    },
-    {
-      id: 'copy-record-link',
-      label: 'レコードリンクをコピー',
-      icon: 'L',
-      category: 'record',
-      badge: 'link',
-      keywords: ['link', 'url', 'リンク', 'コピー', 'copy'],
-      requiresRecord: true,
-      action(ctx) {
-        navigator.clipboard.writeText(`${location.origin}/k/${ctx.appId}/show#record=${ctx.recordId}`);
-      }
-    },
-    {
-      id: 'open-print-preview',
-      label: '印刷プレビューへ',
-      icon: 'P',
-      category: 'record',
-      badge: 'print',
-      keywords: ['print', '印刷', 'プレビュー', 'preview'],
-      requiresRecord: true,
-      action(ctx) { window.location.href = `/k/${ctx.appId}/print?record=${ctx.recordId}`; }
-    },
-    // ─ Nav ─
-    {
-      id: 'open-app-top',
-      label: 'アプリトップへ',
-      icon: '⌂',
-      category: 'nav',
-      badge: 'top',
-      keywords: ['app', 'top', 'アプリ', 'トップ', 'cd'],
-      requiresApp: true,
-      action(ctx) { window.location.href = `${location.origin}/k/${ctx.appId}/`; }
-    },
-    {
-      id: 'open-portal',
-      label: 'ポータルへ',
-      icon: '⌂',
-      category: 'nav',
-      badge: 'portal',
-      keywords: ['portal', 'ポータル', 'home', 'トップ'],
-      action() { window.location.href = `${location.origin}/k/`; }
     },
     // ─ Developer: clipboard ─
     {
@@ -11410,9 +11412,12 @@
       this.appSearchMode = false;
       this.shortcutCommands = [];
       this.shortcutBarEl = null;
-      this.viewPickerMode = null;
+      this.subPickerKind = null;
       this.viewPickerItems = [];
       this.viewPickerLoadedAppId = '';
+      this.reportItems = [];
+      this.reportItemsLoadedAppId = '';
+      this.staticSubItems = [];
     }
 
     async fetchContext() {
@@ -11477,22 +11482,49 @@
       } catch (_) { /* ignore */ }
     }
 
-    async startViewPicker(mode) {
-      this.viewPickerMode = mode;
-      if (this.inputEl) {
-        this.inputEl.value = '';
-        this.inputEl.placeholder = mode === 'graph' ? 'グラフ名を検索...' : 'ビュー名を検索...';
-        this.inputEl.focus();
-      }
-      this.filter('');
-      await this.loadViewPickerItems(mode);
+    buildAclItems(ctx) {
+      const appId = ctx.appId;
+      return [
+        { id: 'acl-app', label: 'アプリのアクセス権', icon: '⚙', badge: 'app', action: () => { window.location.href = `/k/admin/app/acl/app?app=${appId}`; } },
+        { id: 'acl-record', label: 'レコードのアクセス権', icon: '⚙', badge: 'record', action: () => { window.location.href = `/k/admin/app/acl/record?app=${appId}`; } },
+        { id: 'acl-field', label: 'フィールドのアクセス権', icon: '⚙', badge: 'field', action: () => { window.location.href = `/k/admin/app/acl/field?app=${appId}`; } }
+      ];
     }
 
-    async loadViewPickerItems(mode) {
+    buildNotificationItems(ctx) {
+      const appId = ctx.appId;
+      return [
+        { id: 'notify-app', label: '全般通知', icon: '⚙', badge: 'app', action: () => { window.location.href = `/k/admin/app/notification?app=${appId}&trigger=app`; } },
+        { id: 'notify-record', label: 'レコード単位の通知', icon: '⚙', badge: 'record', action: () => { window.location.href = `/k/admin/app/notification?app=${appId}&trigger=record`; } },
+        { id: 'notify-reminder', label: 'リマインダー通知', icon: '⚙', badge: 'reminder', action: () => { window.location.href = `/k/admin/app/notification?app=${appId}&trigger=reminder`; } }
+      ];
+    }
+
+    async startSubPicker(kind) {
+      this.subPickerKind = kind;
+      const PLACEHOLDERS = {
+        view: 'ビュー名を検索...',
+        graph: 'グラフ名を検索...',
+        acl: '種類を選択...',
+        notification: '種類を選択...'
+      };
+      if (this.inputEl) {
+        this.inputEl.value = '';
+        this.inputEl.placeholder = PLACEHOLDERS[kind] || '検索...';
+        this.inputEl.focus();
+      }
+      if (kind === 'acl') { this.staticSubItems = this.buildAclItems(this.ctx); this.filter(''); return; }
+      if (kind === 'notification') { this.staticSubItems = this.buildNotificationItems(this.ctx); this.filter(''); return; }
+      this.filter('');
+      if (kind === 'view') await this.loadViewPickerItems();
+      if (kind === 'graph') await this.loadReportItems();
+    }
+
+    async loadViewPickerItems() {
       const appId = this.ctx.appId;
       if (!appId) { this.viewPickerItems = []; return; }
       if (this.viewPickerLoadedAppId === appId && this.viewPickerItems.length) {
-        if (this.isOpen && this.viewPickerMode === mode) this.filter(this.inputEl?.value || '');
+        if (this.isOpen && this.subPickerKind === 'view') this.filter(this.inputEl?.value || '');
         return;
       }
       try {
@@ -11503,16 +11535,10 @@
           .map((v) => ({
             id: `view-${v.id}`,
             label: v.name || `view-${v.id}`,
-            icon: v.type === 'CHART' ? '▲' : '▤',
+            icon: '▤',
             badge: v.type || '',
-            isChart: v.type === 'CHART',
-            viewId: v.id,
             action: () => {
-              if (v.type === 'CHART') {
-                window.location.href = `${location.origin}/k/${appId}/report?report=${v.id}`;
-              } else {
-                window.location.href = `${location.origin}/k/${appId}/?view=${encodeURIComponent(v.id)}`;
-              }
+              window.location.href = `${location.origin}/k/${appId}/?view=${encodeURIComponent(v.id)}`;
             }
           }))
           .sort((a, b) => String(a.label).localeCompare(String(b.label), 'ja'));
@@ -11520,7 +11546,42 @@
       } catch (_) {
         this.viewPickerItems = [];
       } finally {
-        if (this.isOpen && this.viewPickerMode === mode) this.filter(this.inputEl?.value || '');
+        if (this.isOpen && this.subPickerKind === 'view') this.filter(this.inputEl?.value || '');
+      }
+    }
+
+    async loadReportItems() {
+      const appId = this.ctx.appId;
+      if (!appId) { this.reportItems = []; return; }
+      if (this.reportItemsLoadedAppId === appId && this.reportItems.length) {
+        if (this.isOpen && this.subPickerKind === 'graph') this.filter(this.inputEl?.value || '');
+        return;
+      }
+      try {
+        const res = await this.postFn('CP_GET_REPORTS', { appId });
+        if (!res?.ok) { this.reportItems = []; return; }
+        const reports = res.result?.reports && typeof res.result.reports === 'object' ? res.result.reports : {};
+        this.reportItems = Object.entries(reports)
+          .map(([name, r]) => {
+            const reportId = r?.id != null ? String(r.id) : '';
+            return {
+              id: `report-${reportId || name}`,
+              label: r?.name || name,
+              icon: '▲',
+              badge: 'graph',
+              action: () => {
+                window.location.href = reportId
+                  ? `${location.origin}/k/${appId}/report?report=${reportId}`
+                  : `${location.origin}/k/${appId}/report`;
+              }
+            };
+          })
+          .sort((a, b) => String(a.label).localeCompare(String(b.label), 'ja'));
+        this.reportItemsLoadedAppId = appId;
+      } catch (_) {
+        this.reportItems = [];
+      } finally {
+        if (this.isOpen && this.subPickerKind === 'graph') this.filter(this.inputEl?.value || '');
       }
     }
 
@@ -11745,9 +11806,11 @@
         this.renderList();
         return;
       }
-      if (this.viewPickerMode) {
-        const wantChart = this.viewPickerMode === 'graph';
-        const scoped = this.viewPickerItems.filter((v) => v.isChart === wantChart);
+      if (this.subPickerKind) {
+        let scoped;
+        if (this.subPickerKind === 'view') scoped = this.viewPickerItems;
+        else if (this.subPickerKind === 'graph') scoped = this.reportItems;
+        else scoped = this.staticSubItems;
         this.filtered = q ? scoped.filter((v) => String(v.label).toLowerCase().includes(q)) : scoped;
         this.activeIndex = 0;
         this.renderFooter();
@@ -11772,7 +11835,7 @@
       if (!this.footerEl) return;
       if (this.appSearchMode) {
         this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 開く</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> 新規タブ</span><span><kbd>Esc</kbd> 閉じる</span>';
-      } else if (this.viewPickerMode) {
+      } else if (this.subPickerKind) {
         this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 開く</span><span><kbd>Esc</kbd> 閉じる</span>';
       } else {
         this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
@@ -11790,10 +11853,14 @@
           empty.textContent = this.appCatalogLoading
             ? 'App一覧を読み込んでいます...'
             : (q ? '該当するAppが見つかりません' : 'App名またはApp IDを入力してください');
-        } else if (this.viewPickerMode) {
-          empty.textContent = this.viewPickerMode === 'graph'
-            ? 'グラフビューが見つかりません'
-            : 'ビューが見つかりません';
+        } else if (this.subPickerKind) {
+          const emptyText = {
+            view: 'ビューが見つかりません',
+            graph: 'グラフビューが見つかりません',
+            acl: '項目が見つかりません',
+            notification: '項目が見つかりません'
+          };
+          empty.textContent = emptyText[this.subPickerKind] || '該当する項目が見つかりません';
         } else {
           empty.textContent = '該当するコマンドが見つかりません';
         }
@@ -11895,7 +11962,7 @@
       this.backdropEl.style.display = 'flex';
       this.isOpen = true;
       this.appSearchMode = false;
-      this.viewPickerMode = null;
+      this.subPickerKind = null;
       this.renderShortcutBar();
       this.filter('');
       if (this.inputEl) {

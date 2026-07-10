@@ -1774,6 +1774,17 @@ function markLookupAutoFields(properties, metas) {
         return;
       }
 
+      if (type === 'CP_GET_REPORTS') {
+        let reports = {};
+        try {
+          reports = (typeof window.kintone?.app?.getReports === 'function' ? window.kintone.app.getReports() : null) || {};
+        } catch (_) {
+          reports = {};
+        }
+        window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { reports } }, ORIGIN);
+        return;
+      }
+
       if (type === 'EXCEL_PUT_RECORDS') {
         const appId = payload?.appId;
         const records = Array.isArray(payload?.records) ? payload.records : null;
