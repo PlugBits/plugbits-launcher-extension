@@ -34,14 +34,18 @@ const EXCLUDE_FILES = new Set([
   'package-lock.json',
   '.gitignore',
   'README.md',
-  'content-overlay-controller.js'
+  'content-overlay-controller.js',
+  'content-command-palette.js',
+  'content-quick-new-record-modal.js'
 ]);
 
 // Source files listed here are not real content scripts on their own — they are
 // spliced into a host file at build time via a `// @@INCLUDE: <file>` marker, so
 // content.js can stay split across files in src/ while shipping as one script.
 const INCLUDE_TARGETS = [
-  { host: 'content.js', include: 'content-overlay-controller.js' }
+  { host: 'content.js', include: 'content-overlay-controller.js' },
+  { host: 'content.js', include: 'content-command-palette.js' },
+  { host: 'content.js', include: 'content-quick-new-record-modal.js' }
 ];
 
 const EXCLUDE_DIRS = new Set([
