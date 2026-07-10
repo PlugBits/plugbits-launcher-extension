@@ -336,7 +336,8 @@ const I18N_MESSAGES = {
     pro_verify_btn: '認証する',
     pro_info_email: 'メールアドレス',
     pro_info_expiry: '次回更新日',
-    pro_upgrade_btn: 'Pro にアップグレード',
+    pro_upgrade_btn: 'Pro にアップグレード（¥980 / 月）',
+    pro_price_line: '¥980 / 月',
     pro_portal_btn: 'サブスク管理・領収書',
     pro_clear_btn: 'ライセンス解除',
     pro_portal_hint: '解約・プラン変更・領収書の発行は「サブスク管理」から行えます。',
@@ -602,7 +603,8 @@ const I18N_MESSAGES = {
     pro_verify_btn: 'Verify',
     pro_info_email: 'Email',
     pro_info_expiry: 'Next renewal',
-    pro_upgrade_btn: 'Upgrade to Pro',
+    pro_upgrade_btn: 'Upgrade to Pro (¥980 / month)',
+    pro_price_line: '¥980 / month',
     pro_portal_btn: 'Manage subscription',
     pro_clear_btn: 'Remove license',
     pro_portal_hint: 'Cancel, change plan, or download receipts from "Manage subscription".',
@@ -713,6 +715,7 @@ const proInfoSection = document.getElementById('pro_info_section');
 const proInfoEmail = document.getElementById('pro_info_email');
 const proInfoExpiry = document.getElementById('pro_info_expiry');
 const proUpgradeBtn = document.getElementById('pro_upgrade_btn');
+const proPriceLine = document.getElementById('pro_price_line');
 const proPortalBtn = document.getElementById('pro_portal_btn');
 const proClearBtn = document.getElementById('pro_clear_btn');
 
@@ -736,6 +739,7 @@ function updateProStatusUI(cache, key) {
     }
     if (proInfoSection) proInfoSection.hidden = false;
     if (proUpgradeBtn) proUpgradeBtn.hidden = true;
+    if (proPriceLine) proPriceLine.hidden = true;
     proPortalUrl = cache.portalUrl || '';
     if (proPortalBtn) proPortalBtn.hidden = !proPortalUrl;
     if (proClearBtn) proClearBtn.hidden = false;
@@ -744,6 +748,7 @@ function updateProStatusUI(cache, key) {
     if (proStatusSub) proStatusSub.textContent = hasKey ? 'ライセンスキーを入力して認証してください' : '';
     if (proInfoSection) proInfoSection.hidden = true;
     if (proUpgradeBtn) proUpgradeBtn.hidden = false;
+    if (proPriceLine) proPriceLine.hidden = false;
     if (proPortalBtn) proPortalBtn.hidden = true;
     if (proClearBtn) proClearBtn.hidden = !hasKey;
   }

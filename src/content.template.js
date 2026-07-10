@@ -1383,7 +1383,6 @@
       toastViewOnlyBlocked: "Pro 版のみ",
       overlayProOnly: "Pro 版のみ",
       overlayStandardReadonly: "Standardでは閲覧のみ利用できます",
-      overlayProComingSoon: "Proモードは近日公開予定です",
       lookupAutoReadonly: "LOOKUPにより自動入力されるため編集できません",
       toastSaveSuccess: "保存しました",
       toastSaveFailed: "保存に失敗しました",
@@ -1521,7 +1520,6 @@
       toastViewOnlyBlocked: "Pro plan only",
       overlayProOnly: "Pro plan only",
       overlayStandardReadonly: "Editing is disabled in Standard mode",
-      overlayProComingSoon: "Pro mode is coming soon",
       lookupAutoReadonly: "This field is auto-populated by LOOKUP and cannot be edited",
       toastSaveSuccess: "Changes saved",
       toastSaveFailed: "Failed to save changes",
@@ -1669,11 +1667,9 @@
   const OVERLAY_LAYOUT_PRESETS_KEY = 'kfavOverlayLayoutPresets';
   const OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY = 'kfavOverlayLayoutLegacyMigrated';
   const SUBTABLE_WIDTH_PREF_STORAGE_KEY = 'kfavExcelSubtableWidths';
-  const EXCEL_OVERLAY_MODE_KEY = 'kfavExcelOverlayMode';
   const EXCEL_OVERLAY_MODE_STANDARD = 'standard';
   const EXCEL_OVERLAY_MODE_PRO = 'pro';
   const DEFAULT_EXCEL_OVERLAY_MODE = EXCEL_OVERLAY_MODE_STANDARD;
-  const EXCEL_OVERLAY_MODE_VALUES = new Set([EXCEL_OVERLAY_MODE_STANDARD, EXCEL_OVERLAY_MODE_PRO]);
   const OVERLAY_RUNTIME_MODE_LIST = 'list';
   const OVERLAY_RUNTIME_MODE_DETAIL_SINGLE_ROW = 'detail-single-row';
   const OVERLAY_LAYOUT_MODE_GRID = 'grid';
@@ -1751,12 +1747,6 @@
     if (typeof fallbackJa === 'function') return fallbackJa(...args);
     if (typeof fallbackJa === 'string') return fallbackJa;
     return key;
-  }
-
-  function normalizeExcelOverlayMode(value) {
-    if (value === 'edit') return EXCEL_OVERLAY_MODE_PRO;
-    if (value === 'view' || value === 'off') return EXCEL_OVERLAY_MODE_STANDARD;
-    return EXCEL_OVERLAY_MODE_VALUES.has(value) ? value : DEFAULT_EXCEL_OVERLAY_MODE;
   }
 
   function createPermissionServiceSafe() {

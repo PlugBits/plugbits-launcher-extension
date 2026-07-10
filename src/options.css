@@ -1531,8 +1531,11 @@ ul {
 .pro-info-label { color: #6b7280; width: 100px; flex-shrink: 0; }
 .pro-info-value { color: #111827; font-weight: 500; }
 
+.pro-price-line { margin-top: 16px; font-size: 15px; font-weight: 600; color: #111827; }
+.pro-price-line[hidden] { display: none !important; }
+
 /* アクションボタン */
-.pro-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.pro-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .pro-actions [hidden] { display: none !important; }
 
 .pro-upgrade-btn {
