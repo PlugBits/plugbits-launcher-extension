@@ -9,8 +9,7 @@ import {
   saveShortcuts,
   upsertRecentRecord,
   saveAppNameMap,
-  clearAppNameMap,
-  clearAllAppNameMaps
+  clearAppNameMap
 } from './core.js';
 
 function disableLegacyWatchlistBadgeRefresh() {
@@ -1540,6 +1539,28 @@ async function getCachedAppSearchCatalog(host, options = {}) {
   }
 }
 
+async function refreshAllAppNameMaps() {
+  let granted = { origins: [] };
+  try {
+    granted = await chrome.permissions.getAll();
+  } catch (_err) {
+    granted = { origins: [] };
+  }
+  const hosts = extractHostOriginsFromPermissions(granted);
+  let refreshed = 0;
+  let failed = 0;
+  for (const host of hosts) {
+    try {
+      const map = await fetchAppsMap(host);
+      await saveAppNameMap(host, map);
+      refreshed++;
+    } catch (_err) {
+      failed++;
+    }
+  }
+  return { hosts: hosts.length, refreshed, failed };
+}
+
 async function invalidateHostCaches(host, reason = 'permission_changed') {
   const safeHost = normalizeHostOrigin(host);
   if (!safeHost) return null;
@@ -1978,9 +1999,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
-    if (msg?.type === 'PB_CLEAR_APP_SEARCH_CATALOG_ALL') {
-      const removed = await clearAllAppNameMaps();
-      sendResponse({ ok: true, removed });
+    if (msg?.type === 'PB_REFRESH_APP_SEARCH_CATALOG_ALL') {
+      const result = await refreshAllAppNameMaps();
+      sendResponse({ ok: true, ...result });
       return;
     }
 

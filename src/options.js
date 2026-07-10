@@ -289,11 +289,11 @@ const I18N_MESSAGES = {
     metadata_cache_clear_confirm: 'キャッシュを削除します。よろしいですか？',
     metadata_cache_clear_done: 'キャッシュを削除しました。',
     metadata_cache_clear_failed: 'キャッシュの削除に失敗しました。',
-    app_catalog_cache_clear_btn: 'App一覧キャッシュを更新',
-    app_catalog_cache_clear_desc: 'コマンドパレットのApp検索が使うアプリ名一覧キャッシュを、全ホストぶん更新します。',
-    app_catalog_cache_clear_confirm: 'App一覧キャッシュを削除します。よろしいですか？',
-    app_catalog_cache_clear_done: 'App一覧キャッシュを削除しました。',
-    app_catalog_cache_clear_failed: 'App一覧キャッシュの削除に失敗しました。',
+    app_catalog_cache_refresh_btn: 'App一覧キャッシュを再取得',
+    app_catalog_cache_refresh_desc: 'コマンドパレットのApp検索・ショートカット候補が使うアプリ名一覧を、全ホストぶん取得し直します。',
+    app_catalog_cache_refresh_confirm: 'App一覧キャッシュを再取得します。よろしいですか？',
+    app_catalog_cache_refresh_done: 'App一覧キャッシュを再取得しました。',
+    app_catalog_cache_refresh_failed: 'App一覧キャッシュの再取得に失敗しました。',
     api_usage_group_shortcuts: 'ショートカット',
     api_usage_group_watchlist: 'ウォッチリスト',
     api_usage_group_record_pin: 'ピン止め',
@@ -555,11 +555,11 @@ const I18N_MESSAGES = {
     metadata_cache_clear_confirm: 'Clear metadata cache?',
     metadata_cache_clear_done: 'Metadata cache was cleared.',
     metadata_cache_clear_failed: 'Failed to clear metadata cache.',
-    app_catalog_cache_clear_btn: 'Refresh app list cache',
-    app_catalog_cache_clear_desc: 'Refreshes the app name cache used by the command palette App search, across all hosts.',
-    app_catalog_cache_clear_confirm: 'Clear the app list cache?',
-    app_catalog_cache_clear_done: 'App list cache was cleared.',
-    app_catalog_cache_clear_failed: 'Failed to clear the app list cache.',
+    app_catalog_cache_refresh_btn: 'Refetch app list cache',
+    app_catalog_cache_refresh_desc: 'Refetches the app name list used by the command palette App search and shortcuts, across all hosts.',
+    app_catalog_cache_refresh_confirm: 'Refetch the app list cache?',
+    app_catalog_cache_refresh_done: 'App list cache was refetched.',
+    app_catalog_cache_refresh_failed: 'Failed to refetch the app list cache.',
     api_usage_group_shortcuts: 'Shortcuts',
     api_usage_group_watchlist: 'Watchlist',
     api_usage_group_record_pin: 'Pinned Records',
@@ -838,7 +838,7 @@ const apiUsageFeatureTableBodyEl = document.getElementById('api_usage_feature_ta
 const apiUsageResetBtn = document.getElementById('api_usage_reset');
 const metadataCacheClearBtn = document.getElementById('metadata_cache_clear');
 const metadataCacheStatusEl = document.getElementById('metadata_cache_status');
-const appCatalogCacheClearBtn = document.getElementById('app_catalog_cache_clear');
+const appCatalogCacheRefreshBtn = document.getElementById('app_catalog_cache_refresh');
 const appCatalogCacheStatusEl = document.getElementById('app_catalog_cache_status');
 const apiUsageTodayTotalEl = document.getElementById('api_usage_today_total');
 const apiUsageTodaySuccessEl = document.getElementById('api_usage_today_success');
@@ -3059,7 +3059,7 @@ function setMetadataCacheStatus(message) {
 
 function setAppCatalogCacheStatus(message) {
   if (!appCatalogCacheStatusEl) return;
-  appCatalogCacheStatusEl.textContent = String(message || '').trim() || t('app_catalog_cache_clear_desc');
+  appCatalogCacheStatusEl.textContent = String(message || '').trim() || t('app_catalog_cache_refresh_desc');
 }
 
 function normalizeShortcutSearchOpenMode(value) {
@@ -3186,18 +3186,18 @@ metadataCacheClearBtn?.addEventListener('click', async () => {
   }
 });
 
-appCatalogCacheClearBtn?.addEventListener('click', async () => {
-  if (!window.confirm(t('app_catalog_cache_clear_confirm'))) return;
+appCatalogCacheRefreshBtn?.addEventListener('click', async () => {
+  if (!window.confirm(t('app_catalog_cache_refresh_confirm'))) return;
   setAppCatalogCacheStatus('...');
   try {
-    const response = await chrome.runtime.sendMessage({ type: 'PB_CLEAR_APP_SEARCH_CATALOG_ALL' });
+    const response = await chrome.runtime.sendMessage({ type: 'PB_REFRESH_APP_SEARCH_CATALOG_ALL' });
     if (response?.ok) {
-      setAppCatalogCacheStatus(t('app_catalog_cache_clear_done'));
+      setAppCatalogCacheStatus(t('app_catalog_cache_refresh_done'));
       return;
     }
-    setAppCatalogCacheStatus(t('app_catalog_cache_clear_failed'));
+    setAppCatalogCacheStatus(t('app_catalog_cache_refresh_failed'));
   } catch (_err) {
-    setAppCatalogCacheStatus(t('app_catalog_cache_clear_failed'));
+    setAppCatalogCacheStatus(t('app_catalog_cache_refresh_failed'));
   }
 });
 

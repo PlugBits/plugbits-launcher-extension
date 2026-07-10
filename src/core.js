@@ -412,18 +412,6 @@ export async function clearAppNameMap(host) {
   }
 }
 
-export async function clearAllAppNameMaps() {
-  try {
-    const all = await chrome.storage.local.get(null);
-    const prefix = `${APP_NAME_CACHE_KEY}::`;
-    const keys = Object.keys(all || {}).filter((key) => key.startsWith(prefix));
-    if (keys.length) await chrome.storage.local.remove(keys);
-    return keys.length;
-  } catch (_err) {
-    return 0;
-  }
-}
-
 export async function getCachedAppName(host, appId) {
   const safeAppId = String(appId || '').trim();
   if (!safeAppId) return null;
