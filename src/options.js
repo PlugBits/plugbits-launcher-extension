@@ -1,4 +1,31 @@
 ﻿// options.js
+// options.html loads this as a classic (non-module) script, so it cannot `import` core.js.
+// Kept in sync with core.js's buildKintoneUrl by hand; this is the single local copy —
+// every URL built in this file should go through it instead of inlining template literals.
+function buildKintoneUrl(host, appId, options = {}) {
+  const normalizedHost = String(host || '').trim().replace(/\/+$/, '');
+  const normalizedAppId = String(appId || '').trim();
+  if (!normalizedHost || !normalizedAppId) return '';
+  const encodedAppId = encodeURIComponent(normalizedAppId);
+  const mode = options.mode || '';
+  if (mode === 'create') {
+    return `${normalizedHost}/k/${encodedAppId}/edit`;
+  }
+  const recordId = String(options.recordId || '').trim();
+  if (recordId) {
+    const encodedRecordId = encodeURIComponent(recordId);
+    if (mode === 'edit') return `${normalizedHost}/k/${encodedAppId}/edit?record=${encodedRecordId}`;
+    if (mode === 'print') return `${normalizedHost}/k/${encodedAppId}/print?record=${encodedRecordId}`;
+    return `${normalizedHost}/k/${encodedAppId}/show#record=${encodedRecordId}`;
+  }
+  const base = `${normalizedHost}/k/${encodedAppId}/`;
+  const viewId = String(options.viewId || '').trim();
+  if (viewId) {
+    return `${base}?view=${encodeURIComponent(viewId)}`;
+  }
+  return base;
+}
+
 const DEFAULT_PANE = 'general';
 const menuButtons = Array.from(document.querySelectorAll('[data-pane-target]'));
 const panes = Array.from(document.querySelectorAll('[data-pane]'));
@@ -1108,13 +1135,7 @@ function getWatchlistQueryDisplay(item) {
 }
 
 function buildWatchlistUrl(host, appId, viewId) {
-  const normalizedHost = String(host || '').trim().replace(/\/+$/, '');
-  const normalizedAppId = String(appId || '').trim();
-  const normalizedViewId = String(viewId || '').trim();
-  if (!normalizedHost || !normalizedAppId) return '';
-  const base = `${normalizedHost}/k/${encodeURIComponent(normalizedAppId)}/`;
-  if (!normalizedViewId) return base;
-  return `${base}?view=${encodeURIComponent(normalizedViewId)}`;
+  return buildKintoneUrl(host, appId, { viewId });
 }
 
 function toPascalIconName(name) {
@@ -1449,20 +1470,10 @@ function shortcutTypeLabel(type) {
 }
 
 function buildShortcutUrl(entry) {
-  const host = (entry.host || '').replace(/\/$/, '');
-  const appId = (entry.appId || '').trim();
-  if (!host || !appId) return '';
-  if (entry.type === 'create') {
-    return `${host}/k/${encodeURIComponent(appId)}/edit`;
-  }
-  const base = `${host}/k/${encodeURIComponent(appId)}/`;
-  if (entry.type === 'view') {
-    const view = (entry.viewIdOrName || '').trim();
-    if (view) {
-      return `${base}?view=${encodeURIComponent(view)}`;
-    }
-  }
-  return base;
+  return buildKintoneUrl(entry.host, entry.appId, {
+    mode: entry.type === 'create' ? 'create' : undefined,
+    viewId: entry.type === 'view' ? entry.viewIdOrName : undefined
+  });
 }
 
 function shortcutMetaText(entry) {
@@ -1775,7 +1786,7 @@ function renderPinnedEntries() {
     openBtn.title = t('pins_open');
     openBtn.setAttribute('aria-label', t('pins_open'));
     if (entry.host && entry.appId && entry.recordId) {
-      openBtn.href = `${entry.host}/k/${entry.appId}/show#record=${entry.recordId}`;
+      openBtn.href = buildKintoneUrl(entry.host, entry.appId, { recordId: entry.recordId });
       openBtn.target = '_blank';
       openBtn.rel = 'noopener';
     } else {
@@ -1836,7 +1847,7 @@ function renderPinnedEntries() {
     const detailBody = document.createElement('div');
     detailBody.className = 'watch-details-body pin-details-body';
     const fullUrl = entry.host && entry.appId && entry.recordId
-      ? `${entry.host}/k/${entry.appId}/show#record=${entry.recordId}`
+      ? buildKintoneUrl(entry.host, entry.appId, { recordId: entry.recordId })
       : '-';
     [
       [t('pins_detail_host'), entry.host || '-'],
@@ -2660,7 +2671,7 @@ function openPinEditModal(entry, triggerEl = null) {
   if (pinEditLabelEl) pinEditLabelEl.value = entry.label || '';
   if (pinEditUrlEl) {
     pinEditUrlEl.value = entry.host && entry.appId && entry.recordId
-      ? `${entry.host}/k/${entry.appId}/show#record=${entry.recordId}`
+      ? buildKintoneUrl(entry.host, entry.appId, { recordId: entry.recordId })
       : '';
   }
   if (pinEditAppIdEl) pinEditAppIdEl.value = entry.appId || '';

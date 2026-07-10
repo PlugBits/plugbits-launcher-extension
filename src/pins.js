@@ -6,7 +6,8 @@ import {
   createId,
   getActiveTab,
   parseKintoneUrl,
-  isKintoneUrl
+  isKintoneUrl,
+  buildKintoneUrl
 } from './core.js';
 
 export function initPins(options = {}) {
@@ -201,7 +202,7 @@ export function initPins(options = {}) {
     const openBtn = doc.createElement('a');
     openBtn.textContent = 'Open';
     openBtn.className = 'btn record-pin-open';
-    openBtn.href = `${entry.host}/k/${entry.appId}/show#record=${entry.recordId}`;
+    openBtn.href = buildKintoneUrl(entry.host, entry.appId, { recordId: entry.recordId });
     openBtn.target = '_blank';
     openBtn.rel = 'noopener';
 
