@@ -1775,11 +1775,12 @@ function markLookupAutoFields(properties, metas) {
       }
 
       if (type === 'CP_GET_REPORTS') {
-        let reports = {};
+        let reports = [];
         try {
-          reports = (typeof window.kintone?.app?.getReports === 'function' ? window.kintone.app.getReports() : null) || {};
+          const raw = typeof window.kintone?.app?.getReports === 'function' ? window.kintone.app.getReports() : null;
+          reports = (raw && typeof raw.then === 'function' ? await raw : raw) || [];
         } catch (_) {
-          reports = {};
+          reports = [];
         }
         window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { reports } }, ORIGIN);
         return;
