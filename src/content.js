@@ -11179,6 +11179,142 @@
       requiresApp: true,
       action(ctx) { window.location.href = `/k/admin/app/apitoken?app=${ctx.appId}`; }
     },
+    {
+      id: 'open-list-settings',
+      label: '一覧設定を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: 'view',
+      keywords: ['list', 'view', '一覧', 'ビュー', '設定'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/app/flow?app=${ctx.appId}#section=view`; }
+    },
+    {
+      id: 'open-notification-settings',
+      label: '通知条件を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: 'notify',
+      keywords: ['notification', 'notify', '通知', '条件', 'reminder'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/app/notification?app=${ctx.appId}`; }
+    },
+    {
+      id: 'open-acl-settings',
+      label: 'アクセス権を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: 'acl',
+      keywords: ['acl', 'access', 'permission', 'アクセス権', '権限'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/app/acl/record?app=${ctx.appId}`; }
+    },
+    {
+      id: 'open-customize-settings',
+      label: 'JS・CSSカスタマイズを開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: 'custom',
+      keywords: ['customize', 'js', 'css', 'カスタマイズ', 'javascript'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/app/customize?app=${ctx.appId}`; }
+    },
+    {
+      id: 'open-plugin-settings',
+      label: 'プラグイン設定を開く',
+      icon: '⚙',
+      category: 'admin',
+      badge: 'plugin',
+      keywords: ['plugin', 'プラグイン', '設定'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/app/${ctx.appId}/plugin/#/`; }
+    },
+    {
+      id: 'open-deploy',
+      label: '運用環境へ反映',
+      icon: '⚙',
+      category: 'admin',
+      badge: 'deploy',
+      keywords: ['deploy', '反映', '運用', '公開', 'release'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `/k/admin/preview/${ctx.appId}/`; }
+    },
+    // ─ List: view / graph ─
+    {
+      id: 'switch-view',
+      label: 'ビューを切り替え',
+      icon: '▤',
+      category: 'list',
+      badge: 'view',
+      keywords: ['view', 'switch', 'ビュー', '切替', '一覧'],
+      requiresApp: true,
+      keepOpen: true,
+      action(ctx, palette) { palette.startViewPicker('view'); }
+    },
+    {
+      id: 'open-graph-view',
+      label: 'グラフビューへ',
+      icon: '▲',
+      category: 'list',
+      badge: 'graph',
+      keywords: ['graph', 'chart', 'グラフ', 'レポート', 'report'],
+      requiresApp: true,
+      keepOpen: true,
+      action(ctx, palette) { palette.startViewPicker('graph'); }
+    },
+    // ─ Record detail ─
+    {
+      id: 'duplicate-record',
+      label: 'レコードを複製',
+      icon: '⧉',
+      category: 'record',
+      badge: 'dup',
+      keywords: ['duplicate', 'copy', 'reuse', '複製', '再利用'],
+      requiresRecord: true,
+      action(ctx) { window.location.href = `/k/${ctx.appId}/edit?record=${ctx.recordId}`; }
+    },
+    {
+      id: 'copy-record-link',
+      label: 'レコードリンクをコピー',
+      icon: 'L',
+      category: 'record',
+      badge: 'link',
+      keywords: ['link', 'url', 'リンク', 'コピー', 'copy'],
+      requiresRecord: true,
+      action(ctx) {
+        navigator.clipboard.writeText(`${location.origin}/k/${ctx.appId}/show#record=${ctx.recordId}`);
+      }
+    },
+    {
+      id: 'open-print-preview',
+      label: '印刷プレビューへ',
+      icon: 'P',
+      category: 'record',
+      badge: 'print',
+      keywords: ['print', '印刷', 'プレビュー', 'preview'],
+      requiresRecord: true,
+      action(ctx) { window.location.href = `/k/${ctx.appId}/print?record=${ctx.recordId}`; }
+    },
+    // ─ Nav ─
+    {
+      id: 'open-app-top',
+      label: 'アプリトップへ',
+      icon: '⌂',
+      category: 'nav',
+      badge: 'top',
+      keywords: ['app', 'top', 'アプリ', 'トップ', 'cd'],
+      requiresApp: true,
+      action(ctx) { window.location.href = `${location.origin}/k/${ctx.appId}/`; }
+    },
+    {
+      id: 'open-portal',
+      label: 'ポータルへ',
+      icon: '⌂',
+      category: 'nav',
+      badge: 'portal',
+      keywords: ['portal', 'ポータル', 'home', 'トップ'],
+      action() { window.location.href = `${location.origin}/k/`; }
+    },
     // ─ Developer: clipboard ─
     {
       id: 'copy-app-id',
@@ -11229,6 +11365,31 @@
         await palette.copyFieldCodes(ctx);
       }
     },
+    {
+      id: 'copy-form-definition',
+      label: 'フォーム定義をJSONで取得',
+      icon: 'F',
+      category: 'dev',
+      badge: 'json',
+      keywords: ['form', 'definition', 'json', 'フォーム', '定義', 'schema'],
+      requiresApp: true,
+      isAsync: true,
+      async action(ctx, palette) {
+        await palette.copyFormDefinition(ctx);
+      }
+    },
+    // ─ Help ─
+    {
+      id: 'show-shortcut-help',
+      label: 'ショートカットキー一覧を表示',
+      icon: '?',
+      category: 'help',
+      badge: 'help',
+      keywords: ['help', 'shortcut', 'ヘルプ', 'ショートカット', '一覧'],
+      action() {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true, cancelable: true }));
+      }
+    },
   ];
 
   class CommandPalette {
@@ -11249,6 +11410,9 @@
       this.appSearchMode = false;
       this.shortcutCommands = [];
       this.shortcutBarEl = null;
+      this.viewPickerMode = null;
+      this.viewPickerItems = [];
+      this.viewPickerLoadedAppId = '';
     }
 
     async fetchContext() {
@@ -11302,6 +11466,62 @@
         const text = fields.map((f) => `${f.code}\t${f.label || ''}\t${f.type || ''}`).join('\n');
         await navigator.clipboard.writeText(text);
       } catch (_) { /* ignore */ }
+    }
+
+    async copyFormDefinition(ctx) {
+      try {
+        const res = await this.postFn('CP_GET_FORM_DEFINITION', { appId: ctx.appId });
+        if (!res?.ok) return;
+        const properties = res.result?.properties || {};
+        await navigator.clipboard.writeText(JSON.stringify(properties, null, 2));
+      } catch (_) { /* ignore */ }
+    }
+
+    async startViewPicker(mode) {
+      this.viewPickerMode = mode;
+      if (this.inputEl) {
+        this.inputEl.value = '';
+        this.inputEl.placeholder = mode === 'graph' ? 'グラフ名を検索...' : 'ビュー名を検索...';
+        this.inputEl.focus();
+      }
+      this.filter('');
+      await this.loadViewPickerItems(mode);
+    }
+
+    async loadViewPickerItems(mode) {
+      const appId = this.ctx.appId;
+      if (!appId) { this.viewPickerItems = []; return; }
+      if (this.viewPickerLoadedAppId === appId && this.viewPickerItems.length) {
+        if (this.isOpen && this.viewPickerMode === mode) this.filter(this.inputEl?.value || '');
+        return;
+      }
+      try {
+        const res = await this.postFn('META_GET_VIEWS', { appId, source: 'command_palette' });
+        if (!res?.ok) { this.viewPickerItems = []; return; }
+        const views = res.views && typeof res.views === 'object' ? res.views : {};
+        this.viewPickerItems = Object.values(views)
+          .map((v) => ({
+            id: `view-${v.id}`,
+            label: v.name || `view-${v.id}`,
+            icon: v.type === 'CHART' ? '▲' : '▤',
+            badge: v.type || '',
+            isChart: v.type === 'CHART',
+            viewId: v.id,
+            action: () => {
+              if (v.type === 'CHART') {
+                window.location.href = `${location.origin}/k/${appId}/report?report=${v.id}`;
+              } else {
+                window.location.href = `${location.origin}/k/${appId}/?view=${encodeURIComponent(v.id)}`;
+              }
+            }
+          }))
+          .sort((a, b) => String(a.label).localeCompare(String(b.label), 'ja'));
+        this.viewPickerLoadedAppId = appId;
+      } catch (_) {
+        this.viewPickerItems = [];
+      } finally {
+        if (this.isOpen && this.viewPickerMode === mode) this.filter(this.inputEl?.value || '');
+      }
     }
 
     normalizeHost(host) {
@@ -11525,6 +11745,15 @@
         this.renderList();
         return;
       }
+      if (this.viewPickerMode) {
+        const wantChart = this.viewPickerMode === 'graph';
+        const scoped = this.viewPickerItems.filter((v) => v.isChart === wantChart);
+        this.filtered = q ? scoped.filter((v) => String(v.label).toLowerCase().includes(q)) : scoped;
+        this.activeIndex = 0;
+        this.renderFooter();
+        this.renderList();
+        return;
+      }
       const allCmds = [...CP_COMMANDS, ...this.shortcutCommands];
       const cmds = allCmds.filter((cmd) => {
         if (cmd.requiresApp && !this.ctx.appId) return false;
@@ -11541,9 +11770,13 @@
 
     renderFooter() {
       if (!this.footerEl) return;
-      this.footerEl.innerHTML = this.appSearchMode
-        ? '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 開く</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> 新規タブ</span><span><kbd>Esc</kbd> 閉じる</span>'
-        : '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
+      if (this.appSearchMode) {
+        this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 開く</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> 新規タブ</span><span><kbd>Esc</kbd> 閉じる</span>';
+      } else if (this.viewPickerMode) {
+        this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 開く</span><span><kbd>Esc</kbd> 閉じる</span>';
+      } else {
+        this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
+      }
     }
 
     renderList() {
@@ -11557,13 +11790,20 @@
           empty.textContent = this.appCatalogLoading
             ? 'App一覧を読み込んでいます...'
             : (q ? '該当するAppが見つかりません' : 'App名またはApp IDを入力してください');
+        } else if (this.viewPickerMode) {
+          empty.textContent = this.viewPickerMode === 'graph'
+            ? 'グラフビューが見つかりません'
+            : 'ビューが見つかりません';
         } else {
           empty.textContent = '該当するコマンドが見つかりません';
         }
         this.listEl.appendChild(empty);
         return;
       }
-      const CATEGORY_LABELS = { shortcut: 'SHORTCUTS', admin: 'ADMIN', dev: 'DEV', app: 'APP' };
+      const CATEGORY_LABELS = {
+        shortcut: 'SHORTCUTS', admin: 'ADMIN', dev: 'DEV', app: 'APP',
+        nav: 'NAV', list: 'LIST', record: 'RECORD', help: 'HELP'
+      };
       let lastCategory = null;
       this.filtered.forEach((cmd, i) => {
         if (cmd.category && cmd.category !== lastCategory) {
@@ -11655,6 +11895,7 @@
       this.backdropEl.style.display = 'flex';
       this.isOpen = true;
       this.appSearchMode = false;
+      this.viewPickerMode = null;
       this.renderShortcutBar();
       this.filter('');
       if (this.inputEl) {
