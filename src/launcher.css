@@ -1137,13 +1137,6 @@ body.launcher {
   color: var(--launcher-text);
 }
 
-.filter-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .toggle {
   display: inline-flex;
   align-items: center;
@@ -1737,11 +1730,6 @@ body.launcher {
   border-style: dashed;
   border-color: var(--launcher-accent);
   background: var(--launcher-accent-muted);
-}
-
-.pin-error {
-  font-size: 12px;
-  color: var(--launcher-danger);
 }
 
 /* Record Pin: layout hardening (scoped) */

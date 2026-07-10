@@ -959,15 +959,6 @@ async function saveWatchlistItem(list, item, limit) {
   return { ok: true, list: source };
 }
 
-function extractQueryParamFromUrl(urlValue) {
-  try {
-    const url = new URL(String(urlValue || ''));
-    return String(url.searchParams.get('query') || '').trim();
-  } catch (_err) {
-    return '';
-  }
-}
-
 function extractViewFilterFromViews(viewsObj, viewIdOrName) {
   if (!viewsObj || typeof viewsObj !== 'object') {
     return { matched: false, query: '', viewId: '', viewName: '', reason: 'missing_views' };
