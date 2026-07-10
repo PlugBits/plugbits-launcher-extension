@@ -11560,15 +11560,15 @@
       try {
         const res = await this.postFn('CP_GET_REPORTS', { appId });
         if (!res?.ok) { this.reportItems = []; return; }
-        const reports = res.result?.reports && typeof res.result.reports === 'object' ? res.result.reports : {};
-        this.reportItems = Object.entries(reports)
-          .map(([name, r]) => {
+        const reports = Array.isArray(res.result?.reports) ? res.result.reports : [];
+        this.reportItems = reports
+          .map((r) => {
             const reportId = r?.id != null ? String(r.id) : '';
             return {
-              id: `report-${reportId || name}`,
-              label: r?.name || name,
+              id: `report-${reportId || r?.name || ''}`,
+              label: r?.name || `report-${reportId}`,
               icon: '▲',
-              badge: 'graph',
+              badge: r?.chartType || 'graph',
               action: () => {
                 window.location.href = reportId
                   ? `${location.origin}/k/${appId}/report?report=${reportId}`
