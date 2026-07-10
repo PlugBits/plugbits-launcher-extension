@@ -142,6 +142,33 @@ Chrome Extension
 
 ---
 
+## content.js の分割構成(開発者向け)
+
+content.js は肥大化(12,000行超)していたため、以下のファイルに分割しています。
+
+```
+src/content.template.js              ← content.js のコア部分(この分割の骨格)
+src/content-overlay-controller.js    ← ExcelOverlayController クラス本体
+src/content-command-palette.js       ← コマンドパレット(Ctrl+/)
+src/content-quick-new-record-modal.js← 新規レコード作成モーダル
+        ↓ npm run generate-content
+src/content.js                       ← 上記から生成される、実際に読み込まれる完全なファイル
+```
+
+**`src/content.js` は生成物です。直接編集しないでください。**
+`content-overlay-controller.js` 等のパートファイル、または `content.template.js`
+(コア部分)を編集したら、必ず次を実行してください。
+
+```
+npm run generate-content
+```
+
+これを忘れると、`src` フォルダを直接読み込む開発フロー(パッケージ化されて
+いない拡張機能を読み込む)では変更が反映されません。`npm run build` は
+ビルド時に自動でこれを実行するため、dist 側は忘れても常に最新化されます。
+
+---
+
 # Design Philosophy
 
 PlugBits Launcher は次の原則で設計されています。
@@ -174,7 +201,6 @@ kintoneの一覧操作を高速化します。
 
 中期
 
-- content.js 分割
 - lucide軽量化
 
 長期
