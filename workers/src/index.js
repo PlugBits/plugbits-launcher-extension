@@ -27,8 +27,13 @@ function json(data, status = 200, extraHeaders = {}) {
 }
 
 // ── KV ─────────────────────────────────────────────────────────────────────
+//
+// ライセンスレコードは明示的な削除以外では消えない(TTLなし)。有効性は
+// status(active/past_due/canceled)フィールドで管理し、webhookイベントの
+// 到着頻度(請求サイクルごと、月1回程度)に依存させない。以前はTTL付きで
+// 書き込んでいたため、次の請求イベントが来るまでの間にレコードが自動失効し、
+// 全ての契約者が購入後24〜48時間でPro判定に失敗する不具合があった。
 
-const KV_TTL_SECONDS = 86400; // 24h
 const KV_PREFIX = 'lic_';
 
 function kvKey(licenseKey) {
@@ -46,13 +51,7 @@ async function kvGet(env, licenseKey) {
 }
 
 async function kvSet(env, licenseKey, data) {
-  await env.LICENSES.put(kvKey(licenseKey), JSON.stringify(data), {
-    expirationTtl: KV_TTL_SECONDS
-  });
-}
-
-async function kvDelete(env, licenseKey) {
-  await env.LICENSES.delete(kvKey(licenseKey));
+  await env.LICENSES.put(kvKey(licenseKey), JSON.stringify(data));
 }
 
 // ── Stripe ──────────────────────────────────────────────────────────────────

@@ -79,7 +79,10 @@ Key: `lic_{licenseKey}`
 }
 ```
 
-TTL: 86400秒（24h）、webhook 受信ごとにリセット。
+TTL: なし。明示的な削除以外では消えない。有効性は `status`
+(active/past_due/canceled) フィールドで管理する(以前はTTL付きだったが、
+webhookは請求サイクルごと(月1回程度)にしか届かないため、契約者全員が
+購入後24〜48時間でPro判定に失敗する不具合があったため撤去した)。
 
 ## Stripe 設定
 

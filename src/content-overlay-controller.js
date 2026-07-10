@@ -1647,17 +1647,8 @@
     }
 
     async loadOverlayMode() {
-      let requestedMode = EXCEL_OVERLAY_MODE_STANDARD;
-      try {
-        const stored = await chrome.storage.sync.get(EXCEL_OVERLAY_MODE_KEY);
-        requestedMode = normalizeExcelOverlayMode(String(stored?.[EXCEL_OVERLAY_MODE_KEY] || ''));
-      } catch (_err) {
-        requestedMode = EXCEL_OVERLAY_MODE_STANDARD;
-      }
       const accessState = await this.proService.getProAccessState({
-        featureName: 'excel-overlay-edit',
-        requestedMode,
-        allowDevelopmentInstall: requestedMode === EXCEL_OVERLAY_MODE_PRO
+        featureName: 'excel-overlay-edit'
       });
       this.proAccessState = accessState && typeof accessState === 'object'
         ? accessState
