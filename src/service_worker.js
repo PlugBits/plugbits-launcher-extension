@@ -9,7 +9,8 @@ import {
   saveShortcuts,
   upsertRecentRecord,
   saveAppNameMap,
-  clearAppNameMap
+  clearAppNameMap,
+  buildKintoneUrl
 } from './core.js';
 
 function disableLegacyWatchlistBadgeRefresh() {
@@ -820,12 +821,7 @@ async function migrateShortcutsFillIconFieldsOnce() {
 }
 
 function favoriteUrlOf(host, appId, viewIdOrName) {
-  const appKey = String(appId || '').trim();
-  const base = `${host}/k/${appKey}/`;
-  if (viewIdOrName) {
-    return `${base}?view=${encodeURIComponent(String(viewIdOrName))}`;
-  }
-  return base;
+  return buildKintoneUrl(host, appId, { viewId: viewIdOrName });
 }
 
 function shortenLogValue(value, max = 240) {

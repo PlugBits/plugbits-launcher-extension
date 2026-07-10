@@ -11136,6 +11136,26 @@
 
   const APP_CATALOG_REFRESH_KEYWORDS = ['refresh', 'reload', 'cache', 'キャッシュ', '更新', 'アプリ一覧'];
 
+  // content.js is a classic content script (not an ES module), so it cannot import
+  // core.js's buildKintoneUrl. This is a local copy scoped to the current tenant
+  // (host defaults to location.origin) for the command palette's own app/record links.
+  function buildCurrentTenantUrl(appId, options = {}) {
+    const normalizedAppId = String(appId || '').trim();
+    if (!normalizedAppId) return '';
+    const encodedAppId = encodeURIComponent(normalizedAppId);
+    const recordId = String(options.recordId || '').trim();
+    if (recordId) {
+      const encodedRecordId = encodeURIComponent(recordId);
+      if (options.mode === 'edit') return `${location.origin}/k/${encodedAppId}/edit?record=${encodedRecordId}`;
+      if (options.mode === 'print') return `${location.origin}/k/${encodedAppId}/print?record=${encodedRecordId}`;
+      return `${location.origin}/k/${encodedAppId}/show#record=${encodedRecordId}`;
+    }
+    const base = `${location.origin}/k/${encodedAppId}/`;
+    const viewId = String(options.viewId || '').trim();
+    if (viewId) return `${base}?view=${encodeURIComponent(viewId)}`;
+    return base;
+  }
+
   const CP_COMMANDS = [
     // ─ App search ─
     {
@@ -11159,7 +11179,7 @@
       badge: 'top',
       keywords: ['app', 'top', 'アプリ', 'トップ', 'cd'],
       requiresApp: true,
-      action(ctx) { window.location.href = `${location.origin}/k/${ctx.appId}/`; }
+      action(ctx) { window.location.href = buildCurrentTenantUrl(ctx.appId); }
     },
     {
       id: 'open-portal',
@@ -11202,7 +11222,7 @@
       badge: 'dup',
       keywords: ['duplicate', 'copy', 'reuse', '複製', '再利用'],
       requiresRecord: true,
-      action(ctx) { window.location.href = `/k/${ctx.appId}/edit?record=${ctx.recordId}`; }
+      action(ctx) { window.location.href = buildCurrentTenantUrl(ctx.appId, { recordId: ctx.recordId, mode: 'edit' }); }
     },
     {
       id: 'copy-record-link',
@@ -11213,7 +11233,7 @@
       keywords: ['link', 'url', 'リンク', 'コピー', 'copy'],
       requiresRecord: true,
       action(ctx) {
-        navigator.clipboard.writeText(`${location.origin}/k/${ctx.appId}/show#record=${ctx.recordId}`);
+        navigator.clipboard.writeText(buildCurrentTenantUrl(ctx.appId, { recordId: ctx.recordId }));
       }
     },
     {
@@ -11224,7 +11244,7 @@
       badge: 'print',
       keywords: ['print', '印刷', 'プレビュー', 'preview'],
       requiresRecord: true,
-      action(ctx) { window.location.href = `/k/${ctx.appId}/print?record=${ctx.recordId}`; }
+      action(ctx) { window.location.href = buildCurrentTenantUrl(ctx.appId, { recordId: ctx.recordId, mode: 'print' }); }
     },
     // ─ Admin: navigation ─
     {
@@ -11540,7 +11560,7 @@
             icon: '▤',
             badge: v.type || '',
             action: () => {
-              window.location.href = `${location.origin}/k/${appId}/?view=${encodeURIComponent(v.id)}`;
+              window.location.href = buildCurrentTenantUrl(appId, { viewId: v.id });
             }
           }))
           .sort((a, b) => String(a.label).localeCompare(String(b.label), 'ja'));

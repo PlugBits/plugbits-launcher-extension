@@ -12,6 +12,34 @@ const MAX_RECENT_RECORDS = 10;
 const APP_NAME_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_SHORTCUT_INITIAL_LENGTH = 2;
 
+export function normalizeKintoneHost(host) {
+  return String(host || '').trim().replace(/\/+$/, '');
+}
+
+export function buildKintoneUrl(host, appId, options = {}) {
+  const normalizedHost = normalizeKintoneHost(host);
+  const normalizedAppId = String(appId || '').trim();
+  if (!normalizedHost || !normalizedAppId) return '';
+  const encodedAppId = encodeURIComponent(normalizedAppId);
+  const mode = options.mode || '';
+  if (mode === 'create') {
+    return `${normalizedHost}/k/${encodedAppId}/edit`;
+  }
+  const recordId = String(options.recordId || '').trim();
+  if (recordId) {
+    const encodedRecordId = encodeURIComponent(recordId);
+    if (mode === 'edit') return `${normalizedHost}/k/${encodedAppId}/edit?record=${encodedRecordId}`;
+    if (mode === 'print') return `${normalizedHost}/k/${encodedAppId}/print?record=${encodedRecordId}`;
+    return `${normalizedHost}/k/${encodedAppId}/show#record=${encodedRecordId}`;
+  }
+  const base = `${normalizedHost}/k/${encodedAppId}/`;
+  const viewId = String(options.viewId || '').trim();
+  if (viewId) {
+    return `${base}?view=${encodeURIComponent(viewId)}`;
+  }
+  return base;
+}
+
 function normalizeShortcutInitial(value) {
   if (value == null) return '';
   const str = String(value).trim();
@@ -261,7 +289,7 @@ function normalizeRecentRecord(item) {
   const id = `${host}|${appId}|${recordId}`;
   const appName = item.appName == null ? '' : String(item.appName).trim();
   const url = item.url == null ? '' : String(item.url).trim();
-  const fallbackUrl = `${host}/k/${encodeURIComponent(appId)}/show#record=${encodeURIComponent(recordId)}`;
+  const fallbackUrl = buildKintoneUrl(host, appId, { recordId });
   const tsCandidates = [item.visitedAt, item.lastSeenAt, item.updatedAt];
   let visitedAt = 0;
   for (const value of tsCandidates) {

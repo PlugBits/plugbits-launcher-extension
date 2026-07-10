@@ -19,7 +19,8 @@ import {
   loadRecordPinVisibility,
   loadRecentRecords,
   saveRecentRecords,
-  loadAppNameMap
+  loadAppNameMap,
+  buildKintoneUrl
 } from './core.js';
 import { initPins } from './pins.js';
 
@@ -629,13 +630,7 @@ async function migrateFavoritesQueryIfNeeded(list) {
 }
 
 function buildWatchlistUrl(host, appId, viewId) {
-  const normalizedHost = String(host || '').trim().replace(/\/+$/, '');
-  const normalizedAppId = String(appId || '').trim();
-  const normalizedViewId = String(viewId || '').trim();
-  if (!normalizedHost || !normalizedAppId) return '';
-  const base = `${normalizedHost}/k/${encodeURIComponent(normalizedAppId)}/`;
-  if (!normalizedViewId) return base;
-  return `${base}?view=${encodeURIComponent(normalizedViewId)}`;
+  return buildKintoneUrl(host, appId, { viewId });
 }
 
 function getWatchlistRefreshPresetConfig(presetValue) {
@@ -908,20 +903,10 @@ function shortcutInitial(entry) {
 }
 
 function buildShortcutUrl(entry) {
-  const host = (entry.host || '').replace(/\/$/, '');
-  const appId = (entry.appId || '').trim();
-  if (!host || !appId) return '';
-  if (entry.type === 'create') {
-    return `${host}/k/${encodeURIComponent(appId)}/edit`;
-  }
-  const base = `${host}/k/${encodeURIComponent(appId)}/`;
-  if (entry.type === 'view') {
-    const view = (entry.viewIdOrName || '').trim();
-    if (view) {
-      return `${base}?view=${encodeURIComponent(view)}`;
-    }
-  }
-  return base;
+  return buildKintoneUrl(entry.host, entry.appId, {
+    mode: entry.type === 'create' ? 'create' : undefined,
+    viewId: entry.type === 'view' ? entry.viewIdOrName : undefined
+  });
 }
 
 function resolveShortcutIcon(entry) {
