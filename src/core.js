@@ -1,7 +1,6 @@
 'use strict';
 
 const FAVORITES_KEY = 'kintoneFavorites';
-const SCHEDULE_KEY = 'kfavSchedule';
 const PIN_KEY = 'kfavPins';
 const SHORTCUT_KEY = 'kfavShortcuts';
 const SHORTCUT_VISIBLE_KEY = 'kfavShortcutsVisible';
@@ -65,26 +64,6 @@ export async function saveFavorites(items) {
 
 export function sortFavorites(items) {
   return [...items].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (a.order ?? 0) - (b.order ?? 0));
-}
-
-export async function loadScheduleConfig() {
-  const stored = await chrome.storage.sync.get(SCHEDULE_KEY);
-  const raw = stored[SCHEDULE_KEY];
-  if (!raw) return [];
-  if (Array.isArray(raw)) {
-    return raw
-      .filter((item) => item && typeof item === 'object')
-      .map((item) => ({ id: item.id || createId(), ...item }));
-  }
-  if (raw && typeof raw === 'object') {
-    const entry = { id: raw.id || createId(), ...raw };
-    return [entry];
-  }
-  return [];
-}
-
-export async function saveScheduleConfig(configs) {
-  await chrome.storage.sync.set({ [SCHEDULE_KEY]: configs });
 }
 
 export function originPatternFor(origin) {
@@ -276,10 +255,6 @@ export async function loadRecordPinVisibility() {
   return true;
 }
 
-export async function saveRecordPinVisibility(visible) {
-  await chrome.storage.sync.set({ [RECORD_PIN_VISIBLE_KEY]: Boolean(visible) });
-}
-
 function normalizeRecentRecord(item) {
   if (!item || typeof item !== 'object') return null;
   const host = item.host == null ? '' : String(item.host).trim().replace(/\/$/, '');
@@ -393,18 +368,6 @@ export function getAppNameCacheKey(host) {
   return `${APP_NAME_CACHE_KEY}::${safeHost}`;
 }
 
-export async function loadAppNameCache(host) {
-  const { map, savedAt } = await loadAppNameMap(host);
-  return Object.fromEntries(
-    Object.entries(map).map(([appId, name]) => [appId, { name, fetchedAt: savedAt }])
-  );
-}
-
-export async function saveAppNameCache(host, cacheObj) {
-  const normalized = normalizeSingleHostAppNameCache(cacheObj);
-  await saveAppNameMap(host, normalized);
-}
-
 export async function loadAppNameMap(host) {
   const safeHost = normalizeHostForCache(host);
   if (!safeHost) return { savedAt: 0, map: {}, fresh: false };
@@ -440,34 +403,3 @@ export async function clearAppNameMap(host) {
   }
 }
 
-export async function getCachedAppName(host, appId) {
-  const safeAppId = String(appId || '').trim();
-  if (!safeAppId) return null;
-  const { fresh, map } = await loadAppNameMap(host);
-  if (!fresh) return null;
-  return String(map[safeAppId] || '').trim() || null;
-}
-
-export async function setCachedAppName(host, appId, name) {
-  const safeAppId = String(appId || '').trim();
-  const safeName = String(name || '').trim();
-  if (!safeAppId || !safeName) return;
-  const { map } = await loadAppNameMap(host);
-  map[safeAppId] = safeName;
-  await saveAppNameMap(host, map);
-}
-
-export async function pickMissingAppIds(host, appIds) {
-  const { fresh, map } = await loadAppNameMap(host);
-  const unique = Array.from(new Set((appIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
-  if (!fresh) return unique;
-  return unique.filter((appId) => !String(map[appId] || '').trim());
-}
-
-export async function getAppName(host, appId) {
-  const safeHost = normalizeHostForCache(host);
-  const safeAppId = String(appId || '').trim();
-  if (!safeHost || !safeAppId) return '';
-  const { map } = await loadAppNameMap(safeHost);
-  return String(map[safeAppId] || '').trim();
-}

@@ -438,15 +438,6 @@ function normalizeWatchlistLimit(raw) {
   return DEFAULT_WATCHLIST_LIMIT;
 }
 
-function extractQueryParamFromUrl(urlValue) {
-  try {
-    const url = new URL(String(urlValue || ''));
-    return String(url.searchParams.get('query') || '').trim();
-  } catch (_err) {
-    return '';
-  }
-}
-
 function isWatchlistQueryMissingValue(query) {
   if (query == null) return true;
   return String(query).trim() === '-';
