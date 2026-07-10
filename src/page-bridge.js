@@ -1762,6 +1762,18 @@ function markLookupAutoFields(properties, metas) {
         return;
       }
 
+      if (type === 'CP_GET_FORM_DEFINITION') {
+        const appId = String(payload?.appId || '').trim();
+        if (!appId) throw new Error('appId is required');
+        const resp = await callKintoneApi('/k/v1/app/form/fields', 'GET', { app: appId }, {
+          feature: 'command_palette',
+          trigger: 'cp_form_definition',
+          source: 'command_palette'
+        });
+        window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { properties: resp?.properties || {} } }, ORIGIN);
+        return;
+      }
+
       if (type === 'EXCEL_PUT_RECORDS') {
         const appId = payload?.appId;
         const records = Array.isArray(payload?.records) ? payload.records : null;
