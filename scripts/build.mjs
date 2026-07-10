@@ -33,8 +33,16 @@ const EXCLUDE_FILES = new Set([
   'package.json',
   'package-lock.json',
   '.gitignore',
-  'README.md'
+  'README.md',
+  'content-overlay-controller.js'
 ]);
+
+// Source files listed here are not real content scripts on their own — they are
+// spliced into a host file at build time via a `// @@INCLUDE: <file>` marker, so
+// content.js can stay split across files in src/ while shipping as one script.
+const INCLUDE_TARGETS = [
+  { host: 'content.js', include: 'content-overlay-controller.js' }
+];
 
 const EXCLUDE_DIRS = new Set([
   '.git',
@@ -74,6 +82,26 @@ function copyRecursive(src, dest) {
 
   ensureDir(path.dirname(dest));
   fs.copyFileSync(src, dest);
+}
+
+function inlineIncludes() {
+  const bodyMarker = '// @@BODY_START\n';
+  for (const { host, include } of INCLUDE_TARGETS) {
+    const hostPath = path.join(distDir, host);
+    const includePath = path.join(srcDir, include);
+    const markerLine = new RegExp(`^[ \\t]*// @@INCLUDE: ${include.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*$`, 'm');
+    const hostSource = fs.readFileSync(hostPath, 'utf8');
+    if (!markerLine.test(hostSource)) {
+      throw new Error(`${host} is missing the "// @@INCLUDE: ${include}" include marker`);
+    }
+    const includeSource = fs.readFileSync(includePath, 'utf8');
+    const bodyStart = includeSource.indexOf(bodyMarker);
+    if (bodyStart === -1) {
+      throw new Error(`${include} is missing the "${bodyMarker.trim()}" marker`);
+    }
+    const body = includeSource.slice(bodyStart + bodyMarker.length).replace(/\n$/, '');
+    fs.writeFileSync(hostPath, hostSource.replace(markerLine, body), 'utf8');
+  }
 }
 
 function patchManifest() {
@@ -135,6 +163,7 @@ if (!fs.existsSync(srcDir)) {
 validateManifest();
 resetDir(distDir);
 copyRecursive(srcDir, distDir);
+inlineIncludes();
 patchManifest();
 scanDangerousCode(distDir);
 
