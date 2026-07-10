@@ -9,7 +9,8 @@ import {
   saveShortcuts,
   upsertRecentRecord,
   saveAppNameMap,
-  clearAppNameMap
+  clearAppNameMap,
+  clearAllAppNameMaps
 } from './core.js';
 
 function disableLegacyWatchlistBadgeRefresh() {
@@ -1509,24 +1510,26 @@ async function fetchAppNamesByIds(host, appIds) {
   return out;
 }
 
-async function getCachedAppSearchCatalog(host) {
+async function getCachedAppSearchCatalog(host, options = {}) {
   const safeHost = normalizeHostOrigin(host);
   if (!safeHost) return { ok: false, host: '', map: {}, source: 'none', error: 'host required' };
-  let cached = { map: {}, fresh: false, savedAt: 0 };
-  try {
-    cached = await loadAppNameMap(safeHost);
-  } catch (_err) {
-    cached = { map: {}, fresh: false, savedAt: 0 };
-  }
-  const cachedMap = cached?.map && typeof cached.map === 'object' ? cached.map : {};
-  if (Object.keys(cachedMap).length) {
-    return {
-      ok: true,
-      host: safeHost,
-      map: cachedMap,
-      source: cached.fresh ? 'cache' : 'stale_cache',
-      savedAt: Number(cached.savedAt || 0)
-    };
+  if (!options.forceRefresh) {
+    let cached = { map: {}, fresh: false, savedAt: 0 };
+    try {
+      cached = await loadAppNameMap(safeHost);
+    } catch (_err) {
+      cached = { map: {}, fresh: false, savedAt: 0 };
+    }
+    const cachedMap = cached?.map && typeof cached.map === 'object' ? cached.map : {};
+    if (Object.keys(cachedMap).length) {
+      return {
+        ok: true,
+        host: safeHost,
+        map: cachedMap,
+        source: cached.fresh ? 'cache' : 'stale_cache',
+        savedAt: Number(cached.savedAt || 0)
+      };
+    }
   }
   try {
     const map = await fetchAppsMap(safeHost);
@@ -1970,8 +1973,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === 'GET_APP_SEARCH_CATALOG') {
       const payload = msg?.payload && typeof msg.payload === 'object' ? msg.payload : msg;
       const safeHost = normalizeHostOrigin(payload?.host || payload?.origin || payload?.url || sender?.tab?.url || '');
-      const result = await getCachedAppSearchCatalog(safeHost);
+      const result = await getCachedAppSearchCatalog(safeHost, { forceRefresh: Boolean(payload?.forceRefresh) });
       sendResponse(result);
+      return;
+    }
+
+    if (msg?.type === 'PB_CLEAR_APP_SEARCH_CATALOG_ALL') {
+      const removed = await clearAllAppNameMaps();
+      sendResponse({ ok: true, removed });
       return;
     }
 

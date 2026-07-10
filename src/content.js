@@ -11148,6 +11148,19 @@
         palette.startAppSearch();
       }
     },
+    {
+      id: 'refresh-app-catalog',
+      label: 'アプリ一覧キャッシュを更新',
+      icon: '⟳',
+      category: 'app',
+      badge: 'refresh',
+      keywords: ['refresh', 'reload', 'cache', 'キャッシュ', '更新', 'アプリ一覧'],
+      keepOpen: true,
+      isAsync: true,
+      async action(_ctx, palette) {
+        await palette.refreshAppCatalog();
+      }
+    },
     // ─ Nav ─
     {
       id: 'open-app-top',
@@ -11595,15 +11608,16 @@
       }
     }
 
-    async loadAppCatalog() {
+    async loadAppCatalog(forceRefresh = false) {
       const host = this.normalizeHost(location.origin || '');
-      if (!host || this.appCatalogLoading || (this.appCatalogLoaded && this.appCatalogHost === host)) return;
+      if (!host) return;
+      if (!forceRefresh && (this.appCatalogLoading || (this.appCatalogLoaded && this.appCatalogHost === host))) return;
       this.appCatalogLoading = true;
       this.appCatalogHost = host;
       try {
         const res = await chrome.runtime.sendMessage({
           type: 'GET_APP_SEARCH_CATALOG',
-          payload: { host }
+          payload: { host, forceRefresh }
         });
         const map = res?.map && typeof res.map === 'object' ? res.map : {};
         this.appCatalog = Object.entries(map)
@@ -11683,6 +11697,16 @@
       }
       this.loadAppCatalog();
       this.filter('');
+    }
+
+    async refreshAppCatalog() {
+      if (this.inputEl) this.inputEl.placeholder = 'アプリ一覧を更新しています...';
+      this.appCatalogLoaded = false;
+      await this.loadAppCatalog(true);
+      if (this.inputEl) {
+        this.inputEl.placeholder = this.appSearchMode ? 'App名またはApp IDを検索...' : 'コマンドを検索...';
+      }
+      if (this.appSearchMode) this.filter(this.inputEl?.value || '');
     }
 
     mount() {
