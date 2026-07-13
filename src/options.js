@@ -74,6 +74,28 @@ window.addEventListener('hashchange', () => {
 
 activatePane(window.location.hash.slice(1) || DEFAULT_PANE, { updateHash: false });
 
+// 購入完了ページ等からのディープリンク: options.html?license=KEY で
+// Proペインを開き、キーを自動入力して認証まで実行する
+(() => {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const licenseKey = String(params.get('license') || '').trim();
+    if (!licenseKey) return;
+    activatePane('pro-license');
+    const keyInput = document.getElementById('pro_license_key_input');
+    if (keyInput) {
+      keyInput.value = licenseKey;
+      keyInput.focus();
+    }
+    // i18n初期化後に認証を実行する（doVerifyLicenseは後方で定義されるため遅延呼び出し）
+    setTimeout(() => {
+      try {
+        void doVerifyLicense(licenseKey);
+      } catch (_) { /* ignore */ }
+    }, 600);
+  } catch (_) { /* ignore */ }
+})();
+
 const I18N_MESSAGES = {
   ja: {
     settings_title: 'PlugBits Launcher 設定',
@@ -109,6 +131,7 @@ const I18N_MESSAGES = {
     pins_section_title: 'ピン止め',
     overlay_section_title: 'スプレッドシート',
     overlay_section_desc: 'kintone 一覧画面で スプレッドシートビュー を利用します。利用モードに応じて、無効・Standard・Pro を切り替えます。',
+    overlay_free_pro_boundary: 'Free（Standard）でも一覧・詳細の表示と、詳細画面での単票編集は利用できます。一覧でのセル編集・コピー&貼り付け・一括保存は Pro の機能です。',
     overlay_mode_label: '利用モード',
     overlay_mode_disabled: '無効',
     overlay_mode_disabled_desc: 'スプレッドシートビュー を起動しません。標準の kintone 一覧を使用します。',
@@ -378,6 +401,7 @@ const I18N_MESSAGES = {
     pins_section_title: 'Pins',
     overlay_section_title: 'Spreadsheet View',
     overlay_section_desc: 'Use Spreadsheet View on kintone list pages. Switch between Disabled, Standard, and Pro modes.',
+    overlay_free_pro_boundary: 'Free (Standard) includes list/detail viewing and single-record editing from the detail page. Cell editing, copy & paste, and bulk saving in list view are Pro features.',
     overlay_mode_label: 'Mode',
     overlay_mode_disabled: 'Disabled',
     overlay_mode_disabled_desc: 'Do not launch Spreadsheet View. Use the standard kintone list view.',

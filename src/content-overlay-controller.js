@@ -76,6 +76,7 @@
       this.detailAppId = '';
       this.detailSourceUrl = '';
       this.modeBadge = null;
+      this.proUpsellLayer = null;
       this.viewOnlyNoticeShown = false;
       this.appId = null;
       this.baseQuery = '';
@@ -273,6 +274,10 @@
 
       const surface = document.createElement('div');
       surface.className = 'pb-overlay__surface';
+      if (this.isOverlayViewOnly()) {
+        // 閲覧モードではセルが編集できないことを見た目でも伝える
+        surface.classList.add('pb-overlay__surface--viewonly');
+      }
       this.surface = surface;
 
       const toolbar = this.buildToolbar();
@@ -307,9 +312,14 @@
       this.titleElement = title;
       titleWrap.appendChild(title);
       if (this.isOverlayViewOnly()) {
-        const badge = document.createElement('span');
-        badge.className = 'pb-overlay__mode-badge';
+        // バッジはPro案内モーダルへの入口を兼ねる
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'pb-overlay__mode-badge pb-overlay__mode-badge--clickable';
         badge.textContent = resolveText(this.language, 'modeViewOnly');
+        badge.title = resolveText(this.language, 'modeViewOnlyHint');
+        badge.setAttribute('aria-haspopup', 'dialog');
+        badge.addEventListener('click', () => { this.openProUpsell(); });
         this.modeBadge = badge;
         titleWrap.appendChild(badge);
       }
@@ -1722,10 +1732,112 @@
     notifyViewOnlyBlocked() {
       if (this.viewOnlyNoticeShown) return;
       this.viewOnlyNoticeShown = true;
-      this.notify(resolveText(this.language, 'toastViewOnlyBlocked'));
+      this.notify(resolveText(this.language, 'toastViewOnlyBlocked'), {
+        actionLabel: resolveText(this.language, 'toastViewOnlyAction'),
+        onAction: () => { this.openProUpsell(); }
+      });
       setTimeout(() => {
         this.viewOnlyNoticeShown = false;
       }, 1200);
+    }
+
+    openProUpsell() {
+      if (!this.root || this.proUpsellLayer) return;
+      const lang = this.language;
+
+      const layer = document.createElement('div');
+      layer.className = 'pb-overlay__upsell-layer';
+      layer.addEventListener('mousedown', (event) => {
+        if (event.target === layer) this.closeProUpsell();
+      });
+
+      const card = document.createElement('div');
+      card.className = 'pb-overlay__upsell-card';
+      card.setAttribute('role', 'dialog');
+      card.setAttribute('aria-modal', 'true');
+      card.setAttribute('aria-labelledby', 'pb-upsell-title');
+
+      const head = document.createElement('div');
+      head.className = 'pb-overlay__upsell-head';
+      const title = document.createElement('h2');
+      title.id = 'pb-upsell-title';
+      title.className = 'pb-overlay__upsell-title';
+      title.textContent = resolveText(lang, 'upsellTitle');
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'pb-overlay__upsell-close';
+      closeBtn.setAttribute('aria-label', resolveText(lang, 'upsellClose'));
+      closeBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+      closeBtn.addEventListener('click', () => { this.closeProUpsell(); });
+      head.append(title, closeBtn);
+
+      const subtitle = document.createElement('p');
+      subtitle.className = 'pb-overlay__upsell-sub';
+      subtitle.textContent = resolveText(lang, 'upsellSubtitle');
+
+      const cols = document.createElement('div');
+      cols.className = 'pb-overlay__upsell-cols';
+      const buildCol = (planKey, itemKeys, highlight) => {
+        const col = document.createElement('div');
+        col.className = 'pb-overlay__upsell-col' + (highlight ? ' pb-overlay__upsell-col--pro' : '');
+        const colTitle = document.createElement('div');
+        colTitle.className = 'pb-overlay__upsell-col-title';
+        colTitle.textContent = resolveText(lang, planKey);
+        col.appendChild(colTitle);
+        itemKeys.forEach((key) => {
+          const row = document.createElement('div');
+          row.className = 'pb-overlay__upsell-item';
+          row.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
+          const label = document.createElement('span');
+          label.textContent = resolveText(lang, key);
+          row.appendChild(label);
+          col.appendChild(row);
+        });
+        return col;
+      };
+      cols.append(
+        buildCol('upsellFreeTitle', ['upsellFree1', 'upsellFree2', 'upsellFree3'], false),
+        buildCol('upsellProTitle', ['upsellPro1', 'upsellPro2', 'upsellPro3'], true)
+      );
+
+      const price = document.createElement('div');
+      price.className = 'pb-overlay__upsell-price';
+      price.textContent = resolveText(lang, 'upsellPrice');
+
+      const actions = document.createElement('div');
+      actions.className = 'pb-overlay__upsell-actions';
+      const detailBtn = document.createElement('button');
+      detailBtn.type = 'button';
+      detailBtn.className = 'pb-overlay__upsell-btn pb-overlay__upsell-btn--primary';
+      detailBtn.textContent = resolveText(lang, 'upsellCtaDetail');
+      detailBtn.addEventListener('click', () => {
+        window.open('https://plugbits.app/pro', '_blank', 'noopener,noreferrer');
+      });
+      const licenseBtn = document.createElement('button');
+      licenseBtn.type = 'button';
+      licenseBtn.className = 'pb-overlay__upsell-btn';
+      licenseBtn.textContent = resolveText(lang, 'upsellCtaLicense');
+      licenseBtn.addEventListener('click', () => {
+        try {
+          void chrome.runtime.sendMessage({ type: 'PB_OPEN_OPTIONS_PAGE', payload: { pane: 'pro-license' } });
+        } catch (_) { /* ignore */ }
+        this.closeProUpsell();
+      });
+      actions.append(detailBtn, licenseBtn);
+
+      card.append(head, subtitle, cols, price, actions);
+      layer.appendChild(card);
+      this.root.appendChild(layer);
+      this.proUpsellLayer = layer;
+      try {
+        detailBtn.focus();
+      } catch (_) { /* noop */ }
+    }
+
+    closeProUpsell() {
+      if (!this.proUpsellLayer) return;
+      this.proUpsellLayer.remove();
+      this.proUpsellLayer = null;
     }
 
     async fetchData() {
@@ -7961,6 +8073,13 @@
     handleEscapeForFrontLayer(event) {
       if (!event || event.key !== 'Escape') return false;
       // Close only the front-most transient UI and stop bubbling to overlay close.
+      if (this.proUpsellLayer) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        this.closeProUpsell();
+        return true;
+      }
       if (this.columnPanelLayer) {
         event.preventDefault();
         event.stopPropagation();
@@ -8848,6 +8967,7 @@
       if (!force && this.saving) return;
       this.isOpen = false;
       this.detachUiLanguageListener();
+      this.closeProUpsell();
       this.closeColumnManager(true);
       this.closeFilterPanel();
       this.closeRadioPicker();
@@ -8919,6 +9039,7 @@
       this.closeButton = null;
       this.titleElement = null;
       this.modeBadge = null;
+      this.proUpsellLayer = null;
       this.appName = '';
       this.baseQuery = '';
       this.query = '';
@@ -9044,20 +9165,34 @@
       }
     }
 
-    notify(message) {
+    notify(message, options = {}) {
       if (!this.toastHost) return;
       const toast = document.createElement('div');
       toast.className = 'pb-overlay__toast';
-      toast.textContent = message;
-      this.toastHost.appendChild(toast);
-      requestAnimationFrame(() => {
-        toast.classList.add('is-visible');
-      });
+      const text = document.createElement('span');
+      text.textContent = message;
+      toast.appendChild(text);
+      const hasAction = Boolean(options.actionLabel && typeof options.onAction === 'function');
       const remove = () => {
         toast.classList.remove('is-visible');
         setTimeout(() => toast.remove(), 250);
       };
-      let timer = setTimeout(remove, 2200);
+      if (hasAction) {
+        const actionBtn = document.createElement('button');
+        actionBtn.type = 'button';
+        actionBtn.className = 'pb-overlay__toast-action';
+        actionBtn.textContent = options.actionLabel;
+        actionBtn.addEventListener('click', () => {
+          remove();
+          options.onAction();
+        });
+        toast.appendChild(actionBtn);
+      }
+      this.toastHost.appendChild(toast);
+      requestAnimationFrame(() => {
+        toast.classList.add('is-visible');
+      });
+      let timer = setTimeout(remove, hasAction ? 4200 : 2200);
       toast.addEventListener('mouseenter', () => {
         clearTimeout(timer);
       });

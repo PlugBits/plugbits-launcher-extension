@@ -2097,6 +2097,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
+    if (msg?.type === 'PB_OPEN_OPTIONS_PAGE') {
+      // Overlay内のPro導線などから、設定ページの特定ペインを直接開く
+      try {
+        const pane = String(msg.payload?.pane || '').replace(/[^a-z-]/gi, '');
+        const url = chrome.runtime.getURL(pane ? `options.html#${pane}` : 'options.html');
+        await chrome.tabs.create({ url });
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
+      }
+      return;
+    }
+
     if (msg?.type === 'CP_GET_SHORTCUTS') {
       try {
         const stored = await chrome.storage.sync.get('kfavShortcuts');
