@@ -2728,7 +2728,7 @@
       this.paging = true;
       this.updatePagerUi();
       try {
-        this.showLoading(resolveText(this.language, 'loading'));
+        this.showLoading(resolveText(this.language, 'loading'), { skeleton: true });
         await this.loadCurrentPageRecords();
         if (this.bodyScroll) this.bodyScroll.scrollTop = 0;
         this.renderGrid();

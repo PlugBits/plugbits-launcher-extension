@@ -4792,7 +4792,7 @@
       this.paging = true;
       this.updatePagerUi();
       try {
-        this.showLoading(resolveText(this.language, 'loading'));
+        this.showLoading(resolveText(this.language, 'loading'), { skeleton: true });
         await this.loadCurrentPageRecords();
         if (this.bodyScroll) this.bodyScroll.scrollTop = 0;
         this.renderGrid();
@@ -13637,6 +13637,13 @@
         if (!response?.ok) throw new Error(response?.error || 'create failed');
         this.close();
         if (window.location.href === listUrl) {
+          try {
+            sessionStorage.setItem(QUICK_NEW_SCROLL_KEY, JSON.stringify({
+              url: listUrl,
+              y: Math.round(window.scrollY || 0),
+              savedAt: Date.now()
+            }));
+          } catch (_e) { /* noop */ }
           window.location.reload();
         } else {
           window.location.href = listUrl;
@@ -13654,6 +13661,44 @@
       showOverlayLaunchNotice(message);
     }
   }
+
+  const QUICK_NEW_SCROLL_KEY = 'pbQuickNewScrollV1';
+
+  // Quick New保存後のリロードでスクロール位置を復元する。
+  // kintoneの一覧はリロード後に非同期描画されるため、ブラウザ標準の
+  // スクロール復元は効かない。描画が進んで目標位置まで到達可能に
+  // なるのを待ってから復元する（ユーザーが先にスクロールしたら中断）。
+  function restoreQuickNewScroll() {
+    let payload = null;
+    try {
+      const raw = sessionStorage.getItem(QUICK_NEW_SCROLL_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(QUICK_NEW_SCROLL_KEY);
+      payload = JSON.parse(raw);
+    } catch (_e) {
+      return;
+    }
+    if (!payload || payload.url !== window.location.href) return;
+    const y = Number(payload.y) || 0;
+    if (y <= 0) return;
+    if (Date.now() - (Number(payload.savedAt) || 0) > 30000) return;
+    const startedAt = Date.now();
+    const tryRestore = () => {
+      if (window.scrollY > 0) return;
+      const maxY = document.documentElement.scrollHeight - window.innerHeight;
+      if (maxY >= y) {
+        window.scrollTo(0, y);
+        return;
+      }
+      if (Date.now() - startedAt > 5000) {
+        if (maxY > 0) window.scrollTo(0, Math.min(y, maxY));
+        return;
+      }
+      setTimeout(tryRestore, 200);
+    };
+    tryRestore();
+  }
+  restoreQuickNewScroll();
 
   const quickNewRecord = new QuickNewRecordModal(postToPage);
 
