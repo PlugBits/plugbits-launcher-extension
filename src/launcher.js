@@ -448,7 +448,7 @@ const state = {
   dragging: null,
   shortcutToggleHandler: null,
   recentRecords: [],
-  filterPanelVisible: false,
+  filterPanelVisible: true,
   recordPinsCollapsed: false,
   recentRecordsCollapsed: false,
   appCatalog: [],
@@ -3489,6 +3489,12 @@ function createEntryElement(entry, pinned) {
   });
   button.addEventListener('focus', () => setSelectionById(entry.id));
   button.addEventListener('mouseenter', () => setSelectionById(entry.id));
+  button.addEventListener('keydown', (event) => {
+    if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    moveEntryByOffset(entry.id, pinned, event.key === 'ArrowUp' ? -1 : 1).catch(() => {});
+  });
 
   const left = doc.createElement('div');
   left.className = 'entry-left';
@@ -4403,6 +4409,25 @@ async function persistFavorites() {
   renderLists();
 }
 
+// Alt+↑↓ によるキーボード並び替え（D&Dの代替。同じピン留めグループ内で1つ移動）
+async function moveEntryByOffset(entryId, pinned, delta) {
+  const subset = state.favorites.filter((item) => item.pinned === pinned).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const index = subset.findIndex((item) => item.id === entryId);
+  if (index === -1) return;
+  const nextIndex = index + delta;
+  if (nextIndex < 0 || nextIndex >= subset.length) return;
+  const [moving] = subset.splice(index, 1);
+  subset.splice(nextIndex, 0, moving);
+  subset.forEach((item, i) => {
+    item.order = i;
+  });
+  await persistFavorites();
+  const moved = doc.querySelector(`.entry-main[data-id="${escapeId(entryId)}"]`);
+  if (moved) {
+    moved.focus();
+  }
+}
+
 function handleDragStart(event) {
   const li = event.currentTarget;
   const id = li.dataset.id;
@@ -4530,7 +4555,7 @@ function focusFilterSoon() {
 }
 
 function wireEvents() {
-  setFilterPanelVisible(false);
+  setFilterPanelVisible(state.filterPanelVisible);
   setSettingsMenuOpen(false);
   ensureRecentCollapseControl();
   ensureCollapsedSectionsTray();

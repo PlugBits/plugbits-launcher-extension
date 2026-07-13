@@ -77,6 +77,8 @@
       this.detailSourceUrl = '';
       this.modeBadge = null;
       this.proUpsellLayer = null;
+      this.confirmLayer = null;
+      this.confirmResolve = null;
       this.viewOnlyNoticeShown = false;
       this.appId = null;
       this.baseQuery = '';
@@ -242,7 +244,7 @@
         await this.loadLanguage();
         this.attachUiLanguageListener();
         this.mountShell();
-        this.showLoading(resolveText(this.language, 'loading'));
+        this.showLoading(resolveText(this.language, 'loading'), { skeleton: true });
         await this.fetchData();
         this.hideLoading();
         if (!this.fields.length) {
@@ -1388,7 +1390,7 @@
       if (!this.overlayLayoutState) return;
       if (!Array.isArray(this.overlayLayoutState.presets) || this.overlayLayoutState.presets.length <= 1) return;
       const activeId = String(this.overlayLayoutState.activePresetId || '').trim();
-      if (!window.confirm(resolveText(this.language, 'layoutPresetDeleteConfirm'))) return;
+      if (!(await this.overlayConfirm(resolveText(this.language, 'layoutPresetDeleteConfirm'), { danger: true, confirmLabel: resolveText(this.language, 'confirmDelete') }))) return;
       this.overlayLayoutState.presets = this.overlayLayoutState.presets.filter((preset) => String(preset.id || '') !== activeId);
       if (!this.overlayLayoutState.presets.length) {
         return;
@@ -1848,6 +1850,72 @@
       if (!this.proUpsellLayer) return;
       this.proUpsellLayer.remove();
       this.proUpsellLayer = null;
+    }
+
+    // window.confirm の代替。Overlayのデザイン言語に合わせたモーダル確認。
+    // Escは最前面レイヤーとして処理される（handleEscapeForFrontLayer参照）。
+    overlayConfirm(message, options = {}) {
+      return new Promise((resolve) => {
+        if (!this.root || this.confirmLayer) {
+          resolve(window.confirm(message));
+          return;
+        }
+        const layer = document.createElement('div');
+        layer.className = 'pb-overlay__confirm-layer';
+
+        const card = document.createElement('div');
+        card.className = 'pb-overlay__confirm-card';
+        card.setAttribute('role', 'alertdialog');
+        card.setAttribute('aria-modal', 'true');
+
+        const text = document.createElement('p');
+        text.className = 'pb-overlay__confirm-message';
+        text.textContent = message;
+
+        const actions = document.createElement('div');
+        actions.className = 'pb-overlay__confirm-actions';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'pb-overlay__upsell-btn';
+        cancelBtn.textContent = options.cancelLabel || resolveText(this.language, 'confirmCancel');
+        const okBtn = document.createElement('button');
+        okBtn.type = 'button';
+        okBtn.className = 'pb-overlay__upsell-btn pb-overlay__upsell-btn--primary'
+          + (options.danger ? ' pb-overlay__confirm-btn--danger' : '');
+        okBtn.textContent = options.confirmLabel || resolveText(this.language, 'confirmOk');
+        actions.append(cancelBtn, okBtn);
+
+        card.append(text, actions);
+        layer.appendChild(card);
+
+        const finish = (result) => {
+          if (this.confirmLayer !== layer) return;
+          this.confirmLayer = null;
+          this.confirmResolve = null;
+          layer.remove();
+          resolve(result);
+        };
+        this.confirmLayer = layer;
+        this.confirmResolve = finish;
+
+        layer.addEventListener('mousedown', (event) => {
+          if (event.target === layer) finish(false);
+        });
+        layer.addEventListener('keydown', (event) => {
+          if (event.key === 'Tab') {
+            event.preventDefault();
+            event.stopPropagation();
+            (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
+          }
+        });
+        cancelBtn.addEventListener('click', () => finish(false));
+        okBtn.addEventListener('click', () => finish(true));
+
+        this.root.appendChild(layer);
+        try {
+          okBtn.focus();
+        } catch (_e) { /* noop */ }
+      });
     }
 
     async fetchData() {
@@ -2647,9 +2715,9 @@
       this.updateStats();
     }
 
-    confirmPageMoveIfNeeded() {
+    async confirmPageMoveIfNeeded() {
       if (!this.hasUnsavedChanges()) return true;
-      const ok = window.confirm(resolveText(this.language, 'confirmPageMoveUnsaved'));
+      const ok = await this.overlayConfirm(resolveText(this.language, 'confirmPageMoveUnsaved'));
       if (!ok) return false;
       this.discardUnsavedChangesForPaging();
       return true;
@@ -2703,7 +2771,7 @@
 
     async prevPage() {
       if (this.pageOffset <= 0 || this.paging) return;
-      if (!this.confirmPageMoveIfNeeded()) return;
+      if (!(await this.confirmPageMoveIfNeeded())) return;
       this.pageOffset = Math.max(0, this.pageOffset - this.pageSize);
       await this.reloadPage();
     }
@@ -2711,7 +2779,7 @@
     async nextPage() {
       if (this.paging) return;
       if (this.pageOffset + this.pageSize >= this.totalCount) return;
-      if (!this.confirmPageMoveIfNeeded()) return;
+      if (!(await this.confirmPageMoveIfNeeded())) return;
       this.pageOffset += this.pageSize;
       await this.reloadPage();
     }
@@ -8143,6 +8211,13 @@
     handleEscapeForFrontLayer(event) {
       if (!event || event.key !== 'Escape') return false;
       // Close only the front-most transient UI and stop bubbling to overlay close.
+      if (this.confirmLayer) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if (this.confirmResolve) this.confirmResolve(false);
+        return true;
+      }
       if (this.proUpsellLayer) {
         event.preventDefault();
         event.stopPropagation();
@@ -9025,9 +9100,11 @@
       this.updateVirtualRows(true);
     }
 
-    tryClose() {
+    async tryClose() {
       if (this.hasUnsavedChanges()) {
-        const ok = window.confirm(resolveText(this.language, 'confirmClose'));
+        const ok = await this.overlayConfirm(resolveText(this.language, 'confirmClose'), {
+          confirmLabel: resolveText(this.language, 'confirmCloseAction')
+        });
         if (!ok) return;
       }
       this.close(true);
@@ -9037,6 +9114,7 @@
       if (!force && this.saving) return;
       this.isOpen = false;
       this.detachUiLanguageListener();
+      if (this.confirmResolve) this.confirmResolve(false);
       this.closeProUpsell();
       this.closeColumnManager(true);
       this.closeFilterPanel();
@@ -9110,6 +9188,8 @@
       this.titleElement = null;
       this.modeBadge = null;
       this.proUpsellLayer = null;
+      this.confirmLayer = null;
+      this.confirmResolve = null;
       this.appName = '';
       this.baseQuery = '';
       this.query = '';
@@ -9217,7 +9297,7 @@
       }
     }
 
-    showLoading(text) {
+    showLoading(text, options = {}) {
       if (!this.surface) return;
       if (!this.loadingEl) {
         const loader = document.createElement('div');
@@ -9225,7 +9305,23 @@
         this.loadingEl = loader;
         this.surface.appendChild(loader);
       }
-      this.loadingEl.textContent = text;
+      this.loadingEl.textContent = '';
+      if (options.skeleton) {
+        const col = document.createElement('div');
+        col.className = 'pb-overlay__skeleton-col';
+        const label = document.createElement('div');
+        label.className = 'pb-overlay__loading-label';
+        label.textContent = text;
+        col.appendChild(label);
+        for (let i = 0; i < 6; i += 1) {
+          const row = document.createElement('div');
+          row.className = 'pb-overlay__skeleton-row';
+          col.appendChild(row);
+        }
+        this.loadingEl.appendChild(col);
+      } else {
+        this.loadingEl.textContent = text;
+      }
       this.loadingEl.classList.add('is-active');
     }
 

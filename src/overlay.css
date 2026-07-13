@@ -3197,3 +3197,104 @@
   #pb-excel-overlay .pb-overlay__mode-badge--clickable:hover { border-color: #7cb1ff; color: #7cb1ff; background: #1c2b46; }
   #pb-excel-overlay .pb-overlay__surface--viewonly .pb-overlay__mode-badge { border-color: #8a6a24; background: #2d2410; color: #eac366; }
 }
+
+/* ── Overlay内 確認モーダル ── */
+.pb-overlay__confirm-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.pb-overlay__confirm-card {
+  width: min(380px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.28);
+  padding: 20px 22px;
+  color: #1f2937;
+}
+
+.pb-overlay__confirm-message {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.pb-overlay__confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pb-overlay__confirm-btn--danger {
+  background: #dc2626 !important;
+  border-color: transparent !important;
+}
+
+.pb-overlay__confirm-btn--danger:hover {
+  opacity: 0.88;
+}
+
+/* ── スケルトンローディング（初期ロード時） ──
+   .pb-overlay__loading は inset:0 の全面カバーなので、
+   幅の制約は内側の col コンテナに持たせる */
+.pb-overlay__skeleton-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  width: min(720px, 80%);
+}
+
+.pb-overlay__loading-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.pb-overlay__skeleton-row {
+  height: 22px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #eef1f6 25%, #f8fafc 42%, #eef1f6 60%);
+  background-size: 240% 100%;
+  animation: pb-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.pb-overlay__skeleton-row:nth-child(2) { width: 92%; }
+.pb-overlay__skeleton-row:nth-child(3) { width: 97%; }
+.pb-overlay__skeleton-row:nth-child(4) { width: 88%; }
+.pb-overlay__skeleton-row:nth-child(5) { width: 95%; }
+.pb-overlay__skeleton-row:nth-child(6) { width: 84%; }
+
+@keyframes pb-skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -40% 0; }
+}
+
+/* ── reduced-motion: Overlay内の装飾的アニメーションを止める ── */
+@media (prefers-reduced-motion: reduce) {
+  #pb-excel-overlay *,
+  #pb-excel-overlay *::before,
+  #pb-excel-overlay *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  #pb-excel-overlay .pb-overlay__confirm-card {
+    background: #161e2c;
+    color: #e7edf6;
+  }
+  #pb-excel-overlay .pb-overlay__skeleton-row {
+    background: linear-gradient(90deg, #1b2434 25%, #223047 42%, #1b2434 60%);
+    background-size: 240% 100%;
+  }
+}

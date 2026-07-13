@@ -473,7 +473,11 @@
         });
         if (!response?.ok) throw new Error(response?.error || 'create failed');
         this.close();
-        window.location.href = listUrl;
+        if (window.location.href === listUrl) {
+          window.location.reload();
+        } else {
+          window.location.href = listUrl;
+        }
       } catch (err) {
         console.error('[kintone-excel-overlay] quick new record failed', err);
         this._showNotice(t('toastNewRecordFailed'));
