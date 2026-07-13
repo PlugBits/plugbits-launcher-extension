@@ -631,6 +631,15 @@
       document.addEventListener('mouseup', this.handleMouseUp, true);
       this.root.addEventListener('dragover', this.handleOverlayDragOver);
       this.root.addEventListener('drop', this.handleOverlayDrop);
+      if (!this.handleBeforeUnload) {
+        this.handleBeforeUnload = (event) => {
+          if (!this.isOpen || this.reloading) return;
+          if (!this.hasUnsavedChanges()) return;
+          event.preventDefault();
+          event.returnValue = '';
+        };
+      }
+      window.addEventListener('beforeunload', this.handleBeforeUnload);
     }
 
     detachEvents() {
@@ -643,6 +652,9 @@
       document.removeEventListener('mouseup', this.handleMouseUp, true);
       this.root.removeEventListener('dragover', this.handleOverlayDragOver);
       this.root.removeEventListener('drop', this.handleOverlayDrop);
+      if (this.handleBeforeUnload) {
+        window.removeEventListener('beforeunload', this.handleBeforeUnload);
+      }
       this.closeLayoutPresetMenu();
     }
 

@@ -1258,6 +1258,15 @@
           const res = await openOverlayByCurrentPage('sidepanel');
           sendResponse(res); return;
         }
+        if (msg?.type === 'PB_SHOW_SHORTCUT_CHEATSHEET') {
+          try {
+            cpToggleCheatsheet(true);
+            sendResponse({ ok: true });
+          } catch (e) {
+            sendResponse({ ok: false, error: String(e?.message || e) });
+          }
+          return;
+        }
         sendResponse({ ok: false, error: 'Unknown message type' });
       } catch (e) {
         sendResponse({ ok: false, error: String(e?.message || e) });
@@ -1490,6 +1499,7 @@
       toastLayoutPresetDuplicated: "レイアウトを複製しました",
       errorUnsupportedFilter: "この一覧には一時的なフィルター/ソートが含まれているため、Excelモードを起動できません。ビューを標準状態に戻してから再試行してください。",
       overlayUnsupportedPage: "この画面では Excel Overlay を利用できません。一覧/詳細画面で利用できます。",
+      overlayDisabledBySetting: "Excel Overlay は設定で無効になっています。設定画面の「スプレッドシート」から有効化できます。",
       btnNewRecord: "＋ 新規",
       newRecordTitle: "新規レコード作成",
       newRecordSave: "保存",
@@ -1627,6 +1637,7 @@
       toastLayoutPresetDuplicated: "Layout duplicated",
       errorUnsupportedFilter: "This list has ad-hoc filters/sorting that cannot be replayed in Excel mode. Clear the filter and try again.",
       overlayUnsupportedPage: "Excel Overlay is only available on list/detail pages.",
+      overlayDisabledBySetting: "Excel Overlay is turned off in settings. Enable it from the Spreadsheet section of the options page.",
       btnNewRecord: "+ New",
       newRecordTitle: "Create New Record",
       newRecordSave: "Save",
@@ -2438,6 +2449,15 @@
       document.addEventListener('mouseup', this.handleMouseUp, true);
       this.root.addEventListener('dragover', this.handleOverlayDragOver);
       this.root.addEventListener('drop', this.handleOverlayDrop);
+      if (!this.handleBeforeUnload) {
+        this.handleBeforeUnload = (event) => {
+          if (!this.isOpen || this.reloading) return;
+          if (!this.hasUnsavedChanges()) return;
+          event.preventDefault();
+          event.returnValue = '';
+        };
+      }
+      window.addEventListener('beforeunload', this.handleBeforeUnload);
     }
 
     detachEvents() {
@@ -2450,6 +2470,9 @@
       document.removeEventListener('mouseup', this.handleMouseUp, true);
       this.root.removeEventListener('dragover', this.handleOverlayDragOver);
       this.root.removeEventListener('drop', this.handleOverlayDrop);
+      if (this.handleBeforeUnload) {
+        window.removeEventListener('beforeunload', this.handleBeforeUnload);
+      }
       this.closeLayoutPresetMenu();
     }
 
@@ -11092,7 +11115,27 @@
     }, 2400);
   }
 
+  async function isOverlayDisabledBySetting() {
+    try {
+      const stored = await chrome.storage.sync.get('kfavExcelOverlayMode');
+      return String(stored?.kfavExcelOverlayMode || '').toLowerCase() === 'off';
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function openOverlayByCurrentPage(source = 'unknown') {
+    if (await isOverlayDisabledBySetting()) {
+      const uiLanguage = await resolveOverlayUiLanguage();
+      const language = uiLanguage?.language || DEFAULT_OVERLAY_LANGUAGE;
+      return {
+        ok: false,
+        reason: 'disabled_by_setting',
+        source,
+        pageType: 'disabled',
+        message: resolveText(language, 'overlayDisabledBySetting')
+      };
+    }
     const context = resolveOverlayLaunchContext(location.href);
     if (context.pageType === 'unsupported') {
       const uiLanguage = await resolveOverlayUiLanguage();
@@ -11147,6 +11190,161 @@
     const viewId = String(options.viewId || '').trim();
     if (viewId) return `${base}?view=${encodeURIComponent(viewId)}`;
     return base;
+  }
+
+  // ── Palette feedback toast (palette本体から独立して生存する) ─────────────
+  let cpToastEl = null;
+  let cpToastTimer = null;
+  function cpShowToast(message, ok = true) {
+    try {
+      if (!cpToastEl || !document.body.contains(cpToastEl)) {
+        cpToastEl = document.createElement('div');
+        cpToastEl.id = 'pb-cp-toast';
+        document.body.appendChild(cpToastEl);
+      }
+      cpToastEl.textContent = message;
+      cpToastEl.style.cssText = [
+        'position:fixed', 'left:50%', 'bottom:32px', 'transform:translateX(-50%)',
+        'z-index:2147483647', 'padding:9px 16px', 'border-radius:8px',
+        'font-size:13px', "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        'box-shadow:0 8px 24px rgba(0,0,0,.22)', 'pointer-events:none',
+        'transition:opacity .2s ease', 'opacity:1',
+        ok ? 'background:#111827;color:#f9fafb' : 'background:#b91c1c;color:#fef2f2'
+      ].join(';');
+      if (cpToastTimer) clearTimeout(cpToastTimer);
+      cpToastTimer = setTimeout(() => {
+        if (cpToastEl) cpToastEl.style.opacity = '0';
+      }, 2200);
+    } catch (_) { /* ignore */ }
+  }
+
+  async function cpCopyText(text, successMessage) {
+    try {
+      await navigator.clipboard.writeText(String(text ?? ''));
+      cpShowToast(successMessage || 'コピーしました');
+      return true;
+    } catch (_) {
+      cpShowToast('コピーに失敗しました', false);
+      return false;
+    }
+  }
+
+  // ── Keyboard shortcut cheatsheet ─────────────────────────────────────────
+  const CP_CHEATSHEET_SECTIONS = [
+    {
+      title: '全般',
+      items: [
+        ['Ctrl / ⌘ + /', 'コマンドパレットを開く'],
+        ['Ctrl / ⌘ + Shift + E', 'Excel Overlay を開く'],
+        ['Shift + Alt + N', 'クイック新規レコード（一覧画面）'],
+        ['?', 'このショートカット一覧を表示']
+      ]
+    },
+    {
+      title: 'コマンドパレット',
+      items: [
+        ['↑ / ↓', '項目を移動'],
+        ['Enter', '実行 / 開く'],
+        ['Shift + Enter', 'App検索: 新規タブで開く'],
+        ['1 – 9', '番号ショートカットを実行'],
+        ['Esc', '閉じる']
+      ]
+    },
+    {
+      title: 'Excel Overlay',
+      items: [
+        ['↑ ↓ ← →', 'セル移動 / 範囲選択（Shift併用）'],
+        ['Enter / Shift + Enter', '確定して下 / 上へ'],
+        ['Tab / Shift + Tab', '右 / 左へ'],
+        ['F2 / Space', '編集開始・ピッカーを開く'],
+        ['Ctrl / ⌘ + C / V', 'コピー / 貼り付け'],
+        ['Ctrl / ⌘ + Z / Y', '元に戻す / やり直し'],
+        ['Ctrl / ⌘ + S', '保存'],
+        ['Esc', 'パネル / Overlay を閉じる']
+      ]
+    }
+  ];
+
+  let cpCheatsheetEl = null;
+  function cpCheatsheetEscHandler(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cpToggleCheatsheet(false);
+    }
+  }
+  function cpToggleCheatsheet(forceOpen) {
+    const shouldOpen = forceOpen !== undefined
+      ? Boolean(forceOpen)
+      : !(cpCheatsheetEl && cpCheatsheetEl.style.display !== 'none');
+    if (!shouldOpen) {
+      if (cpCheatsheetEl) cpCheatsheetEl.style.display = 'none';
+      document.removeEventListener('keydown', cpCheatsheetEscHandler, true);
+      return;
+    }
+    if (!cpCheatsheetEl || !document.body.contains(cpCheatsheetEl)) {
+      const backdrop = document.createElement('div');
+      backdrop.id = 'pb-cp-cheatsheet';
+      backdrop.addEventListener('mousedown', (e) => {
+        if (e.target === backdrop) cpToggleCheatsheet(false);
+      });
+
+      const style = document.createElement('style');
+      style.textContent = `
+        #pb-cp-cheatsheet{position:fixed!important;inset:0!important;background:rgba(0,0,0,.4)!important;z-index:2147483647!important;display:flex!important;align-items:flex-start!important;justify-content:center!important;padding-top:9vh!important}
+        #pb-cp-cheatsheet .pb-cs__panel{width:520px!important;max-width:calc(100vw - 32px)!important;max-height:80vh!important;overflow-y:auto!important;background:#fff!important;border-radius:12px!important;box-shadow:0 24px 64px rgba(0,0,0,.25)!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;color:#374151!important;padding:20px 24px 22px!important;box-sizing:border-box!important}
+        #pb-cp-cheatsheet .pb-cs__head{display:flex!important;align-items:center!important;justify-content:space-between!important;margin:0 0 6px!important}
+        #pb-cp-cheatsheet .pb-cs__title{font-size:15px!important;font-weight:700!important;color:#111827!important;margin:0!important}
+        #pb-cp-cheatsheet .pb-cs__close{border:none!important;background:transparent!important;cursor:pointer!important;color:#9ca3af!important;padding:4px!important;border-radius:6px!important;line-height:0!important}
+        #pb-cp-cheatsheet .pb-cs__close:hover{background:#f3f4f6!important;color:#374151!important}
+        #pb-cp-cheatsheet .pb-cs__section-title{font-size:10px!important;font-weight:700!important;color:#9ca3af!important;letter-spacing:.1em!important;text-transform:uppercase!important;margin:16px 0 6px!important}
+        #pb-cp-cheatsheet .pb-cs__row{display:flex!important;align-items:baseline!important;justify-content:space-between!important;gap:16px!important;padding:5px 0!important;font-size:13px!important}
+        #pb-cp-cheatsheet .pb-cs__keys{flex:0 0 auto!important;font-family:ui-monospace,SFMono-Regular,Menlo,monospace!important;font-size:11px!important;color:#374151!important;background:#f3f4f6!important;border:1px solid #e5e7eb!important;border-radius:5px!important;padding:2px 7px!important;white-space:nowrap!important}
+        #pb-cp-cheatsheet .pb-cs__desc{flex:1!important;color:#4b5563!important;text-align:left!important}
+      `;
+
+      const panel = document.createElement('div');
+      panel.className = 'pb-cs__panel';
+
+      const head = document.createElement('div');
+      head.className = 'pb-cs__head';
+      const title = document.createElement('h2');
+      title.className = 'pb-cs__title';
+      title.textContent = 'キーボードショートカット';
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'pb-cs__close';
+      closeBtn.setAttribute('aria-label', '閉じる');
+      closeBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+      closeBtn.addEventListener('click', () => cpToggleCheatsheet(false));
+      head.append(title, closeBtn);
+      panel.appendChild(head);
+
+      CP_CHEATSHEET_SECTIONS.forEach((section) => {
+        const sTitle = document.createElement('div');
+        sTitle.className = 'pb-cs__section-title';
+        sTitle.textContent = section.title;
+        panel.appendChild(sTitle);
+        section.items.forEach(([keys, desc]) => {
+          const row = document.createElement('div');
+          row.className = 'pb-cs__row';
+          const keysEl = document.createElement('span');
+          keysEl.className = 'pb-cs__keys';
+          keysEl.textContent = keys;
+          const descEl = document.createElement('span');
+          descEl.className = 'pb-cs__desc';
+          descEl.textContent = desc;
+          row.append(keysEl, descEl);
+          panel.appendChild(row);
+        });
+      });
+
+      backdrop.append(style, panel);
+      document.body.appendChild(backdrop);
+      cpCheatsheetEl = backdrop;
+    }
+    cpCheatsheetEl.style.display = 'flex';
+    document.addEventListener('keydown', cpCheatsheetEscHandler, true);
   }
 
   const CP_COMMANDS = [
@@ -11226,7 +11424,7 @@
       keywords: ['link', 'url', 'リンク', 'コピー', 'copy'],
       requiresRecord: true,
       action(ctx) {
-        navigator.clipboard.writeText(buildCurrentTenantUrl(ctx.appId, { recordId: ctx.recordId }));
+        cpCopyText(buildCurrentTenantUrl(ctx.appId, { recordId: ctx.recordId }), 'レコードリンクをコピーしました');
       }
     },
     {
@@ -11342,7 +11540,7 @@
       keywords: ['app', 'id', 'appid', 'copy'],
       requiresApp: true,
       action(ctx) {
-        navigator.clipboard.writeText(String(ctx.appId));
+        cpCopyText(String(ctx.appId), 'App IDをコピーしました');
       }
     },
     {
@@ -11354,7 +11552,7 @@
       keywords: ['record', 'id', 'recid', 'recordid', 'copy'],
       requiresRecord: true,
       action(ctx) {
-        navigator.clipboard.writeText(String(ctx.recordId));
+        cpCopyText(String(ctx.recordId), 'Record IDをコピーしました');
       }
     },
     {
@@ -11366,7 +11564,7 @@
       keywords: ['query', 'クエリ', 'condition', '条件', 'copy'],
       requiresApp: true,
       action(ctx) {
-        navigator.clipboard.writeText(ctx.query || '');
+        cpCopyText(ctx.query || '', 'クエリ条件をコピーしました');
       }
     },
     {
@@ -11404,7 +11602,7 @@
       badge: 'help',
       keywords: ['help', 'shortcut', 'ヘルプ', 'ショートカット', '一覧'],
       action() {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true, cancelable: true }));
+        cpToggleCheatsheet(true);
       }
     },
   ];
@@ -11481,20 +11679,30 @@
     async copyFieldCodes(ctx) {
       try {
         const res = await this.postFn('CP_GET_FIELDS', { appId: ctx.appId });
-        if (!res?.ok) return;
+        if (!res?.ok) {
+          cpShowToast('フィールド情報の取得に失敗しました', false);
+          return;
+        }
         const fields = Array.isArray(res.result?.fields) ? res.result.fields : [];
         const text = fields.map((f) => `${f.code}\t${f.label || ''}\t${f.type || ''}`).join('\n');
-        await navigator.clipboard.writeText(text);
-      } catch (_) { /* ignore */ }
+        await cpCopyText(text, `フィールドコード ${fields.length}件をコピーしました`);
+      } catch (_) {
+        cpShowToast('フィールド情報の取得に失敗しました', false);
+      }
     }
 
     async copyFormDefinition(ctx) {
       try {
         const res = await this.postFn('CP_GET_FORM_DEFINITION', { appId: ctx.appId });
-        if (!res?.ok) return;
+        if (!res?.ok) {
+          cpShowToast('フォーム定義の取得に失敗しました', false);
+          return;
+        }
         const properties = res.result?.properties || {};
-        await navigator.clipboard.writeText(JSON.stringify(properties, null, 2));
-      } catch (_) { /* ignore */ }
+        await cpCopyText(JSON.stringify(properties, null, 2), 'フォーム定義(JSON)をコピーしました');
+      } catch (_) {
+        cpShowToast('フォーム定義の取得に失敗しました', false);
+      }
     }
 
     buildAclItems(ctx) {
@@ -11878,7 +12086,10 @@
       } else if (this.subPickerKind) {
         this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 開く</span><span><kbd>Esc</kbd> 閉じる</span>';
       } else {
-        this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span><span><kbd>Esc</kbd> 閉じる</span>';
+        const shortcutHint = this.shortcutCommands.length
+          ? '<span><kbd>1-9</kbd> ショートカット</span>'
+          : '';
+        this.footerEl.innerHTML = `<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span>${shortcutHint}<span><kbd>Esc</kbd> 閉じる</span>`;
       }
     }
 
@@ -11983,6 +12194,20 @@
         this.execute(this.activeIndex, { newTab: this.appSearchMode && e.shiftKey });
         return;
       }
+      // 検索欄が空のとき、1-9キーで番号ショートカットを直接実行する
+      if (
+        !this.appSearchMode && !this.subPickerKind &&
+        /^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey &&
+        !(this.inputEl && this.inputEl.value)
+      ) {
+        const cmd = this.shortcutCommands[Number(e.key) - 1];
+        if (cmd) {
+          e.preventDefault();
+          this.close();
+          cmd.action(this.ctx, this);
+          return;
+        }
+      }
     }
 
     execute(index, options = {}) {
@@ -12028,6 +12253,23 @@
     if (e.key === '/' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       commandPalette.toggle();
+      return;
+    }
+    // '?' でチートシートを表示（入力中・編集中は反応しない）
+    if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const t = e.target;
+      const isEditable = Boolean(
+        t && (
+          t.tagName === 'INPUT' ||
+          t.tagName === 'TEXTAREA' ||
+          t.tagName === 'SELECT' ||
+          t.isContentEditable ||
+          (typeof t.closest === 'function' && t.closest('[contenteditable="true"]'))
+        )
+      );
+      if (isEditable || commandPalette.isOpen) return;
+      e.preventDefault();
+      cpToggleCheatsheet(true);
       return;
     }
   }, true);

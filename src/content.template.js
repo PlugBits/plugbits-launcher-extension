@@ -1254,6 +1254,15 @@
           const res = await openOverlayByCurrentPage('sidepanel');
           sendResponse(res); return;
         }
+        if (msg?.type === 'PB_SHOW_SHORTCUT_CHEATSHEET') {
+          try {
+            cpToggleCheatsheet(true);
+            sendResponse({ ok: true });
+          } catch (e) {
+            sendResponse({ ok: false, error: String(e?.message || e) });
+          }
+          return;
+        }
         sendResponse({ ok: false, error: 'Unknown message type' });
       } catch (e) {
         sendResponse({ ok: false, error: String(e?.message || e) });
@@ -1486,6 +1495,7 @@
       toastLayoutPresetDuplicated: "レイアウトを複製しました",
       errorUnsupportedFilter: "この一覧には一時的なフィルター/ソートが含まれているため、Excelモードを起動できません。ビューを標準状態に戻してから再試行してください。",
       overlayUnsupportedPage: "この画面では Excel Overlay を利用できません。一覧/詳細画面で利用できます。",
+      overlayDisabledBySetting: "Excel Overlay は設定で無効になっています。設定画面の「スプレッドシート」から有効化できます。",
       btnNewRecord: "＋ 新規",
       newRecordTitle: "新規レコード作成",
       newRecordSave: "保存",
@@ -1623,6 +1633,7 @@
       toastLayoutPresetDuplicated: "Layout duplicated",
       errorUnsupportedFilter: "This list has ad-hoc filters/sorting that cannot be replayed in Excel mode. Clear the filter and try again.",
       overlayUnsupportedPage: "Excel Overlay is only available on list/detail pages.",
+      overlayDisabledBySetting: "Excel Overlay is turned off in settings. Enable it from the Spreadsheet section of the options page.",
       btnNewRecord: "+ New",
       newRecordTitle: "Create New Record",
       newRecordSave: "Save",
@@ -1935,7 +1946,27 @@
     }, 2400);
   }
 
+  async function isOverlayDisabledBySetting() {
+    try {
+      const stored = await chrome.storage.sync.get('kfavExcelOverlayMode');
+      return String(stored?.kfavExcelOverlayMode || '').toLowerCase() === 'off';
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function openOverlayByCurrentPage(source = 'unknown') {
+    if (await isOverlayDisabledBySetting()) {
+      const uiLanguage = await resolveOverlayUiLanguage();
+      const language = uiLanguage?.language || DEFAULT_OVERLAY_LANGUAGE;
+      return {
+        ok: false,
+        reason: 'disabled_by_setting',
+        source,
+        pageType: 'disabled',
+        message: resolveText(language, 'overlayDisabledBySetting')
+      };
+    }
     const context = resolveOverlayLaunchContext(location.href);
     if (context.pageType === 'unsupported') {
       const uiLanguage = await resolveOverlayUiLanguage();

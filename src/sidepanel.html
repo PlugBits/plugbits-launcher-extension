@@ -4,20 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title data-i18n="panel_title">PlugBits Launcher for kintone</title>
+  <link rel="stylesheet" href="tokens.css" />
   <link rel="stylesheet" href="launcher.css" />
 </head>
 <body class="launcher">
   <div class="launcher-shell">
     <header class="launcher-head">
       <div class="launcher-title">
-        <span class="launcher-name">PlugBits Launcher</span>
-        <span class="launcher-tag">for kintone</span>
+        <span class="launcher-mark" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>
+        </span>
+        <span class="launcher-title-text">
+          <span class="launcher-name">PlugBits Launcher</span>
+          <span class="launcher-tag">for kintone</span>
+        </span>
       </div>
       <div class="launcher-head-actions">
         <button id="openExcelOverlay" class="icon-btn small" type="button" data-i18n-title="panel_action_open_overlay" data-i18n-aria-label="panel_action_open_overlay"><span class="lc" data-icon="table-2" aria-hidden="true"></span></button>
         <button id="toggleFilterPanel" class="icon-btn small" type="button" aria-pressed="false" data-i18n-title="panel_action_toggle_search_show" data-i18n-aria-label="panel_action_toggle_search_show"><span class="lc" data-icon="filter" aria-hidden="true"></span></button>
         <div class="launcher-head-menu">
-          <button id="openOptions" class="icon-btn small" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="panel_action_open_settings" data-i18n-aria-label="panel_action_open_settings">⚙</button>
+          <button id="openOptions" class="icon-btn small" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="panel_action_open_settings" data-i18n-aria-label="panel_action_open_settings"><span class="lc" data-icon="settings" aria-hidden="true"></span></button>
           <div id="settingsMenu" class="launcher-head-menu-popover hidden" role="menu" aria-labelledby="openOptions">
             <button id="openOptionsPageMenuItem" class="launcher-head-menu-item" type="button" role="menuitem" data-i18n="panel_settings_menu_settings">設定</button>
             <button id="openManualMenuItem" class="launcher-head-menu-item" type="button" role="menuitem" data-i18n="panel_settings_menu_manual">マニュアルへ</button>
@@ -44,9 +50,9 @@
     </section>
 
     <nav class="panel-tabs" role="tablist">
-      <button class="panel-tab is-active" data-tab="main" role="tab" aria-selected="true" aria-controls="tabpane-main">メイン</button>
+      <button class="panel-tab is-active" data-tab="main" role="tab" aria-selected="true" aria-controls="tabpane-main"><span data-i18n="panel_tab_main">メイン</span></button>
       <button class="panel-tab" data-tab="pins" role="tab" aria-selected="false" aria-controls="tabpane-pins">
-        <span class="lc" data-icon="pin" aria-hidden="true"></span> ピン
+        <span class="lc" data-icon="pin" aria-hidden="true"></span> <span data-i18n="panel_tab_pins">ピン</span>
       </button>
     </nav>
 
@@ -57,14 +63,14 @@
           <div class="filter-field">
             <span class="filter-icon lc" data-icon="filter" aria-hidden="true"></span>
             <input id="filter" type="search" data-i18n-placeholder="panel_search_placeholder" autocomplete="off" />
-            <button id="clearFilter" class="icon-btn small" type="button" data-i18n-aria-label="panel_action_clear_search" data-i18n-title="panel_action_clear_search">✕</button>
+            <button id="clearFilter" class="icon-btn small" type="button" data-i18n-aria-label="panel_action_clear_search" data-i18n-title="panel_action_clear_search"><span class="lc" data-icon="x" aria-hidden="true"></span></button>
           </div>
         </section>
 
         <div class="shortcut-head">
           <span class="shortcut-label" data-i18n="panel_section_shortcuts">ショートカット</span>
           <div class="section-actions section-actions-icons">
-            <button id="toggleShortcuts" class="icon-btn small" type="button" aria-pressed="true" data-i18n-title="panel_action_toggle_shortcuts_collapse" data-i18n-aria-label="panel_action_toggle_shortcuts_collapse">▾</button>
+            <button id="toggleShortcuts" class="icon-btn small" type="button" aria-pressed="true" data-i18n-title="panel_action_toggle_shortcuts_collapse" data-i18n-aria-label="panel_action_toggle_shortcuts_collapse"><span class="lc" data-icon="chevron-down" aria-hidden="true"></span></button>
           </div>
         </div>
         <div id="shortcutRow" class="shortcut-row" role="toolbar" data-i18n-aria-label="panel_shortcuts_toolbar"></div>
@@ -75,7 +81,7 @@
       <div class="lists-scroll" id="listsScroll">
         <section id="pinSection" class="list-section" data-i18n-aria-label="panel_section_watchlist_pinned">
           <div class="section-head">
-            <span class="section-label">📌 <span data-i18n="panel_section_watchlist_pinned">ウォッチリスト（ピン）</span></span>
+            <span class="section-label"><span class="section-ico lc" data-icon="pin" aria-hidden="true"></span> <span data-i18n="panel_section_watchlist_pinned">ウォッチリスト（ピン）</span></span>
           </div>
           <ul id="pinnedWatchList" class="entry-list" aria-live="polite"></ul>
         </section>
@@ -87,11 +93,11 @@
               <span data-i18n="panel_section_watchlist">ウォッチリスト</span>
             </span>
             <div class="section-actions section-actions-icons">
-              <button id="quickAdd" class="icon-btn small" type="button" data-i18n-title="panel_action_add_current_view" data-i18n-aria-label="panel_action_add_current_view">＋</button>
-              <button id="refreshCounts" class="icon-btn small" type="button" data-i18n-title="panel_action_refresh_counts" data-i18n-aria-label="panel_action_refresh_counts">↻</button>
+              <button id="quickAdd" class="icon-btn small" type="button" data-i18n-title="panel_action_add_current_view" data-i18n-aria-label="panel_action_add_current_view"><span class="lc" data-icon="plus" aria-hidden="true"></span></button>
+              <button id="refreshCounts" class="icon-btn small" type="button" data-i18n-title="panel_action_refresh_counts" data-i18n-aria-label="panel_action_refresh_counts"><span class="lc" data-icon="refresh-cw" aria-hidden="true"></span></button>
               <label class="icon-toggle pins-only-toggle" data-i18n-title="panel_action_toggle_watchlist_collapse" data-i18n-aria-label="panel_action_toggle_watchlist_collapse">
                 <input type="checkbox" id="togglePinsOnly" />
-                <span id="togglePinsOnlyIcon" class="icon-btn small" aria-hidden="true">▾</span>
+                <span id="togglePinsOnlyIcon" class="icon-btn small" aria-hidden="true"><span class="lc" data-icon="chevron-down" aria-hidden="true"></span></span>
               </label>
             </div>
           </div>
@@ -105,7 +111,7 @@
               <span class="section-ico lc" data-icon="history" aria-hidden="true"></span>
               <span data-i18n="panel_section_recent_records">最近のレコード</span>
             </span>
-            <button id="recentClear" class="icon-btn small" type="button" data-i18n-title="panel_action_clear_recent_records" data-i18n-aria-label="panel_action_clear_recent_records">✕</button>
+            <button id="recentClear" class="icon-btn small" type="button" data-i18n-title="panel_action_clear_recent_records" data-i18n-aria-label="panel_action_clear_recent_records"><span class="lc" data-icon="x" aria-hidden="true"></span></button>
           </div>
           <ul id="recentList" class="recent-list" aria-live="polite"></ul>
         </section>
@@ -117,14 +123,22 @@
         <div class="section-head">
           <span class="section-label"><span class="section-ico lc" data-icon="pin" aria-hidden="true"></span> <span data-i18n="panel_section_record_pins">レコードピン</span></span>
           <div class="section-actions section-actions-icons">
-            <button id="addPinFromTab" class="icon-btn small" type="button" data-i18n-title="panel_action_add_current_record_pin" data-i18n-aria-label="panel_action_add_current_record_pin">＋</button>
-            <button id="refreshPins" class="icon-btn small" type="button" data-i18n-title="panel_action_refresh_pins" data-i18n-aria-label="panel_action_refresh_pins">↻</button>
+            <button id="addPinFromTab" class="icon-btn small" type="button" data-i18n-title="panel_action_add_current_record_pin" data-i18n-aria-label="panel_action_add_current_record_pin"><span class="lc" data-icon="plus" aria-hidden="true"></span></button>
+            <button id="refreshPins" class="icon-btn small" type="button" data-i18n-title="panel_action_refresh_pins" data-i18n-aria-label="panel_action_refresh_pins"><span class="lc" data-icon="refresh-cw" aria-hidden="true"></span></button>
           </div>
         </div>
         <div id="pinNotice" class="pin-notice hidden" role="status"></div>
         <ul id="pinList" class="pin-cards" aria-live="polite"></ul>
       </section>
     </div>
+
+    <footer class="launcher-foot">
+      <button id="openCheatsheet" class="launcher-foot-help" type="button" data-i18n-title="panel_footer_shortcuts_title">
+        <span class="lc" data-icon="keyboard" aria-hidden="true"></span>
+        <span data-i18n="panel_footer_shortcuts">ショートカット一覧</span>
+      </button>
+      <span class="launcher-foot-hint" aria-hidden="true"><kbd>Ctrl</kbd>+<kbd>/</kbd> <span data-i18n="panel_footer_palette">パレット</span></span>
+    </footer>
   </div>
 
   <script src="./vendor/lucide.umd.js"></script>

@@ -1,0 +1,98 @@
+/* tokens.css — PlugBits Launcher 共通デザイントークン
+ *
+ * サイドパネル(launcher.css)と設定画面(options.css)が参照する唯一の
+ * カラーパレット定義。ライト/ダークはここで一括して切り替わる。
+ * 個別のCSSに生のカラーコードを追加しないこと。
+ */
+
+:root {
+  /* accent */
+  --pb-accent: #2563eb;
+  --pb-accent-strong: #1d4ed8;
+  --pb-accent-soft: #eff4ff;
+  --pb-accent-border: #bfdbfe;
+  --pb-on-accent: #ffffff;
+  --pb-focus-ring: rgba(37, 99, 235, 0.45);
+  --pb-focus-ring-soft: rgba(37, 99, 235, 0.14);
+
+  /* ground */
+  --pb-bg: #f6f8fb;
+  --pb-surface: #ffffff;
+  --pb-surface-2: #f8fafc;
+  --pb-surface-3: #f1f4f8;
+  --pb-backdrop: rgba(15, 23, 42, 0.45);
+
+  /* text */
+  --pb-text: #101828;
+  --pb-text-2: #3c4657;
+  --pb-muted: #64748b;
+  --pb-muted-2: #94a3b8;
+
+  /* lines */
+  --pb-line: #e4e9f0;
+  --pb-line-2: #d3dae4;
+
+  /* semantic */
+  --pb-danger: #dc2626;
+  --pb-danger-soft: #fdf1f2;
+  --pb-danger-border: #f3c6cb;
+  --pb-success: #15803d;
+  --pb-success-soft: #f0fdf4;
+  --pb-success-border: #bbf7d0;
+  --pb-warn: #b45309;
+  --pb-warn-soft: #fff7ed;
+  --pb-warn-border: #fed7aa;
+
+  /* entry icon palette */
+  --pb-ico-gray: #475569;
+  --pb-ico-blue: #2563eb;
+  --pb-ico-green: #16a34a;
+  --pb-ico-orange: #ea580c;
+  --pb-ico-red: #dc2626;
+  --pb-ico-purple: #7c3aed;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pb-accent: #7cb1ff;
+    --pb-accent-strong: #a3c7ff;
+    --pb-accent-soft: #1c2b46;
+    --pb-accent-border: #2e4a75;
+    --pb-on-accent: #0b1220;
+    --pb-focus-ring: rgba(124, 177, 255, 0.55);
+    --pb-focus-ring-soft: rgba(124, 177, 255, 0.18);
+
+    --pb-bg: #0e141f;
+    --pb-surface: #161e2c;
+    --pb-surface-2: #1b2434;
+    --pb-surface-3: #202a3c;
+    --pb-backdrop: rgba(0, 0, 0, 0.6);
+
+    --pb-text: #e7edf6;
+    --pb-text-2: #c4cede;
+    --pb-muted: #94a3b8;
+    --pb-muted-2: #7b8aa0;
+
+    --pb-line: #2a3547;
+    --pb-line-2: #38445a;
+
+    --pb-danger: #f87171;
+    --pb-danger-soft: #3a1e22;
+    --pb-danger-border: #5c2b31;
+    --pb-success: #4ade80;
+    --pb-success-soft: #142e1f;
+    --pb-success-border: #245536;
+    --pb-warn: #fbbf24;
+    --pb-warn-soft: #33261a;
+    --pb-warn-border: #54402a;
+
+    --pb-ico-gray: #9aa8bd;
+    --pb-ico-blue: #7cb1ff;
+    --pb-ico-green: #4ade80;
+    --pb-ico-orange: #fb923c;
+    --pb-ico-red: #f87171;
+    --pb-ico-purple: #a78bfa;
+
+    color-scheme: dark;
+  }
+}

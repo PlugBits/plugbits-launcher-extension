@@ -34,7 +34,7 @@ export function initPins(options = {}) {
       btn.id = 'refreshPins';
       btn.className = 'ghost-btn';
       btn.type = 'button';
-      btn.textContent = '↻ Refresh';
+      btn.innerHTML = `${iconSvg('refresh-cw', '↻')} Refresh`;
       btn.title = 'Refresh pinned records';
       sectionActions.appendChild(btn);
       refreshBtn = btn;
@@ -55,6 +55,25 @@ export function initPins(options = {}) {
     if (value == null) return '';
     if (globalThis.CSS?.escape) return CSS.escape(String(value));
     return String(value).replace(/[^\w-]/g, (ch) => `\\${ch}`);
+  };
+
+  // Lucideアイコン(1色ストロークSVG)を返す。取得できない環境では
+  // フォールバック文字を返し、字形頼みの見た目のバラつきを避ける。
+  const iconSvg = (name, fallback, size = 14) => {
+    try {
+      const icons = globalThis.lucide?.icons;
+      const pascal = String(name || '')
+        .split('-')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join('');
+      const icon = icons?.[name] || icons?.[pascal];
+      if (icon?.toSvg) return icon.toSvg({ width: size, height: size });
+      if (icon && typeof globalThis.lucide?.createElement === 'function') {
+        const node = globalThis.lucide.createElement(icon, { width: size, height: size });
+        if (node?.outerHTML) return node.outerHTML;
+      }
+    } catch (_) { /* ignore */ }
+    return fallback || '';
   };
 
   function normalizeTimestamp(value) {
@@ -168,7 +187,7 @@ export function initPins(options = {}) {
     const dragHandle = doc.createElement('span');
     dragHandle.className = 'pin-drag-handle';
     dragHandle.title = 'Drag to reorder';
-    dragHandle.textContent = '::';
+    dragHandle.innerHTML = iconSvg('grip-vertical', '::');
     dragHandle.draggable = true;
     dragHandle.dataset.cardId = entry.id;
     dragHandle.setAttribute('role', 'button');
@@ -211,7 +230,7 @@ export function initPins(options = {}) {
     removeBtn.className = 'pin-remove btn record-pin-remove x-only';
     removeBtn.title = 'Remove';
     removeBtn.setAttribute('aria-label', 'Remove');
-    removeBtn.textContent = '✖';
+    removeBtn.innerHTML = iconSvg('x', '✖');
     removeBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       removeEntry(entry.id).catch(() => {});

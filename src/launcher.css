@@ -1,43 +1,30 @@
+/* カラーパレットは tokens.css（共通デザイントークン）で一元管理する */
 :root {
-  --launcher-bg: #f7f9fc;
-  --launcher-surface: #ffffff;
-  --launcher-text: #0f172a;
-  --launcher-muted: #64748b;
-  --launcher-line: rgba(15, 23, 42, 0.08);
-  --launcher-accent: #2563eb;
-  --launcher-accent-muted: rgba(37, 99, 235, 0.12);
-  --launcher-danger: #dc2626;
-  --badge-bg: #eef2ff;
-  --badge-text: #1e3a8a;
-  --menu-bg: #fff;
-  --menu-border: rgba(15, 23, 42, 0.12);
-  --ico-gray: #444;
-  --ico-blue: #2563eb;
-  --ico-green: #16a34a;
-  --ico-orange: #ea580c;
-  --ico-red: #dc2626;
-  --ico-purple: #7c3aed;
+  --launcher-bg: var(--pb-bg);
+  --launcher-surface: var(--pb-surface);
+  --launcher-surface-2: var(--pb-surface-2);
+  --launcher-surface-3: var(--pb-surface-3);
+  --launcher-text: var(--pb-text);
+  --launcher-muted: var(--pb-muted);
+  --launcher-line: var(--pb-line);
+  --launcher-line-strong: var(--pb-line-2);
+  --launcher-accent: var(--pb-accent);
+  --launcher-accent-2: var(--pb-accent-strong);
+  --launcher-accent-muted: var(--pb-focus-ring-soft);
+  --launcher-danger: var(--pb-danger);
+  --badge-bg: var(--pb-accent-soft);
+  --badge-text: var(--pb-accent-strong);
+  --menu-bg: var(--pb-surface);
+  --menu-border: var(--pb-line-2);
+  --ico-gray: var(--pb-ico-gray);
+  --ico-blue: var(--pb-ico-blue);
+  --ico-green: var(--pb-ico-green);
+  --ico-orange: var(--pb-ico-orange);
+  --ico-red: var(--pb-ico-red);
+  --ico-purple: var(--pb-ico-purple);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --launcher-bg: #0b1220;
-    --launcher-surface: #111a2d;
-    --launcher-surface-2: #162136;
-    --launcher-surface-3: #1b2942;
-    --launcher-text: #e5edf8;
-    --launcher-muted: #9fb0c7;
-    --launcher-line: rgba(148, 163, 184, 0.22);
-    --launcher-line-strong: rgba(148, 163, 184, 0.34);
-    --launcher-accent: #60a5fa;
-    --launcher-accent-2: #93c5fd;
-    --badge-bg: rgba(96, 165, 250, 0.22);
-    --badge-text: #dbeafe;
-    --menu-bg: #1a2235;
-    --menu-border: rgba(148, 163, 184, 0.30);
-
-    color-scheme: dark;
-  }
 
   .host-onboarding {
     background: rgba(2, 6, 23, 0.56);
@@ -59,239 +46,18 @@
     border-color: rgba(96, 165, 250, 0.32);
   }
 
-  .host-onboarding__btn--primary:hover {
-    background: #3b82f6;
-    border-color: transparent;
-  }
 
-  .pb-launcher,
-  .plugbits-launcher,
-  .launcher-root,
-  .launcher-panel {
-    background: var(--launcher-bg);
-    color: var(--launcher-text);
-    border-color: var(--launcher-line);
-  }
 
-  .pb-launcher .surface,
-  .plugbits-launcher .surface,
-  .launcher-card,
-  .launcher-section,
-  .launcher-block,
-  .launcher-menu,
-  .launcher-popover,
-  .launcher-dropdown {
-    background: var(--launcher-surface);
-    color: var(--launcher-text);
-    border: 1px solid var(--launcher-line);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
-  }
-
-  .launcher-section-title,
-  .launcher-label,
-  .launcher-card-title,
-  .launcher-title {
-    color: var(--launcher-text);
-  }
-
-  .launcher-subtitle,
-  .launcher-meta,
-  .launcher-time,
-  .launcher-empty,
-  .launcher-hint,
-  .launcher-muted {
-    color: var(--launcher-muted);
-  }
-
-  .launcher-icon-button,
-  .launcher-toolbar button,
-  .launcher-header button,
-  .pb-launcher button.icon-button,
-  .pb-launcher .icon-btn,
-  .plugbits-launcher .icon-btn {
-    background: var(--launcher-surface-2);
-    color: var(--launcher-text);
-    border: 1px solid var(--launcher-line-strong);
-  }
-
-  .launcher-icon-button:hover,
-  .launcher-toolbar button:hover,
-  .launcher-header button:hover,
-  .pb-launcher button.icon-button:hover,
-  .pb-launcher .icon-btn:hover,
-  .plugbits-launcher .icon-btn:hover {
-    background: var(--launcher-surface-3);
-    border-color: var(--launcher-accent);
-    color: var(--launcher-accent-2);
-  }
-
-  .launcher-icon-button:focus-visible,
-  .launcher-toolbar button:focus-visible,
-  .launcher-header button:focus-visible,
-  .pb-launcher button.icon-button:focus-visible,
-  .pb-launcher .icon-btn:focus-visible,
-  .plugbits-launcher .icon-btn:focus-visible {
-    outline: 2px solid var(--launcher-accent);
-    outline-offset: 2px;
-  }
-
-  .pb-launcher svg,
-  .plugbits-launcher svg,
-  .launcher-root svg,
-  .launcher-panel svg,
-  .pb-launcher .icon,
-  .plugbits-launcher .icon,
-  .launcher-icon {
-    color: currentColor;
-    fill: none;
-    stroke: currentColor;
-    opacity: 0.96;
-  }
-
-  .launcher-shortcut,
-  .shortcut-item,
-  .shortcut-tile {
-    background: var(--launcher-surface-2);
-    color: var(--launcher-text);
-    border: 1px solid var(--launcher-line);
-  }
-
-  .launcher-shortcut:hover,
-  .shortcut-item:hover,
-  .shortcut-tile:hover {
-    background: var(--launcher-surface-3);
-    border-color: var(--launcher-accent);
-  }
-
-  .launcher-list-item,
-  .watchlist-item,
-  .recent-item,
-  .record-item {
-    background: var(--launcher-surface-2);
-    color: var(--launcher-text);
-    border: 1px solid rgba(148, 163, 184, 0.16);
-  }
-
-  .entry {
-    background: var(--launcher-surface-2);
-    border-color: rgba(148, 163, 184, 0.16);
-    box-shadow: none;
-  }
-
-  .launcher-head,
-  .panel-tabs {
-    background: var(--launcher-surface);
-    border-color: var(--launcher-line);
-  }
-
-  .shortcut-panel {
-    border-color: var(--launcher-line);
-  }
-
-  .list-section {
-    border-color: var(--launcher-line);
-  }
-
-  .launcher-list-item:hover,
-  .watchlist-item:hover,
-  .recent-item:hover,
-  .record-item:hover {
-    background: rgba(27, 41, 66, 0.96);
-    border-color: var(--launcher-line-strong);
-  }
-
-  .launcher-badge,
-  .watchlist-badge,
-  .count-badge {
-    background: var(--badge-bg);
-    color: var(--badge-text);
-    border: 1px solid rgba(147, 197, 253, 0.26);
-  }
-
-  .launcher-search input,
-  .launcher-search-box input,
-  .pb-launcher input[type="search"],
-  .pb-launcher input[type="text"] {
-    background: var(--launcher-surface-2);
-    color: var(--launcher-text);
-    border: 1px solid var(--launcher-line-strong);
-  }
-
-  .launcher-search input::placeholder,
-  .launcher-search-box input::placeholder,
-  .pb-launcher input[type="search"]::placeholder,
-  .pb-launcher input[type="text"]::placeholder {
-    color: var(--launcher-muted);
-  }
-
-  .launcher-search input:focus,
-  .launcher-search-box input:focus,
-  .pb-launcher input[type="search"]:focus,
-  .pb-launcher input[type="text"]:focus {
-    border-color: var(--launcher-accent);
-    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.18);
-    outline: none;
-  }
-
-  .launcher-menu,
-  .launcher-popover,
-  .launcher-dropdown,
-  .launcher-context-menu {
-    background: var(--menu-bg);
-    color: var(--launcher-text);
-    border: 1px solid var(--menu-border);
-  }
-
-  .launcher-menu button,
-  .launcher-dropdown button,
-  .launcher-context-menu button,
-  .launcher-menu a,
-  .launcher-dropdown a {
-    color: var(--launcher-text);
-  }
-
-  .launcher-menu button:hover,
-  .launcher-dropdown button:hover,
-  .launcher-context-menu button:hover,
-  .launcher-menu a:hover,
-  .launcher-dropdown a:hover {
-    background: rgba(96, 165, 250, 0.12);
-  }
-
-  .toast,
-  .pb-toast,
-  .launcher-toast {
-    z-index: 99999;
-  }
-
+  /* トークン(tokens.css)がダークで自動反転するため、ここには
+     ダーク時だけ意図的に変えたい差分のみを置く */
   .shortcut-button {
     background: var(--launcher-surface-2) !important;
-    color: var(--launcher-text) !important;
-    border: 1px solid rgba(148, 163, 184, 0.22) !important;
+    border: 1px solid var(--launcher-line-strong) !important;
     border-left: 3px solid transparent !important;
   }
 
   .shortcut-button:not(:disabled):hover {
-    background: rgba(96, 165, 250, 0.10) !important;
-  }
-
-  .pb-launcher .lc,
-  .pb-launcher [data-icon] {
-    color: #cbd5e1 !important;
-    opacity: 1 !important;
-    filter: none !important;
-  }
-
-  .pb-launcher .lc svg,
-  .pb-launcher .lc svg *,
-  .pb-launcher [data-icon] svg,
-  .pb-launcher [data-icon] svg * {
-    stroke: currentColor !important;
-    fill: none !important;
-    opacity: 1 !important;
-  }
-  .pb-launcher .watchlist-item .lc {
-    color: #dbeafe;
+    background: var(--pb-accent-soft) !important;
   }
 }
 
@@ -329,14 +95,34 @@ body.launcher {
 
 .launcher-title {
   display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.launcher-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.launcher-title-text {
+  display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 1px;
+  min-width: 0;
 }
 
 .launcher-name {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
 }
 
 .launcher-tag {
@@ -503,12 +289,12 @@ body.launcher {
 .host-onboarding__btn--primary {
   border-color: transparent;
   background: var(--launcher-accent);
-  color: #fff;
+  color: var(--pb-on-accent);
 }
 
 .host-onboarding__btn--primary:hover {
   border-color: transparent;
-  background: #1d4ed8;
+  background: var(--launcher-accent-2);
 }
 
 .host-onboarding__btn--subtle {
@@ -901,7 +687,7 @@ body.launcher {
   height: 7px;
   border-radius: 50%;
   flex: 0 0 auto;
-  background: #94a3b8;
+  background: var(--pb-muted-2);
 }
 
 .shortcut-button.shortcut-appTop .shortcut-dot {
@@ -1185,10 +971,10 @@ body.launcher {
 .lists-scroll {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 0 16px 24px;
+  padding: 10px 12px 24px;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 10px;
 }
 
 /* ピンタブ: recordPinSection がタブペイン直下にあるのでスクロール対応 */
@@ -1198,12 +984,12 @@ body.launcher {
   gap: 0;
 }
 
+/* セクションはカードとして区切りを明示する */
 .list-section {
-  background: transparent;
-  border-radius: 0;
-  border: none;
-  border-top: 1px solid var(--launcher-line);
-  padding: 12px 0 4px;
+  background: var(--launcher-surface);
+  border-radius: 12px;
+  border: 1px solid var(--launcher-line);
+  padding: 10px 12px 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1406,7 +1192,7 @@ body.launcher {
 .recent-item-meta {
   margin-top: 2px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--launcher-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1551,6 +1337,7 @@ body.launcher {
 .entry-badge {
   font-size: 12px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--badge-text);
   background: var(--badge-bg);
   padding: 4px 8px;
@@ -1558,6 +1345,25 @@ body.launcher {
   min-width: 36px;
   text-align: center;
   flex: 0 0 auto;
+}
+
+/* 件数バッジの状態表現: 0件は控えめ、取得失敗/権限エラーは警告アイコン */
+.entry-badge--zero {
+  background: transparent;
+  color: var(--launcher-muted);
+  font-weight: 500;
+}
+
+.entry-badge--error {
+  background: transparent;
+  color: var(--pb-warn);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.entry-badge--error svg {
+  display: block;
 }
 
 .entry-badge.loading {
@@ -1867,4 +1673,62 @@ body.launcher {
   color: var(--launcher-muted);
   padding: 12px 4px;
   text-align: center;
+}
+
+/* ── Footer: shortcut help ── */
+.launcher-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--launcher-line);
+  background: var(--launcher-surface);
+}
+
+.launcher-foot-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--launcher-muted);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.launcher-foot-help:hover {
+  background: var(--launcher-accent-muted);
+  color: var(--launcher-accent);
+}
+
+.launcher-foot-help:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 2px;
+}
+
+.launcher-foot-help .lc svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.launcher-foot-hint {
+  font-size: 10.5px;
+  color: var(--launcher-muted);
+  white-space: nowrap;
+}
+
+.launcher-foot-hint kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9.5px;
+  border: 1px solid var(--launcher-line-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+  background: var(--launcher-surface-2);
 }

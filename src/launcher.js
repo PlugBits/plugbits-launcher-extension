@@ -115,6 +115,11 @@ const I18N_MESSAGES = {
     panel_empty_favorites: 'ウォッチリストはまだありません',
     panel_empty_shortcuts: 'ショートカットを設定',
     panel_entry_no_label: '(no label)',
+    panel_tab_main: 'メイン',
+    panel_tab_pins: 'ピン',
+    panel_footer_shortcuts: 'ショートカット一覧',
+    panel_footer_shortcuts_title: 'キーボードショートカット一覧を表示（kintoneタブで開きます）',
+    panel_footer_palette: 'パレット',
     panel_badge_not_fetched: '未取得',
     panel_badge_permission_required: 'ホスト権限が必要です',
     panel_badge_missing_result: 'この項目の件数が返されませんでした',
@@ -135,6 +140,7 @@ const I18N_MESSAGES = {
     panel_notice_favorites_stale: '他のタブで更新がありました。最新状態を再読み込みしました。',
     panel_notice_overlay_unsupported: 'この画面では Excel Overlay を利用できません（一覧/詳細画面で利用できます）',
     panel_notice_overlay_open_failed: 'Excel Overlay の起動に失敗しました',
+    panel_notice_overlay_disabled: 'Excel Overlay は設定で無効になっています（設定画面の「スプレッドシート」から有効化できます）',
     panel_notice_permission_granted: 'ホストアクセスを許可しました: {host}',
     panel_notice_permission_cancelled: 'ホストアクセスの許可がキャンセルされました',
     panel_notice_url_required: 'URLは必須です',
@@ -209,6 +215,11 @@ const I18N_MESSAGES = {
     panel_empty_favorites: 'No watchlist items yet',
     panel_empty_shortcuts: 'Configure shortcuts',
     panel_entry_no_label: '(no label)',
+    panel_tab_main: 'Main',
+    panel_tab_pins: 'Pins',
+    panel_footer_shortcuts: 'Keyboard shortcuts',
+    panel_footer_shortcuts_title: 'Show the keyboard shortcut cheatsheet (opens in the kintone tab)',
+    panel_footer_palette: 'Palette',
     panel_badge_not_fetched: 'Not fetched',
     panel_badge_permission_required: 'Host permission required',
     panel_badge_missing_result: 'Count was not returned for this item',
@@ -229,6 +240,7 @@ const I18N_MESSAGES = {
     panel_notice_favorites_stale: 'Another tab updated watchlist. Reloaded the latest state.',
     panel_notice_overlay_unsupported: 'Excel Overlay is only available on list/detail pages',
     panel_notice_overlay_open_failed: 'Failed to open Excel Overlay',
+    panel_notice_overlay_disabled: 'Excel Overlay is turned off in settings (enable it from the Spreadsheet section)',
     panel_notice_permission_granted: 'Host access granted: {host}',
     panel_notice_permission_cancelled: 'Host access request was cancelled',
     panel_notice_url_required: 'URL is required',
@@ -270,6 +282,7 @@ const els = {
   settingsMenu: doc.getElementById('settingsMenu'),
   openOptionsPageMenuItem: doc.getElementById('openOptionsPageMenuItem'),
   openManualMenuItem: doc.getElementById('openManualMenuItem'),
+  openCheatsheet: doc.getElementById('openCheatsheet'),
   filterPanel: doc.getElementById('filterPanel'),
   toggleFilterPanel: doc.getElementById('toggleFilterPanel'),
   filter: doc.getElementById('filter'),
@@ -832,8 +845,10 @@ function iconToSvg(name, size = 16) {
   const lucide = globalThis.lucide;
   const icons = lucide?.icons;
   if (!icons) return '';
-  const kebab = normalizeIconName(name);
-  const candidates = [kebab, toPascalIconName(kebab)];
+  // UI用アイコンはICON_OPTIONS(ユーザー選択用の許可リスト)に縛らず、
+  // 指定名をそのまま解決し、見つからなければ既定アイコンに落とす
+  const kebab = (typeof name === 'string' && name.trim()) || DEFAULT_ICON;
+  const candidates = [kebab, toPascalIconName(kebab), DEFAULT_ICON, toPascalIconName(DEFAULT_ICON)];
   for (const key of candidates) {
     const iconNode = icons[key];
     if (!iconNode) continue;
@@ -851,11 +866,20 @@ function iconToSvg(name, size = 16) {
 function renderLucideIcons(root = doc) {
   const nodes = root.querySelectorAll('.lc[data-icon]');
   nodes.forEach((el) => {
-    const iconName = normalizeIconName(el.dataset.icon);
-    el.dataset.icon = iconName;
-    const svg = iconToSvg(iconName, 16);
+    const svg = iconToSvg(String(el.dataset.icon || '').trim(), 16);
     el.innerHTML = svg;
   });
+}
+
+// 折りたたみトグルのアイコンを差し替える(Lucide、取得不可時は字形フォールバック)
+function setCollapseIcon(el, collapsed) {
+  if (!el) return;
+  const svg = iconToSvg(collapsed ? 'chevron-right' : 'chevron-down', 14);
+  if (svg) {
+    el.innerHTML = svg;
+  } else {
+    el.textContent = collapsed ? '▶' : '▼';
+  }
 }
 
 function escapeId(value) {
@@ -1314,7 +1338,7 @@ function setRecordPinsCollapsed(collapsed, { persist = true } = {}) {
   }
   if (els.toggleRecordPins) {
     const isCollapsed = state.recordPinsCollapsed;
-    els.toggleRecordPins.textContent = isCollapsed ? '\u25B6' : '\u25BC';
+    setCollapseIcon(els.toggleRecordPins, isCollapsed);
     els.toggleRecordPins.setAttribute('aria-pressed', isCollapsed ? 'true' : 'false');
     const label = isCollapsed ? t('panel_action_toggle_record_pins_expand') : t('panel_action_toggle_record_pins_collapse');
     els.toggleRecordPins.title = label;
@@ -1341,7 +1365,7 @@ function setWatchlistCollapsed(collapsed, { persist = true, source = 'unknown' }
   }
   if (els.togglePinsOnlyIcon) {
     const isCollapsed = state.pinsOnly;
-    els.togglePinsOnlyIcon.textContent = isCollapsed ? '\u25B6' : '\u25BC';
+    setCollapseIcon(els.togglePinsOnlyIcon, isCollapsed);
     const label = isCollapsed ? t('panel_action_toggle_watchlist_expand') : t('panel_action_toggle_watchlist_collapse');
     els.togglePinsOnlyIcon.title = label;
     els.togglePinsOnlyIcon.setAttribute('aria-label', label);
@@ -1364,7 +1388,7 @@ function setRecentRecordsCollapsed(collapsed, { persist = true } = {}) {
   }
   if (els.toggleRecentRecords) {
     const isCollapsed = state.recentRecordsCollapsed;
-    els.toggleRecentRecords.textContent = isCollapsed ? '\u25B6' : '\u25BC';
+    setCollapseIcon(els.toggleRecentRecords, isCollapsed);
     els.toggleRecentRecords.setAttribute('aria-pressed', isCollapsed ? 'true' : 'false');
     const label = isCollapsed ? t('panel_action_toggle_recent_records_expand') : t('panel_action_toggle_recent_records_collapse');
     els.toggleRecentRecords.title = label;
@@ -1991,10 +2015,12 @@ function applyWatchlistCountCacheToBadges() {
   state.favorites.forEach((item) => {
     const cached = state.watchlistCountCache.get(item.id);
     if (!cached) return;
+    const text = String(cached.text);
     state.badgeStatus.set(item.id, {
-      text: String(cached.text),
+      text,
       title: buildWatchlistBadgeTitle(cached.updatedAt),
-      loading: false
+      loading: false,
+      status: text === '0' ? 'zero' : 'count'
     });
   });
   renderWatchlistUpdatedLabel();
@@ -2119,6 +2145,8 @@ async function openOverlayFromSidePanel() {
     state.overlayLaunchState = { pageType: 'unsupported', canEditOverlay: false };
     syncOverlayButtonLabel();
     setNoticeKey('panel_notice_overlay_unsupported');
+  } else if (response?.reason === 'disabled_by_setting') {
+    setNoticeKey('panel_notice_overlay_disabled');
   } else if (response?.reason === 'active_tab_not_kintone') {
     setNoticeKey('panel_notice_open_kintone_first');
   } else {
@@ -3424,10 +3452,25 @@ async function openEntry(entry, options = {}) {
 }
 
 function syncBadgeToElement(id, el) {
-  const stateItem = state.badgeStatus.get(id) || { text: '-', title: t('panel_badge_not_fetched'), loading: false };
-  el.textContent = stateItem.text ?? '-';
+  const stateItem = state.badgeStatus.get(id) || { text: '-', title: t('panel_badge_not_fetched'), loading: false, status: 'none' };
   el.title = stateItem.title || '';
   el.classList.toggle('loading', Boolean(stateItem.loading));
+  const isError = !stateItem.loading && stateItem.status === 'error';
+  const isZero = !stateItem.loading && stateItem.status === 'zero';
+  el.classList.toggle('entry-badge--error', isError);
+  el.classList.toggle('entry-badge--zero', isZero);
+  if (isError) {
+    const svg = iconToSvg('triangle-alert', 12);
+    if (svg) {
+      el.innerHTML = svg;
+      el.setAttribute('role', 'img');
+      el.setAttribute('aria-label', stateItem.title || t('panel_badge_fetch_failed'));
+      return;
+    }
+  }
+  el.removeAttribute('role');
+  el.removeAttribute('aria-label');
+  el.textContent = stateItem.text ?? '-';
 }
 
 function updateBadgeDom(id) {
@@ -3445,9 +3488,10 @@ function setBadgeLoading(id, loading) {
 
 function setBadgeValue(id, value, title = '') {
   const text = value == null ? '-' : String(value);
-  const next = { text, title: title || '', loading: false };
+  const status = value == null ? 'error' : (Number(value) === 0 ? 'zero' : 'count');
+  const next = { text, title: title || '', loading: false, status };
   const prev = state.badgeStatus.get(id);
-  if (prev && prev.text === next.text && prev.title === next.title && Boolean(prev.loading) === next.loading) {
+  if (prev && prev.text === next.text && prev.title === next.title && Boolean(prev.loading) === next.loading && prev.status === next.status) {
     return;
   }
   state.badgeStatus.set(id, next);
@@ -3751,7 +3795,7 @@ function applyShortcutVisibility(visible) {
   }
   if (els.toggleShortcuts) {
     els.toggleShortcuts.setAttribute('aria-pressed', visible ? 'true' : 'false');
-    els.toggleShortcuts.textContent = visible ? '▼' : '▶';
+    setCollapseIcon(els.toggleShortcuts, !visible);
     const label = visible ? t('panel_action_toggle_shortcuts_collapse') : t('panel_action_toggle_shortcuts_expand');
     els.toggleShortcuts.title = label;
     els.toggleShortcuts.setAttribute('aria-label', label);
@@ -4329,6 +4373,12 @@ function wireEvents() {
     openManualPage().catch((error) => {
       console.error('Failed to open manual page', error);
     });
+  });
+  els.openCheatsheet?.addEventListener('click', async () => {
+    const response = await sendMessageToActiveKintoneTab({ type: 'PB_SHOW_SHORTCUT_CHEATSHEET' });
+    if (!response?.ok) {
+      setNoticeKey('panel_notice_open_kintone_first');
+    }
   });
   els.recentClear?.addEventListener('click', () => {
     clearRecentRecords().catch(() => {});
