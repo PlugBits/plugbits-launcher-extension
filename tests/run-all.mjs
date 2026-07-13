@@ -16,7 +16,8 @@ const SUITES = [
   ['sidepanel', './sidepanel.test.mjs'],
   ['palette', './palette.test.mjs'],
   ['trial', './trial.test.mjs'],
-  ['options-api-usage', './options-api-usage.test.mjs']
+  ['options-api-usage', './options-api-usage.test.mjs'],
+  ['api-usage-tracking', './api-usage-tracking.test.mjs']
 ];
 
 const filter = process.argv[2];

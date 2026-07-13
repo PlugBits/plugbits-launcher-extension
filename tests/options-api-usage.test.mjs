@@ -36,10 +36,13 @@ export async function run({ browser, origin, check }) {
   check('api-usage: reset removes storage keys',
     storedAfter.apiUsageDaily === undefined && storedAfter.apiUsageAdminBreakdownDaily === undefined);
 
+  // 「キャッシュを更新」は全般ペインに移動済み
+  await page.click('.menu-item[data-pane-target="general"]');
+  await page.waitForTimeout(300);
   await page.click('#metadata_cache_clear');
   await page.waitForTimeout(400);
   const status = (await page.locator('#metadata_cache_status').textContent()).trim();
-  check('api-usage: cache clear shows removed count', status.includes('7'));
+  check('general: cache clear shows removed count', status.includes('7'));
 
   await ctx.close();
 }
