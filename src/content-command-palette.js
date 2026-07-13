@@ -57,49 +57,51 @@
   async function cpCopyText(text, successMessage) {
     try {
       await navigator.clipboard.writeText(String(text ?? ''));
-      cpShowToast(successMessage || 'コピーしました');
+      cpShowToast(successMessage || cpText('cpToastCopied'));
       return true;
     } catch (_) {
-      cpShowToast('コピーに失敗しました', false);
+      cpShowToast(cpText('cpToastCopyFailed'), false);
       return false;
     }
   }
 
   // ── Keyboard shortcut cheatsheet ─────────────────────────────────────────
-  const CP_CHEATSHEET_SECTIONS = [
-    {
-      title: '全般',
-      items: [
-        ['Ctrl / ⌘ + /', 'コマンドパレットを開く'],
-        ['Ctrl / ⌘ + Shift + E', 'Excel Overlay を開く'],
-        ['Shift + Alt + N', 'クイック新規レコード（一覧画面）'],
-        ['?', 'このショートカット一覧を表示']
-      ]
-    },
-    {
-      title: 'コマンドパレット',
-      items: [
-        ['↑ / ↓', '項目を移動'],
-        ['Enter', '実行 / 開く'],
-        ['Shift + Enter', 'App検索: 新規タブで開く'],
-        ['1 – 9', '番号ショートカットを実行'],
-        ['Esc', '閉じる']
-      ]
-    },
-    {
-      title: 'Excel Overlay',
-      items: [
-        ['↑ ↓ ← →', 'セル移動 / 範囲選択（Shift併用）'],
-        ['Enter / Shift + Enter', '確定して下 / 上へ'],
-        ['Tab / Shift + Tab', '右 / 左へ'],
-        ['F2 / Space', '編集開始・ピッカーを開く'],
-        ['Ctrl / ⌘ + C / V', 'コピー / 貼り付け'],
-        ['Ctrl / ⌘ + Z / Y', '元に戻す / やり直し'],
-        ['Ctrl / ⌘ + S', '保存'],
-        ['Esc', 'パネル / Overlay を閉じる']
-      ]
-    }
-  ];
+  function cpCheatsheetSections() {
+    return [
+      {
+        title: cpText('csSecGeneral'),
+        items: [
+          ['Ctrl / ⌘ + /', cpText('csOpenPalette')],
+          ['Ctrl / ⌘ + Shift + E', cpText('csOpenOverlay')],
+          ['Shift + Alt + N', cpText('csQuickNew')],
+          ['?', cpText('csShowThis')]
+        ]
+      },
+      {
+        title: cpText('csSecPalette'),
+        items: [
+          ['↑ / ↓', cpText('csMove')],
+          ['Enter', cpText('csRun')],
+          ['Shift + Enter', cpText('csAppNewTab')],
+          ['1 – 9', cpText('csNumShortcut')],
+          ['Esc', cpText('csCloseDesc')]
+        ]
+      },
+      {
+        title: cpText('csSecOverlay'),
+        items: [
+          ['↑ ↓ ← →', cpText('csCellMove')],
+          ['Enter / Shift + Enter', cpText('csConfirmMove')],
+          ['Tab / Shift + Tab', cpText('csTabMove')],
+          ['F2 / Space', cpText('csEditStart')],
+          ['Ctrl / ⌘ + C / V', cpText('csCopyPaste')],
+          ['Ctrl / ⌘ + Z / Y', cpText('csUndoRedo')],
+          ['Ctrl / ⌘ + S', cpText('csSave')],
+          ['Esc', cpText('csEscDesc')]
+        ]
+      }
+    ];
+  }
 
   let cpCheatsheetEl = null;
   function cpCheatsheetEscHandler(e) {
@@ -117,7 +119,12 @@
       document.removeEventListener('keydown', cpCheatsheetEscHandler, true);
       return;
     }
-    if (!cpCheatsheetEl || !document.body.contains(cpCheatsheetEl)) {
+    // 言語切替に追従できるよう、開くたびに内容を作り直す
+    if (cpCheatsheetEl && document.body.contains(cpCheatsheetEl)) {
+      cpCheatsheetEl.remove();
+      cpCheatsheetEl = null;
+    }
+    if (!cpCheatsheetEl) {
       const backdrop = document.createElement('div');
       backdrop.id = 'pb-cp-cheatsheet';
       backdrop.addEventListener('mousedown', (e) => {
@@ -141,22 +148,25 @@
 
       const panel = document.createElement('div');
       panel.className = 'pb-cs__panel';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-label', cpText('csTitle'));
 
       const head = document.createElement('div');
       head.className = 'pb-cs__head';
       const title = document.createElement('h2');
       title.className = 'pb-cs__title';
-      title.textContent = 'キーボードショートカット';
+      title.textContent = cpText('csTitle');
       const closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.className = 'pb-cs__close';
-      closeBtn.setAttribute('aria-label', '閉じる');
+      closeBtn.setAttribute('aria-label', cpText('csClose'));
       closeBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
       closeBtn.addEventListener('click', () => cpToggleCheatsheet(false));
       head.append(title, closeBtn);
       panel.appendChild(head);
 
-      CP_CHEATSHEET_SECTIONS.forEach((section) => {
+      cpCheatsheetSections().forEach((section) => {
         const sTitle = document.createElement('div');
         sTitle.className = 'pb-cs__section-title';
         sTitle.textContent = section.title;
@@ -181,13 +191,33 @@
     }
     cpCheatsheetEl.classList.add('pb-cs--open');
     document.addEventListener('keydown', cpCheatsheetEscHandler, true);
+    try {
+      cpCheatsheetEl.querySelector('.pb-cs__close')?.focus();
+    } catch (_) { /* noop */ }
   }
+
+  // パレットのUI言語（overlayTexts辞書のcp*/cs*キーを参照する）
+  let cpLanguage = DEFAULT_OVERLAY_LANGUAGE;
+  async function cpSyncLanguage() {
+    try {
+      const ui = await resolveOverlayUiLanguage();
+      cpLanguage = ui?.language || DEFAULT_OVERLAY_LANGUAGE;
+    } catch (_) { /* keep previous */ }
+  }
+  function cpText(key, ...args) {
+    return resolveText(cpLanguage, key, ...args);
+  }
+  function cpItemLabel(item) {
+    if (item?.labelKey) return cpText(item.labelKey);
+    return item?.label || '';
+  }
+  void cpSyncLanguage();
 
   const CP_COMMANDS = [
     // ─ App search ─
     {
       id: 'start-app-search',
-      label: 'App検索を開始',
+      labelKey: 'cpCmdAppSearch',
       icon: '⌕',
       category: 'app',
       badge: 'search',
@@ -200,7 +230,7 @@
     // ─ Nav ─
     {
       id: 'open-app-top',
-      label: 'アプリトップへ',
+      labelKey: 'cpCmdAppTop',
       icon: '⌂',
       category: 'nav',
       badge: 'top',
@@ -210,7 +240,7 @@
     },
     {
       id: 'open-portal',
-      label: 'ポータルへ',
+      labelKey: 'cpCmdPortal',
       icon: '⌂',
       category: 'nav',
       badge: 'portal',
@@ -220,7 +250,7 @@
     // ─ List: view / graph ─
     {
       id: 'switch-view',
-      label: 'ビューを切り替え',
+      labelKey: 'cpCmdSwitchView',
       icon: '▤',
       category: 'list',
       badge: 'view',
@@ -231,7 +261,7 @@
     },
     {
       id: 'open-graph-view',
-      label: 'グラフビューへ',
+      labelKey: 'cpCmdGraphView',
       icon: '▲',
       category: 'list',
       badge: 'graph',
@@ -243,7 +273,7 @@
     // ─ Record detail ─
     {
       id: 'duplicate-record',
-      label: 'レコードを複製',
+      labelKey: 'cpCmdDuplicateRecord',
       icon: '⧉',
       category: 'record',
       badge: 'dup',
@@ -253,19 +283,19 @@
     },
     {
       id: 'copy-record-link',
-      label: 'レコードリンクをコピー',
+      labelKey: 'cpCmdCopyRecordLink',
       icon: 'L',
       category: 'record',
       badge: 'link',
       keywords: ['link', 'url', 'リンク', 'コピー', 'copy'],
       requiresRecord: true,
       action(ctx) {
-        cpCopyText(buildCurrentTenantUrl(ctx.appId, { recordId: ctx.recordId }), 'レコードリンクをコピーしました');
+        cpCopyText(buildCurrentTenantUrl(ctx.appId, { recordId: ctx.recordId }), cpText('cpToastCopiedRecordLink'));
       }
     },
     {
       id: 'open-print-preview',
-      label: '印刷プレビューへ',
+      labelKey: 'cpCmdPrintPreview',
       icon: 'P',
       category: 'record',
       badge: 'print',
@@ -276,7 +306,7 @@
     // ─ Admin: navigation ─
     {
       id: 'open-form-settings',
-      label: 'フォーム設定を開く',
+      labelKey: 'cpCmdFormSettings',
       icon: '⚙',
       category: 'admin',
       badge: 'form',
@@ -286,7 +316,7 @@
     },
     {
       id: 'open-process-settings',
-      label: 'プロセス管理設定を開く',
+      labelKey: 'cpCmdProcessSettings',
       icon: '⚙',
       category: 'admin',
       badge: 'status',
@@ -296,7 +326,7 @@
     },
     {
       id: 'open-api-token-settings',
-      label: 'APIトークン設定を開く',
+      labelKey: 'cpCmdApiTokenSettings',
       icon: '⚙',
       category: 'admin',
       badge: 'apitoken',
@@ -306,7 +336,7 @@
     },
     {
       id: 'open-list-settings',
-      label: '一覧設定を開く',
+      labelKey: 'cpCmdListSettings',
       icon: '⚙',
       category: 'admin',
       badge: 'view',
@@ -316,7 +346,7 @@
     },
     {
       id: 'open-notification-settings',
-      label: '通知条件を開く',
+      labelKey: 'cpCmdNotificationSettings',
       icon: '⚙',
       category: 'admin',
       badge: 'notify',
@@ -327,7 +357,7 @@
     },
     {
       id: 'open-acl-settings',
-      label: 'アクセス権を開く',
+      labelKey: 'cpCmdAclSettings',
       icon: '⚙',
       category: 'admin',
       badge: 'acl',
@@ -338,7 +368,7 @@
     },
     {
       id: 'open-customize-settings',
-      label: 'JS・CSSカスタマイズを開く',
+      labelKey: 'cpCmdCustomizeSettings',
       icon: '⚙',
       category: 'admin',
       badge: 'custom',
@@ -348,7 +378,7 @@
     },
     {
       id: 'open-plugin-settings',
-      label: 'プラグイン設定を開く',
+      labelKey: 'cpCmdPluginSettings',
       icon: '⚙',
       category: 'admin',
       badge: 'plugin',
@@ -358,7 +388,7 @@
     },
     {
       id: 'open-deploy',
-      label: '運用環境へ反映',
+      labelKey: 'cpCmdDeploy',
       icon: '⚙',
       category: 'admin',
       badge: 'deploy',
@@ -369,43 +399,43 @@
     // ─ Developer: clipboard ─
     {
       id: 'copy-app-id',
-      label: 'App IDをコピー',
+      labelKey: 'cpCmdCopyAppId',
       icon: '#',
       category: 'dev',
       badge: 'appid',
       keywords: ['app', 'id', 'appid', 'copy'],
       requiresApp: true,
       action(ctx) {
-        cpCopyText(String(ctx.appId), 'App IDをコピーしました');
+        cpCopyText(String(ctx.appId), cpText('cpToastCopiedAppId'));
       }
     },
     {
       id: 'copy-record-id',
-      label: 'Record IDをコピー',
+      labelKey: 'cpCmdCopyRecordId',
       icon: '#',
       category: 'dev',
       badge: 'recid',
       keywords: ['record', 'id', 'recid', 'recordid', 'copy'],
       requiresRecord: true,
       action(ctx) {
-        cpCopyText(String(ctx.recordId), 'Record IDをコピーしました');
+        cpCopyText(String(ctx.recordId), cpText('cpToastCopiedRecordId'));
       }
     },
     {
       id: 'copy-query',
-      label: 'クエリ条件をコピー',
+      labelKey: 'cpCmdCopyQuery',
       icon: 'Q',
       category: 'dev',
       badge: 'query',
       keywords: ['query', 'クエリ', 'condition', '条件', 'copy'],
       requiresApp: true,
       action(ctx) {
-        cpCopyText(ctx.query || '', 'クエリ条件をコピーしました');
+        cpCopyText(ctx.query || '', cpText('cpToastCopiedQuery'));
       }
     },
     {
       id: 'copy-field-codes',
-      label: 'フィールドコード一覧をコピー',
+      labelKey: 'cpCmdCopyFieldCodes',
       icon: '{}',
       category: 'dev',
       badge: 'fields',
@@ -418,7 +448,7 @@
     },
     {
       id: 'copy-form-definition',
-      label: 'フォーム定義をJSONで取得',
+      labelKey: 'cpCmdCopyFormDefinition',
       icon: 'F',
       category: 'dev',
       badge: 'json',
@@ -432,7 +462,7 @@
     // ─ Help ─
     {
       id: 'show-shortcut-help',
-      label: 'ショートカットキー一覧を表示',
+      labelKey: 'cpCmdShowHelp',
       icon: '?',
       category: 'help',
       badge: 'help',
@@ -483,7 +513,7 @@
         const list = Array.isArray(res.shortcuts) ? res.shortcuts : [];
         this.shortcutCommands = list.slice(0, 9).map((entry, i) => ({
           id: `shortcut-${i}`,
-          label: (entry.label || '').trim() || `ショートカット ${i + 1}`,
+          label: (entry.label || '').trim() || `${cpText('cpShortcutDefault')} ${i + 1}`,
           icon: String(i + 1),
           category: 'shortcut',
           badge: `[${i + 1}]`,
@@ -516,14 +546,14 @@
       try {
         const res = await this.postFn('CP_GET_FIELDS', { appId: ctx.appId });
         if (!res?.ok) {
-          cpShowToast('フィールド情報の取得に失敗しました', false);
+          cpShowToast(cpText('cpToastFieldsFailed'), false);
           return;
         }
         const fields = Array.isArray(res.result?.fields) ? res.result.fields : [];
         const text = fields.map((f) => `${f.code}\t${f.label || ''}\t${f.type || ''}`).join('\n');
-        await cpCopyText(text, `フィールドコード ${fields.length}件をコピーしました`);
+        await cpCopyText(text, cpText('cpToastCopiedFields', fields.length));
       } catch (_) {
-        cpShowToast('フィールド情報の取得に失敗しました', false);
+        cpShowToast(cpText('cpToastFieldsFailed'), false);
       }
     }
 
@@ -531,45 +561,45 @@
       try {
         const res = await this.postFn('CP_GET_FORM_DEFINITION', { appId: ctx.appId });
         if (!res?.ok) {
-          cpShowToast('フォーム定義の取得に失敗しました', false);
+          cpShowToast(cpText('cpToastFormFailed'), false);
           return;
         }
         const properties = res.result?.properties || {};
-        await cpCopyText(JSON.stringify(properties, null, 2), 'フォーム定義(JSON)をコピーしました');
+        await cpCopyText(JSON.stringify(properties, null, 2), cpText('cpToastCopiedForm'));
       } catch (_) {
-        cpShowToast('フォーム定義の取得に失敗しました', false);
+        cpShowToast(cpText('cpToastFormFailed'), false);
       }
     }
 
     buildAclItems(ctx) {
       const appId = ctx.appId;
       return [
-        { id: 'acl-app', label: 'アプリのアクセス権', icon: '⚙', badge: 'app', action: () => { window.location.href = `/k/admin/app/acl/app?app=${appId}`; } },
-        { id: 'acl-record', label: 'レコードのアクセス権', icon: '⚙', badge: 'record', action: () => { window.location.href = `/k/admin/app/acl/record?app=${appId}`; } },
-        { id: 'acl-field', label: 'フィールドのアクセス権', icon: '⚙', badge: 'field', action: () => { window.location.href = `/k/admin/app/acl/field?app=${appId}`; } }
+        { id: 'acl-app', labelKey: 'cpAclApp', icon: '⚙', badge: 'app', action: () => { window.location.href = `/k/admin/app/acl/app?app=${appId}`; } },
+        { id: 'acl-record', labelKey: 'cpAclRecord', icon: '⚙', badge: 'record', action: () => { window.location.href = `/k/admin/app/acl/record?app=${appId}`; } },
+        { id: 'acl-field', labelKey: 'cpAclField', icon: '⚙', badge: 'field', action: () => { window.location.href = `/k/admin/app/acl/field?app=${appId}`; } }
       ];
     }
 
     buildNotificationItems(ctx) {
       const appId = ctx.appId;
       return [
-        { id: 'notify-app', label: '全般通知', icon: '⚙', badge: 'app', action: () => { window.location.href = `/k/admin/app/notification?app=${appId}&trigger=app`; } },
-        { id: 'notify-record', label: 'レコード単位の通知', icon: '⚙', badge: 'record', action: () => { window.location.href = `/k/admin/app/notification?app=${appId}&trigger=record`; } },
-        { id: 'notify-reminder', label: 'リマインダー通知', icon: '⚙', badge: 'reminder', action: () => { window.location.href = `/k/admin/app/notification?app=${appId}&trigger=reminder`; } }
+        { id: 'notify-app', labelKey: 'cpNotifyApp', icon: '⚙', badge: 'app', action: () => { window.location.href = `/k/admin/app/notification?app=${appId}&trigger=app`; } },
+        { id: 'notify-record', labelKey: 'cpNotifyRecord', icon: '⚙', badge: 'record', action: () => { window.location.href = `/k/admin/app/notification?app=${appId}&trigger=record`; } },
+        { id: 'notify-reminder', labelKey: 'cpNotifyReminder', icon: '⚙', badge: 'reminder', action: () => { window.location.href = `/k/admin/app/notification?app=${appId}&trigger=reminder`; } }
       ];
     }
 
     async startSubPicker(kind) {
       this.subPickerKind = kind;
       const PLACEHOLDERS = {
-        view: 'ビュー名を検索...',
-        graph: 'グラフ名を検索...',
-        acl: '種類を選択...',
-        notification: '種類を選択...'
+        view: cpText('cpPhView'),
+        graph: cpText('cpPhGraph'),
+        acl: cpText('cpPhKind'),
+        notification: cpText('cpPhKind')
       };
       if (this.inputEl) {
         this.inputEl.value = '';
-        this.inputEl.placeholder = PLACEHOLDERS[kind] || '検索...';
+        this.inputEl.placeholder = PLACEHOLDERS[kind] || cpText('cpPhDefault');
         this.inputEl.focus();
       }
       if (kind === 'acl') { this.staticSubItems = this.buildAclItems(this.ctx); this.filter(''); return; }
@@ -718,7 +748,7 @@
     buildAppCatalogRefreshItem() {
       return {
         id: 'refresh-app-catalog-inline',
-        label: 'アプリ一覧キャッシュを更新',
+        labelKey: 'cpCmdRefreshCatalog',
         icon: '⟳',
         badge: 'refresh',
         keepOpen: true,
@@ -749,7 +779,7 @@
       this.appSearchMode = true;
       if (this.inputEl) {
         this.inputEl.value = '';
-        this.inputEl.placeholder = 'App名またはApp IDを検索...';
+        this.inputEl.placeholder = cpText('cpPhAppSearch');
         this.inputEl.focus();
       }
       this.loadAppCatalog();
@@ -757,11 +787,11 @@
     }
 
     async refreshAppCatalog() {
-      if (this.inputEl) this.inputEl.placeholder = 'アプリ一覧を更新しています...';
+      if (this.inputEl) this.inputEl.placeholder = cpText('cpPhRefreshing');
       this.appCatalogLoaded = false;
       await this.loadAppCatalog(true);
       if (this.inputEl) {
-        this.inputEl.placeholder = this.appSearchMode ? 'App名またはApp IDを検索...' : 'コマンドを検索...';
+        this.inputEl.placeholder = this.appSearchMode ? cpText('cpPhAppSearch') : cpText('cpPhCommand');
       }
       if (this.appSearchMode) this.filter(this.inputEl?.value || '');
     }
@@ -772,9 +802,24 @@
       backdrop.addEventListener('mousedown', (e) => {
         if (e.target === backdrop) this.close();
       });
+      backdrop.addEventListener('keydown', (e) => {
+        if (!this.isOpen) return;
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.cycleFocus(e.shiftKey);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.close();
+        }
+      });
 
       const panel = document.createElement('div');
       panel.id = 'pb-command-palette';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-label', cpText('cpDialogLabel'));
 
       const searchWrap = document.createElement('div');
       searchWrap.className = 'pb-cp__search-wrap';
@@ -786,9 +831,13 @@
       const input = document.createElement('input');
       input.className = 'pb-cp__search-input';
       input.type = 'text';
-      input.placeholder = 'コマンドを検索...';
+      input.placeholder = cpText('cpPhCommand');
       input.autocomplete = 'off';
       input.spellcheck = false;
+      input.setAttribute('role', 'combobox');
+      input.setAttribute('aria-autocomplete', 'list');
+      input.setAttribute('aria-expanded', 'true');
+      input.setAttribute('aria-controls', 'pb-cp-list');
       input.addEventListener('input', () => this.filter(input.value));
       input.addEventListener('keydown', (e) => {
         e.stopPropagation();
@@ -800,6 +849,8 @@
 
       const list = document.createElement('div');
       list.className = 'pb-cp__list';
+      list.id = 'pb-cp-list';
+      list.setAttribute('role', 'listbox');
       this.listEl = list;
 
       const footer = document.createElement('div');
@@ -858,7 +909,7 @@
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'pb-cp__sc-btn';
-        btn.title = cmd.label;
+        btn.title = cpItemLabel(cmd);
 
         const num = document.createElement('span');
         num.className = 'pb-cp__sc-btn-num';
@@ -866,11 +917,11 @@
 
         const label = document.createElement('span');
         label.className = 'pb-cp__sc-btn-label';
-        label.textContent = cmd.label;
+        label.textContent = cpItemLabel(cmd);
 
         btn.append(num, label);
-        btn.addEventListener('mousedown', (e) => {
-          e.preventDefault();
+        btn.addEventListener('mousedown', (e) => { e.preventDefault(); });
+        btn.addEventListener('click', () => {
           cmd.action(this.ctx, this);
           this.close();
         });
@@ -895,7 +946,7 @@
         if (this.subPickerKind === 'view') scoped = this.viewPickerItems;
         else if (this.subPickerKind === 'graph') scoped = this.reportItems;
         else scoped = this.staticSubItems;
-        this.filtered = q ? scoped.filter((v) => String(v.label).toLowerCase().includes(q)) : scoped;
+        this.filtered = q ? scoped.filter((v) => cpItemLabel(v).toLowerCase().includes(q)) : scoped;
         this.activeIndex = 0;
         this.renderFooter();
         this.renderList();
@@ -906,7 +957,7 @@
         if (cmd.requiresApp && !this.ctx.appId) return false;
         if (cmd.requiresRecord && !this.ctx.recordId) return false;
         if (!q) return true;
-        if (cmd.label.toLowerCase().includes(q)) return true;
+        if (cpItemLabel(cmd).toLowerCase().includes(q)) return true;
         return (cmd.keywords || []).some((k) => k.toLowerCase().includes(q));
       });
       this.filtered = cmds;
@@ -918,14 +969,14 @@
     renderFooter() {
       if (!this.footerEl) return;
       if (this.appSearchMode) {
-        this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 開く</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> 新規タブ</span><span><kbd>Esc</kbd> 閉じる</span>';
+        this.footerEl.innerHTML = `<span><kbd>↑↓</kbd> ${cpText('cpFooterMove')}</span><span><kbd>Enter</kbd> ${cpText('cpFooterOpen')}</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> ${cpText('cpFooterNewTab')}</span><span><kbd>Esc</kbd> ${cpText('cpFooterClose')}</span>`;
       } else if (this.subPickerKind) {
-        this.footerEl.innerHTML = '<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 開く</span><span><kbd>Esc</kbd> 閉じる</span>';
+        this.footerEl.innerHTML = `<span><kbd>↑↓</kbd> ${cpText('cpFooterMove')}</span><span><kbd>Enter</kbd> ${cpText('cpFooterOpen')}</span><span><kbd>Esc</kbd> ${cpText('cpFooterClose')}</span>`;
       } else {
         const shortcutHint = this.shortcutCommands.length
-          ? '<span><kbd>1-9</kbd> ショートカット</span>'
+          ? `<span><kbd>1-9</kbd> ${cpText('cpFooterShortcuts')}</span>`
           : '';
-        this.footerEl.innerHTML = `<span><kbd>↑↓</kbd> 移動</span><span><kbd>Enter</kbd> 実行</span>${shortcutHint}<span><kbd>Esc</kbd> 閉じる</span>`;
+        this.footerEl.innerHTML = `<span><kbd>↑↓</kbd> ${cpText('cpFooterMove')}</span><span><kbd>Enter</kbd> ${cpText('cpFooterRun')}</span>${shortcutHint}<span><kbd>Esc</kbd> ${cpText('cpFooterClose')}</span>`;
       }
     }
 
@@ -938,18 +989,18 @@
         if (this.appSearchMode) {
           const q = String(this.inputEl?.value || '').trim();
           empty.textContent = this.appCatalogLoading
-            ? 'App一覧を読み込んでいます...'
-            : (q ? '該当するAppが見つかりません' : 'App名またはApp IDを入力してください');
+            ? cpText('cpEmptyAppLoading')
+            : (q ? cpText('cpEmptyAppNoMatch') : cpText('cpEmptyAppPrompt'));
         } else if (this.subPickerKind) {
           const emptyText = {
-            view: 'ビューが見つかりません',
-            graph: 'グラフビューが見つかりません',
-            acl: '項目が見つかりません',
-            notification: '項目が見つかりません'
+            view: cpText('cpEmptyView'),
+            graph: cpText('cpEmptyGraph'),
+            acl: cpText('cpEmptyItems'),
+            notification: cpText('cpEmptyItems')
           };
-          empty.textContent = emptyText[this.subPickerKind] || '該当する項目が見つかりません';
+          empty.textContent = emptyText[this.subPickerKind] || cpText('cpEmptyGeneric');
         } else {
-          empty.textContent = '該当するコマンドが見つかりません';
+          empty.textContent = cpText('cpEmptyCommand');
         }
         this.listEl.appendChild(empty);
         return;
@@ -970,6 +1021,9 @@
 
         const item = document.createElement('div');
         item.className = 'pb-cp__item' + (i === this.activeIndex ? ' pb-cp__item--active' : '');
+        item.id = `pb-cp-item-${i}`;
+        item.setAttribute('role', 'option');
+        item.setAttribute('aria-selected', i === this.activeIndex ? 'true' : 'false');
 
         const icon = document.createElement('span');
         icon.className = 'pb-cp__item-icon';
@@ -980,7 +1034,7 @@
 
         const label = document.createElement('span');
         label.className = 'pb-cp__item-label';
-        label.textContent = cmd.label;
+        label.textContent = cpItemLabel(cmd);
         text.appendChild(label);
 
         if (cmd.category === 'app' && cmd.appId) {
@@ -1009,10 +1063,30 @@
       });
       const activeEl = this.listEl.querySelector('.pb-cp__item--active');
       if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+      if (this.inputEl) {
+        if (activeEl) this.inputEl.setAttribute('aria-activedescendant', activeEl.id);
+        else this.inputEl.removeAttribute('aria-activedescendant');
+      }
+    }
+
+    cycleFocus(backward = false) {
+      const focusables = [
+        this.inputEl,
+        ...Array.from(this.shortcutBarEl?.querySelectorAll('button') || [])
+      ].filter(Boolean);
+      if (!focusables.length) return;
+      const idx = focusables.indexOf(document.activeElement);
+      const next = idx === -1 ? 0 : (idx + (backward ? -1 : 1) + focusables.length) % focusables.length;
+      focusables[next].focus();
     }
 
     handleKey(e) {
       if (e.key === 'Escape') { this.close(); return; }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        this.cycleFocus(e.shiftKey);
+        return;
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         this.activeIndex = Math.min(this.activeIndex + 1, this.filtered.length - 1);
@@ -1058,6 +1132,7 @@
     }
 
     async open() {
+      await cpSyncLanguage();
       if (!this.backdropEl) this.mount();
       await Promise.all([this.fetchContext(), this.fetchShortcutCommands()]);
       this.backdropEl.style.display = 'flex';
@@ -1068,7 +1143,7 @@
       this.filter('');
       if (this.inputEl) {
         this.inputEl.value = '';
-        this.inputEl.placeholder = 'コマンドを検索...';
+        this.inputEl.placeholder = cpText('cpPhCommand');
         this.inputEl.focus();
       }
     }

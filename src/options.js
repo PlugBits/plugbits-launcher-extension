@@ -104,7 +104,7 @@ const I18N_MESSAGES = {
     nav_shortcuts: 'ショートカット',
     nav_watchlist: 'ウォッチリスト',
     nav_pins: 'ピン止め',
-    nav_excel_overlay: 'スプレッドシート',
+    nav_excel_overlay: 'Excel Overlay',
     nav_api_usage: 'API使用状況',
     general_section_title: '全般',
     general_intro_1: 'PlugBits Launcher は、kintone を横断的に閲覧・操作するための Chrome 拡張機能です。各機能は左メニューから切り替えて設定できます。',
@@ -129,12 +129,12 @@ const I18N_MESSAGES = {
     watchlist_refresh_preset_hint: '短くすると更新は早くなりますが、API消費は増えます。',
     watchlist_refresh_preset_warn: '高頻度設定は自己責任で使用してください。',
     pins_section_title: 'ピン止め',
-    overlay_section_title: 'スプレッドシート',
-    overlay_section_desc: 'kintone 一覧画面で スプレッドシートビュー を利用します。利用モードに応じて、無効・Standard・Pro を切り替えます。',
+    overlay_section_title: 'Excel Overlay',
+    overlay_section_desc: 'kintone 一覧画面で Excel Overlay（スプレッドシートビュー）を利用します。利用モードに応じて、無効・Standard・Pro を切り替えます。',
     overlay_free_pro_boundary: 'Free（Standard）でも一覧・詳細の表示と、詳細画面での単票編集は利用できます。一覧でのセル編集・コピー&貼り付け・一括保存は Pro の機能です。',
     overlay_mode_label: '利用モード',
     overlay_mode_disabled: '無効',
-    overlay_mode_disabled_desc: 'スプレッドシートビュー を起動しません。標準の kintone 一覧を使用します。',
+    overlay_mode_disabled_desc: 'Excel Overlay を起動しません。標準の kintone 一覧を使用します。',
     overlay_mode_standard: 'Standard',
     overlay_mode_standard_desc: 'スプレッドシートビュー のフィルタ・ソート・コピー・列レイアウト変更は可能です。編集と保存は利用できません。',
     overlay_mode_pro: 'Pro',
@@ -353,6 +353,37 @@ const I18N_MESSAGES = {
     api_usage_group_spreadsheet: 'スプレッドシート',
     api_usage_group_admin: '管理',
     nav_pro_license: 'Pro ライセンス',
+    pro_page_sub: 'kintoneの移動・確認・一覧編集を、もっと速く。',
+    pro_status_plan_label: '現在のプラン',
+    pro_badge_active: 'Pro 有効',
+    pro_status_active: 'Pro機能が有効です',
+    pro_status_registered_email: '登録メール',
+    pro_status_unverified: 'ライセンスキー未認証',
+    pro_status_free: '基本機能が利用できます',
+    pro_status_enter_key: 'ライセンスキーを入力して認証してください',
+    pro_verify_loading: '認証中...',
+    pro_verify_again: '再認証',
+    pro_verify_ok: '認証成功',
+    pro_verify_failed: '認証に失敗しました',
+    pro_verify_failed_prefix: '認証失敗',
+    pro_verify_key_required: 'ライセンスキーを入力してください',
+    pro_verify_activated: 'Pro が有効になりました 🎉',
+    pro_verify_network_error: 'ネットワークエラーが発生しました。接続を確認してください。',
+    pro_clear_confirm: 'ライセンスを解除しますか？Pro 機能が無効になります。',
+    pro_features_title: 'Pro でできること',
+    pro_feat_nav: 'クイックナビゲーション',
+    pro_feat_nav_desc: 'お気に入り・ウォッチリスト・ピン止めで素早く移動',
+    pro_feat_detail_grid: '詳細画面 Grid Edit',
+    pro_feat_detail_grid_desc: '1レコードをスプレッドシート形式で編集',
+    pro_feat_quicknew: 'Quick New（レコード新規追加）',
+    pro_feat_quicknew_desc: 'モーダルからすばやくレコードを新規登録',
+    pro_feat_list_grid: '一覧 Grid Edit',
+    pro_feat_list_grid_desc: '一覧画面をスプレッドシート形式で一括編集・行追加',
+    pro_feat_copypaste: 'スプレッドシート コピー＆ペースト',
+    pro_feat_copypaste_desc: '一覧のセルをExcelへコピー、またはExcelからkintoneへ貼り付けてインポート',
+    pro_tier_free: '無料',
+    pro_tier_pro: 'Pro',
+    pro_key_card_title: 'すでにライセンスキーをお持ちの方',
     pro_license_title: 'PlugBits Launcher Pro',
     pro_status_free: '無料プラン',
     pro_status_active: 'Pro プラン（有効）',
@@ -374,7 +405,7 @@ const I18N_MESSAGES = {
     nav_shortcuts: 'Shortcuts',
     nav_watchlist: 'Watchlist',
     nav_pins: 'Pins',
-    nav_excel_overlay: 'Spreadsheet',
+    nav_excel_overlay: 'Excel Overlay',
     nav_api_usage: 'API Usage',
     general_section_title: 'General',
     general_intro_1: 'PlugBits Launcher is a Chrome extension for browsing and operating kintone more efficiently across apps.',
@@ -399,12 +430,12 @@ const I18N_MESSAGES = {
     watchlist_refresh_preset_hint: 'Shorter intervals improve freshness but increase API usage.',
     watchlist_refresh_preset_warn: 'Use fast mode at your own responsibility.',
     pins_section_title: 'Pins',
-    overlay_section_title: 'Spreadsheet View',
-    overlay_section_desc: 'Use Spreadsheet View on kintone list pages. Switch between Disabled, Standard, and Pro modes.',
+    overlay_section_title: 'Excel Overlay',
+    overlay_section_desc: 'Use Excel Overlay (spreadsheet view) on kintone list pages. Switch between Disabled, Standard, and Pro modes.',
     overlay_free_pro_boundary: 'Free (Standard) includes list/detail viewing and single-record editing from the detail page. Cell editing, copy & paste, and bulk saving in list view are Pro features.',
     overlay_mode_label: 'Mode',
     overlay_mode_disabled: 'Disabled',
-    overlay_mode_disabled_desc: 'Do not launch Spreadsheet View. Use the standard kintone list view.',
+    overlay_mode_disabled_desc: 'Do not launch Excel Overlay. Use the standard kintone list view.',
     overlay_mode_standard: 'Standard',
     overlay_mode_standard_desc: 'Spreadsheet View supports filtering, sorting, copying, and column layout changes. Editing and saving are disabled.',
     overlay_mode_pro: 'Pro',
@@ -623,6 +654,37 @@ const I18N_MESSAGES = {
     api_usage_group_spreadsheet: 'Spreadsheet',
     api_usage_group_admin: 'System / Admin',
     nav_pro_license: 'Pro License',
+    pro_page_sub: 'Navigate, check, and bulk-edit kintone faster.',
+    pro_status_plan_label: 'Current plan',
+    pro_badge_active: 'Pro active',
+    pro_status_active: 'Pro features are active',
+    pro_status_registered_email: 'Registered email',
+    pro_status_unverified: 'License key not verified',
+    pro_status_free: 'Basic features are available',
+    pro_status_enter_key: 'Enter your license key and verify it',
+    pro_verify_loading: 'Verifying...',
+    pro_verify_again: 'Re-verify',
+    pro_verify_ok: 'Verified',
+    pro_verify_failed: 'Verification failed',
+    pro_verify_failed_prefix: 'Verification failed',
+    pro_verify_key_required: 'Enter your license key',
+    pro_verify_activated: 'Pro is now active 🎉',
+    pro_verify_network_error: 'A network error occurred. Check your connection.',
+    pro_clear_confirm: 'Remove this license? Pro features will be disabled.',
+    pro_features_title: 'What Pro unlocks',
+    pro_feat_nav: 'Quick navigation',
+    pro_feat_nav_desc: 'Jump quickly with favorites, watchlist, and pins',
+    pro_feat_detail_grid: 'Detail Grid Edit',
+    pro_feat_detail_grid_desc: 'Edit a single record in a spreadsheet layout',
+    pro_feat_quicknew: 'Quick New (record creation)',
+    pro_feat_quicknew_desc: 'Create records quickly from a modal',
+    pro_feat_list_grid: 'List Grid Edit',
+    pro_feat_list_grid_desc: 'Bulk-edit list views in a spreadsheet layout and add rows',
+    pro_feat_copypaste: 'Spreadsheet copy & paste',
+    pro_feat_copypaste_desc: 'Copy list cells to Excel or paste from Excel into kintone',
+    pro_tier_free: 'Free',
+    pro_tier_pro: 'Pro',
+    pro_key_card_title: 'Already have a license key?',
     pro_license_title: 'PlugBits Launcher Pro',
     pro_status_free: 'Free plan',
     pro_status_active: 'Pro plan (active)',
@@ -758,12 +820,12 @@ function updateProStatusUI(cache, key) {
   if (proBadge) proBadge.hidden = !isActive;
 
   if (isActive) {
-    if (proStatusLabel) proStatusLabel.textContent = 'Pro機能が有効です';
-    if (proStatusSub) proStatusSub.textContent = cache.email ? `登録メール: ${cache.email}` : '';
+    if (proStatusLabel) proStatusLabel.textContent = t('pro_status_active');
+    if (proStatusSub) proStatusSub.textContent = cache.email ? `${t('pro_status_registered_email')}: ${cache.email}` : '';
     if (proInfoEmail) proInfoEmail.textContent = cache.email || '—';
     if (proInfoExpiry && cache.expiry) {
       const d = new Date(cache.expiry);
-      proInfoExpiry.textContent = isNaN(d.getTime()) ? cache.expiry : d.toLocaleDateString('ja-JP');
+      proInfoExpiry.textContent = isNaN(d.getTime()) ? cache.expiry : d.toLocaleDateString(currentLang === 'en' ? 'en-US' : 'ja-JP');
     }
     if (proInfoSection) proInfoSection.hidden = false;
     if (proUpgradeBtn) proUpgradeBtn.hidden = true;
@@ -772,8 +834,8 @@ function updateProStatusUI(cache, key) {
     if (proPortalBtn) proPortalBtn.hidden = !proPortalUrl;
     if (proClearBtn) proClearBtn.hidden = false;
   } else {
-    if (proStatusLabel) proStatusLabel.textContent = hasKey ? 'ライセンスキー未認証' : '基本機能が利用できます';
-    if (proStatusSub) proStatusSub.textContent = hasKey ? 'ライセンスキーを入力して認証してください' : '';
+    if (proStatusLabel) proStatusLabel.textContent = hasKey ? t('pro_status_unverified') : t('pro_status_free');
+    if (proStatusSub) proStatusSub.textContent = hasKey ? t('pro_status_enter_key') : '';
     if (proInfoSection) proInfoSection.hidden = true;
     if (proUpgradeBtn) proUpgradeBtn.hidden = false;
     if (proPriceLine) proPriceLine.hidden = false;
@@ -790,19 +852,19 @@ function setProVerifyState(state, message) {
   if (!proVerifyBtn) return;
   if (state === 'loading') {
     proVerifyBtn.disabled = true;
-    proVerifyBtn.textContent = '認証中...';
+    proVerifyBtn.textContent = t('pro_verify_loading');
     if (proVerifyMsg) { proVerifyMsg.textContent = ''; proVerifyMsg.className = 'hint'; }
   } else if (state === 'ok') {
     proVerifyBtn.disabled = false;
-    proVerifyBtn.textContent = '再認証';
-    if (proVerifyMsg) { proVerifyMsg.textContent = message || '認証成功'; proVerifyMsg.className = 'hint hint--success'; }
+    proVerifyBtn.textContent = t('pro_verify_again');
+    if (proVerifyMsg) { proVerifyMsg.textContent = message || t('pro_verify_ok'); proVerifyMsg.className = 'hint hint--success'; }
   } else if (state === 'error') {
     proVerifyBtn.disabled = false;
-    proVerifyBtn.textContent = '認証する';
-    if (proVerifyMsg) { proVerifyMsg.textContent = message || '認証に失敗しました'; proVerifyMsg.className = 'hint hint--error'; }
+    proVerifyBtn.textContent = t('pro_verify_btn');
+    if (proVerifyMsg) { proVerifyMsg.textContent = message || t('pro_verify_failed'); proVerifyMsg.className = 'hint hint--error'; }
   } else {
     proVerifyBtn.disabled = false;
-    proVerifyBtn.textContent = '認証する';
+    proVerifyBtn.textContent = t('pro_verify_btn');
     if (proVerifyMsg) { proVerifyMsg.textContent = ''; proVerifyMsg.className = 'hint'; }
   }
 }
@@ -821,7 +883,7 @@ async function loadProLicenseUI() {
 }
 
 async function doVerifyLicense(key) {
-  if (!key) { setProVerifyState('error', 'ライセンスキーを入力してください'); return; }
+  if (!key) { setProVerifyState('error', t('pro_verify_key_required')); return; }
   setProVerifyState('loading');
   try {
     const url = `${VERIFY_ENDPOINT}?key=${encodeURIComponent(key)}`;
@@ -831,13 +893,13 @@ async function doVerifyLicense(key) {
       const cache = { ...body, cachedAt: Date.now() };
       await chrome.storage.local.set({ [PRO_LICENSE_KEY]: key, [PRO_LICENSE_CACHE_KEY]: cache });
       updateProStatusUI(cache, key);
-      setProVerifyState('ok', 'Pro が有効になりました 🎉');
+      setProVerifyState('ok', t('pro_verify_activated'));
     } else {
       const reason = body?.reason || body?.status || `HTTP ${resp.status}`;
-      setProVerifyState('error', `認証失敗: ${reason}`);
+      setProVerifyState('error', `${t('pro_verify_failed_prefix')}: ${reason}`);
     }
   } catch (err) {
-    setProVerifyState('error', 'ネットワークエラーが発生しました。接続を確認してください。');
+    setProVerifyState('error', t('pro_verify_network_error'));
   }
 }
 
@@ -862,7 +924,7 @@ if (proPortalBtn) {
 
 if (proClearBtn) {
   proClearBtn.addEventListener('click', async () => {
-    if (!confirm('ライセンスを解除しますか？Pro 機能が無効になります。')) return;
+    if (!confirm(t('pro_clear_confirm'))) return;
     await chrome.storage.local.remove([PRO_LICENSE_KEY, PRO_LICENSE_CACHE_KEY]);
     if (proLicenseKeyInput) proLicenseKeyInput.value = '';
     updateProStatusUI(null, '');

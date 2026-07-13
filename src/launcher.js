@@ -73,7 +73,7 @@ const I18N_MESSAGES = {
     panel_search_placeholder: '検索（ラベル / URL / ホスト）',
     panel_shortcuts_toolbar: 'ショートカット一覧',
     panel_section_shortcuts: 'ショートカット',
-    panel_section_watchlist_pinned: 'ウォッチリスト（ピン）',
+    panel_section_watchlist_pinned: 'ウォッチリスト（固定）',
     panel_section_watchlist: 'ウォッチリスト',
     panel_section_record_pins: 'レコードピン',
     panel_section_recent_records: '最近のレコード',
@@ -137,7 +137,7 @@ const I18N_MESSAGES = {
     panel_empty_shortcuts: 'ショートカットを設定',
     panel_entry_no_label: '(no label)',
     panel_tab_main: 'メイン',
-    panel_tab_pins: 'ピン',
+    panel_tab_pins: 'レコードピン',
     panel_tour_eyebrow: 'はじめに',
     panel_tour_title: '3ステップではじめる',
     panel_tour_dismiss: 'このガイドを閉じる（再表示されません）',
@@ -203,7 +203,7 @@ const I18N_MESSAGES = {
     panel_search_placeholder: 'Search (label / URL / host)',
     panel_shortcuts_toolbar: 'Shortcut list',
     panel_section_shortcuts: 'Shortcuts',
-    panel_section_watchlist_pinned: 'Pinned watchlist',
+    panel_section_watchlist_pinned: 'Watchlist (starred)',
     panel_section_watchlist: 'Watchlist',
     panel_section_record_pins: 'Record pins',
     panel_section_recent_records: 'Recent records',
@@ -267,7 +267,7 @@ const I18N_MESSAGES = {
     panel_empty_shortcuts: 'Configure shortcuts',
     panel_entry_no_label: '(no label)',
     panel_tab_main: 'Main',
-    panel_tab_pins: 'Pins',
+    panel_tab_pins: 'Record pins',
     panel_tour_eyebrow: 'Getting started',
     panel_tour_title: 'Start in 3 steps',
     panel_tour_dismiss: 'Dismiss this guide (it will not show again)',
@@ -3944,20 +3944,40 @@ function closeShortcutTooltip(btn) {
   btn.classList.remove('tooltip-open', 'tooltip-align-left', 'tooltip-align-right');
 }
 
-function switchTab(tabName) {
+function switchTab(tabName, { focus = false } = {}) {
   state.activeTab = tabName;
   els.panelTabBtns.forEach((btn) => {
     const isActive = btn.dataset.tab === tabName;
     btn.classList.toggle('is-active', isActive);
     btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    // roving tabindex: アクティブなタブだけをTab順に含める
+    btn.setAttribute('tabindex', isActive ? '0' : '-1');
+    if (isActive && focus) btn.focus();
   });
   if (els.mainTabPane) els.mainTabPane.classList.toggle('is-active', tabName === 'main');
   if (els.pinsTabPane) els.pinsTabPane.classList.toggle('is-active', tabName === 'pins');
 }
 
 function initPanelTabs() {
-  els.panelTabBtns.forEach((btn) => {
+  const tabs = els.panelTabBtns;
+  tabs.forEach((btn, index) => {
+    btn.setAttribute('tabindex', btn.classList.contains('is-active') ? '0' : '-1');
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    btn.addEventListener('keydown', (event) => {
+      let nextIndex = null;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        nextIndex = (index + 1) % tabs.length;
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        nextIndex = (index - 1 + tabs.length) % tabs.length;
+      } else if (event.key === 'Home') {
+        nextIndex = 0;
+      } else if (event.key === 'End') {
+        nextIndex = tabs.length - 1;
+      }
+      if (nextIndex === null) return;
+      event.preventDefault();
+      switchTab(tabs[nextIndex].dataset.tab, { focus: true });
+    });
   });
 }
 
@@ -4161,87 +4181,6 @@ async function quickAddFromActiveTab() {
     console.error('Failed to add favorite', error);
     setNoticeKey('panel_notice_add_failed');
   }
-}
-
-async function editEntry(entry) {
-  const currentLabel = entry.label || '';
-  const nextLabel = window.prompt(t('panel_prompt_edit_label'), currentLabel);
-  if (nextLabel == null) return;
-  const currentUrl = entry.url || '';
-  const nextUrl = window.prompt(t('panel_prompt_edit_url'), currentUrl);
-  if (nextUrl == null) return;
-  if (!nextUrl.trim()) {
-    setNoticeKey('panel_notice_url_required');
-    return;
-  }
-  if (!isKintoneUrl(nextUrl.trim())) {
-    setNoticeKey('panel_notice_kintone_url_required');
-    return;
-  }
-  const parsed = parseKintoneUrl(nextUrl.trim());
-  const resolvedQuery = await resolveWatchlistSavedQuery({
-    host: parsed.host,
-    appId: parsed.appId,
-    viewId: parsed.viewId,
-    viewIdOrName: parsed.viewIdOrName,
-    url: parsed.url,
-    query: ''
-  });
-  if (!resolvedQuery.ok) {
-    setNoticeKey('panel_notice_watchlist_query_resolve_failed');
-    return;
-  }
-  const canonicalUrl = buildWatchlistUrl(parsed.host, parsed.appId, resolvedQuery.viewId);
-  if (!canonicalUrl) {
-    setNoticeKey('panel_notice_watchlist_query_resolve_failed');
-    return;
-  }
-  entry.label = nextLabel.trim() || t('panel_entry_no_label');
-  entry.title = entry.label;
-  entry.url = canonicalUrl;
-  entry.host = parsed.host;
-  entry.appId = parsed.appId;
-  entry.viewId = String(resolvedQuery.viewId || '').trim();
-  entry.viewIdOrName = entry.viewId;
-  entry.viewName = resolvedQuery.viewName || '';
-  entry.query = String(resolvedQuery.query || '');
-  entry.queryRepairRequired = false;
-  await persistFavorites();
-  setNoticeKey('panel_notice_updated');
-}
-
-async function changeEntryIcon(entry) {
-  const current = normalizeIconName(entry.icon);
-  const promptText = t('panel_prompt_icon', { icons: ICON_OPTIONS.join(', ') });
-  const input = window.prompt(promptText, current);
-  if (input == null) return;
-  const value = input.trim();
-  entry.icon = normalizeIconName(value);
-  await persistFavorites();
-  setNoticeKey('panel_notice_icon_updated');
-}
-
-async function changeEntryCategory(entry) {
-  const current = normalizeCategoryName(entry.category);
-  const input = window.prompt(t('panel_prompt_category'), current);
-  if (input == null) return;
-  entry.category = normalizeCategoryName(input);
-  await persistFavorites();
-  setNoticeKey('panel_notice_category_updated');
-}
-
-async function deleteEntry(id) {
-  if (!window.confirm(t('panel_confirm_delete_shortcut'))) return;
-  const next = state.favorites.filter((item) => item.id !== id);
-  state.favorites = next;
-  reindexOrders();
-  await persistFavorites();
-  state.badgeStatus.delete(id);
-  if (removeWatchlistCountCacheValue(id)) {
-    saveWatchlistCountCache().catch(() => {});
-    renderWatchlistUpdatedLabel();
-  }
-  renderLists();
 }
 
 async function togglePin(id, pinned) {

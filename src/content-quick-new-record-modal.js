@@ -97,7 +97,26 @@
     _buildLayer() {
       const layer = document.createElement('div');
       layer.className = 'pb-newrec__layer pb-newrec__layer--standalone';
+      layer.setAttribute('role', 'dialog');
+      layer.setAttribute('aria-modal', 'true');
       layer.addEventListener('mousedown', (e) => { if (e.target === layer) this.close(); });
+      // フォーカストラップ: Tabはモーダル内でループさせる
+      layer.addEventListener('keydown', (e) => {
+        if (e.key !== 'Tab') return;
+        const focusables = Array.from(layer.querySelectorAll(
+          'button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )).filter((el) => !el.disabled && el.offsetParent !== null);
+        if (!focusables.length) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      });
       return layer;
     }
 
@@ -149,11 +168,16 @@
       head.className = 'pb-newrec__head';
       const title = document.createElement('div');
       title.className = 'pb-newrec__title';
+      title.id = 'pb-newrec-title';
       title.textContent = t('newRecordTitle');
+      if (panel?.closest) {
+        const layerEl = panel.closest('.pb-newrec__layer');
+        if (layerEl) layerEl.setAttribute('aria-labelledby', 'pb-newrec-title');
+      }
       const closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.className = 'pb-newrec__close';
-      closeBtn.textContent = '×';
+      closeBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
       closeBtn.setAttribute('aria-label', t('newRecordCancel'));
       closeBtn.addEventListener('click', () => this.close());
       head.appendChild(title);
