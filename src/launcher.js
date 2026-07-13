@@ -113,10 +113,24 @@ const I18N_MESSAGES = {
     panel_empty_pinned: 'ピン留めされた項目はありません',
     panel_empty_favorites_no_match: '検索条件に一致するウォッチリストはありません',
     panel_empty_favorites: 'ウォッチリストはまだありません',
+    panel_empty_favorites_cta: 'このビューを追加',
+    panel_empty_favorites_hint: 'kintoneの一覧画面を開いた状態で押すと、そのビューの件数を見張れます',
+    pins_empty_message: 'ピン留めされたレコードはまだありません',
+    pins_empty_pin_current: '現在のレコードをピン',
+    pins_empty_hint: 'kintoneのレコード詳細を開いた状態で押すと、メモ付きで保存できます',
     panel_empty_shortcuts: 'ショートカットを設定',
     panel_entry_no_label: '(no label)',
     panel_tab_main: 'メイン',
     panel_tab_pins: 'ピン',
+    panel_tour_eyebrow: 'はじめに',
+    panel_tour_title: '3ステップではじめる',
+    panel_tour_dismiss: 'このガイドを閉じる（再表示されません）',
+    panel_tour_step1: 'kintoneの一覧を開いて、件数を見張るビューを登録',
+    panel_tour_step1_cta: 'このビューを追加',
+    panel_tour_step2: '一覧をExcelのように表示・編集（Ctrl+Shift+E）',
+    panel_tour_step2_cta: '今すぐ開く',
+    panel_tour_step3: 'コマンドパレットでどこへでも移動（Ctrl+/）',
+    panel_tour_step3_cta: 'ショートカット一覧',
     panel_footer_shortcuts: 'ショートカット一覧',
     panel_footer_shortcuts_title: 'キーボードショートカット一覧を表示（kintoneタブで開きます）',
     panel_footer_palette: 'パレット',
@@ -213,10 +227,24 @@ const I18N_MESSAGES = {
     panel_empty_pinned: 'No pinned items yet',
     panel_empty_favorites_no_match: 'No watchlist items matched your search',
     panel_empty_favorites: 'No watchlist items yet',
+    panel_empty_favorites_cta: 'Add this view',
+    panel_empty_favorites_hint: 'Open a kintone list view first, then press this to watch its record count',
+    pins_empty_message: 'No pinned records yet',
+    pins_empty_pin_current: 'Pin current record',
+    pins_empty_hint: 'Open a kintone record first, then press this to save it with a note',
     panel_empty_shortcuts: 'Configure shortcuts',
     panel_entry_no_label: '(no label)',
     panel_tab_main: 'Main',
     panel_tab_pins: 'Pins',
+    panel_tour_eyebrow: 'Getting started',
+    panel_tour_title: 'Start in 3 steps',
+    panel_tour_dismiss: 'Dismiss this guide (it will not show again)',
+    panel_tour_step1: 'Open a kintone list and register the view to watch its count',
+    panel_tour_step1_cta: 'Add this view',
+    panel_tour_step2: 'View and edit lists like Excel (Ctrl+Shift+E)',
+    panel_tour_step2_cta: 'Open now',
+    panel_tour_step3: 'Jump anywhere with the command palette (Ctrl+/)',
+    panel_tour_step3_cta: 'Keyboard shortcuts',
     panel_footer_shortcuts: 'Keyboard shortcuts',
     panel_footer_shortcuts_title: 'Show the keyboard shortcut cheatsheet (opens in the kintone tab)',
     panel_footer_palette: 'Palette',
@@ -283,6 +311,11 @@ const els = {
   openOptionsPageMenuItem: doc.getElementById('openOptionsPageMenuItem'),
   openManualMenuItem: doc.getElementById('openManualMenuItem'),
   openCheatsheet: doc.getElementById('openCheatsheet'),
+  panelTour: doc.getElementById('panelTour'),
+  panelTourDismiss: doc.getElementById('panelTourDismiss'),
+  panelTourAddView: doc.getElementById('panelTourAddView'),
+  panelTourOpenOverlay: doc.getElementById('panelTourOpenOverlay'),
+  panelTourShowKeys: doc.getElementById('panelTourShowKeys'),
   filterPanel: doc.getElementById('filterPanel'),
   toggleFilterPanel: doc.getElementById('toggleFilterPanel'),
   filter: doc.getElementById('filter'),
@@ -3248,9 +3281,44 @@ function renderLists() {
   setWatchlistCollapsed(state.pinsOnly, { persist: false, source: 'render_lists' });
   applySearchVisibility();
   renderCollapsedSectionsTray();
+  updatePanelTourVisibility();
   renderLucideIcons();
   syncSelectionState();
   highlightSelection();
+}
+
+// ── 初回ツアー: ウォッチリストが空かつ未消去のときだけ表示する ─────────────
+const PANEL_TOUR_DISMISSED_KEY = 'pbPanelTourDismissed';
+
+function updatePanelTourVisibility() {
+  if (!els.panelTour) return;
+  // ロード完了前(undefined)は表示しない — 一瞬表示されるチラつきを防ぐ
+  const show = state.panelTourDismissed === false && !state.favorites.length;
+  els.panelTour.classList.toggle('hidden', !show);
+}
+
+async function loadPanelTourDismissed() {
+  try {
+    const stored = await chrome.storage.sync.get(PANEL_TOUR_DISMISSED_KEY);
+    state.panelTourDismissed = Boolean(stored?.[PANEL_TOUR_DISMISSED_KEY]);
+  } catch (_) {
+    state.panelTourDismissed = false;
+  }
+}
+
+async function dismissPanelTour() {
+  state.panelTourDismissed = true;
+  updatePanelTourVisibility();
+  try {
+    await chrome.storage.sync.set({ [PANEL_TOUR_DISMISSED_KEY]: true });
+  } catch (_) { /* ignore */ }
+}
+
+async function showShortcutCheatsheetInActiveTab() {
+  const response = await sendMessageToActiveKintoneTab({ type: 'PB_SHOW_SHORTCUT_CHEATSHEET' });
+  if (!response?.ok) {
+    setNoticeKey('panel_notice_open_kintone_first');
+  }
 }
 
 function renderPinnedList(items) {
@@ -3294,6 +3362,26 @@ function renderCategorySections(items) {
       ? t('panel_empty_favorites_no_match')
       : t('panel_empty_favorites');
     container.appendChild(message);
+    if (!hasFilter) {
+      // 空状態から次の一歩に進める導線（現在のビューをそのまま登録）
+      const cta = doc.createElement('button');
+      cta.type = 'button';
+      cta.className = 'empty-cta';
+      const icon = doc.createElement('span');
+      icon.className = 'lc';
+      icon.dataset.icon = 'plus';
+      icon.setAttribute('aria-hidden', 'true');
+      const label = doc.createElement('span');
+      label.textContent = t('panel_empty_favorites_cta');
+      cta.append(icon, label);
+      cta.addEventListener('click', () => quickAddFromActiveTab());
+      container.appendChild(cta);
+      const hint = doc.createElement('div');
+      hint.className = 'empty-hint';
+      hint.textContent = t('panel_empty_favorites_hint');
+      container.appendChild(hint);
+      renderLucideIcons(container);
+    }
     return [];
   }
   const grouped = groupByCategory(items);
@@ -4249,7 +4337,7 @@ function applyRecordPinVisibility(visible) {
   if (!els.recordPinSection) return;
   if (flag) {
     if (!recordPinState.controller) {
-      recordPinState.controller = initPins();
+      recordPinState.controller = initPins({ translate: t });
     }
     setRecordPinsCollapsed(state.recordPinsCollapsed, { persist: false });
   } else {
@@ -4374,11 +4462,18 @@ function wireEvents() {
       console.error('Failed to open manual page', error);
     });
   });
-  els.openCheatsheet?.addEventListener('click', async () => {
-    const response = await sendMessageToActiveKintoneTab({ type: 'PB_SHOW_SHORTCUT_CHEATSHEET' });
-    if (!response?.ok) {
-      setNoticeKey('panel_notice_open_kintone_first');
-    }
+  els.openCheatsheet?.addEventListener('click', () => {
+    showShortcutCheatsheetInActiveTab().catch(() => {});
+  });
+  els.panelTourDismiss?.addEventListener('click', () => {
+    dismissPanelTour().catch(() => {});
+  });
+  els.panelTourAddView?.addEventListener('click', () => quickAddFromActiveTab());
+  els.panelTourOpenOverlay?.addEventListener('click', () => {
+    openOverlayFromSidePanel().catch(() => {});
+  });
+  els.panelTourShowKeys?.addEventListener('click', () => {
+    showShortcutCheatsheetInActiveTab().catch(() => {});
   });
   els.recentClear?.addEventListener('click', () => {
     clearRecentRecords().catch(() => {});
@@ -4537,6 +4632,7 @@ async function init() {
   await loadCollapsedSectionsState();
   await loadWatchlistRefreshPreset();
   await loadWatchlistCountCache();
+  await loadPanelTourDismissed();
   initPanelTabs();
   wireEvents();
   attachStorageListener();

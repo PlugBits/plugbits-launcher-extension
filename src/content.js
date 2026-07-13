@@ -1500,6 +1500,11 @@
       errorUnsupportedFilter: "この一覧には一時的なフィルター/ソートが含まれているため、Excelモードを起動できません。ビューを標準状態に戻してから再試行してください。",
       overlayUnsupportedPage: "この画面では Excel Overlay を利用できません。一覧/詳細画面で利用できます。",
       overlayDisabledBySetting: "Excel Overlay は設定で無効になっています。設定画面の「スプレッドシート」から有効化できます。",
+      dockOverlay: "Excel Overlay を開く (Ctrl+Shift+E)",
+      dockQuickNew: "クイック新規レコード (Shift+Alt+N)",
+      dockPalette: "コマンドパレット (Ctrl+/)",
+      dockHelp: "キーボードショートカット一覧 (?)",
+      dockQuickNewUnsupported: "クイック新規レコードは一覧画面で利用できます。",
       btnNewRecord: "＋ 新規",
       newRecordTitle: "新規レコード作成",
       newRecordSave: "保存",
@@ -1638,6 +1643,11 @@
       errorUnsupportedFilter: "This list has ad-hoc filters/sorting that cannot be replayed in Excel mode. Clear the filter and try again.",
       overlayUnsupportedPage: "Excel Overlay is only available on list/detail pages.",
       overlayDisabledBySetting: "Excel Overlay is turned off in settings. Enable it from the Spreadsheet section of the options page.",
+      dockOverlay: "Open Excel Overlay (Ctrl+Shift+E)",
+      dockQuickNew: "Quick new record (Shift+Alt+N)",
+      dockPalette: "Command palette (Ctrl+/)",
+      dockHelp: "Keyboard shortcuts (?)",
+      dockQuickNewUnsupported: "Quick new record is available on list pages.",
       btnNewRecord: "+ New",
       newRecordTitle: "Create New Record",
       newRecordSave: "Save",
@@ -11016,6 +11026,129 @@
     overlayShortcutListenerAttached = true;
   }
 
+  // ── Quick launcher dock ────────────────────────────────────────────────────
+  // 主要機能(Overlay / Quick New / パレット)がキーボード限定で発見できない
+  // 問題への対策として、対応ページの右下に小さな起動ドックを表示する。
+  // kintone DOMには依存せず body 直下に置く。設定(pbPageDockDisabled)でOFF可。
+  const PAGE_DOCK_DISABLED_KEY = 'pbPageDockDisabled';
+  let pageDockEl = null;
+  let pageDockStorageListenerAttached = false;
+
+  const PAGE_DOCK_ICONS = {
+    overlay: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>',
+    quickNew: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
+    palette: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg>',
+    help: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>'
+  };
+
+  async function isPageDockDisabled() {
+    try {
+      const stored = await chrome.storage.sync.get(PAGE_DOCK_DISABLED_KEY);
+      return Boolean(stored?.[PAGE_DOCK_DISABLED_KEY]);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function removePageDock() {
+    if (pageDockEl) {
+      pageDockEl.remove();
+      pageDockEl = null;
+    }
+  }
+
+  function createPageDockButton(iconHtml, label, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pb-dock__btn';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    btn.innerHTML = iconHtml;
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    });
+    return btn;
+  }
+
+  async function mountPageDock() {
+    if (pageDockEl && document.body.contains(pageDockEl)) return;
+    const uiLanguage = await resolveOverlayUiLanguage();
+    const language = uiLanguage?.language || DEFAULT_OVERLAY_LANGUAGE;
+
+    const dock = document.createElement('div');
+    dock.id = 'pb-quick-dock';
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #pb-quick-dock{position:fixed;right:18px;bottom:18px;z-index:2147483000;display:flex;align-items:center;gap:2px;padding:4px;border-radius:999px;background:rgba(255,255,255,.94);border:1px solid rgba(15,23,42,.14);box-shadow:0 8px 24px rgba(15,23,42,.18);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+      #pb-quick-dock .pb-dock__btn{width:30px;height:30px;border:none;border-radius:999px;background:transparent;color:#475569;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;line-height:0}
+      #pb-quick-dock .pb-dock__btn:hover{background:#eff4ff;color:#2563eb}
+      #pb-quick-dock .pb-dock__btn:focus-visible{outline:2px solid #2563eb;outline-offset:1px}
+      #pb-quick-dock .pb-dock__brand{width:22px;height:22px;border-radius:999px;margin:0 2px 0 4px;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+      @media (prefers-color-scheme: dark){
+        #pb-quick-dock{background:rgba(22,30,44,.94);border-color:rgba(148,163,184,.28);box-shadow:0 8px 24px rgba(0,0,0,.5)}
+        #pb-quick-dock .pb-dock__btn{color:#9fb0c7}
+        #pb-quick-dock .pb-dock__btn:hover{background:rgba(124,177,255,.16);color:#7cb1ff}
+      }
+    `;
+
+    const brand = document.createElement('span');
+    brand.className = 'pb-dock__brand';
+    brand.setAttribute('aria-hidden', 'true');
+    brand.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>';
+
+    const overlayBtn = createPageDockButton(PAGE_DOCK_ICONS.overlay, resolveText(language, 'dockOverlay'), () => {
+      void (async () => {
+        const result = await openOverlayByCurrentPage('dock');
+        if (!result?.ok && result?.message) showOverlayLaunchNotice(result.message);
+      })();
+    });
+
+    const quickNewBtn = createPageDockButton(PAGE_DOCK_ICONS.quickNew, resolveText(language, 'dockQuickNew'), () => {
+      if (!parseListOverlayContext(location.href)) {
+        showOverlayLaunchNotice(resolveText(language, 'dockQuickNewUnsupported'));
+        return;
+      }
+      if (!quickNewRecord.isVisible()) void quickNewRecord.open();
+    });
+
+    const paletteBtn = createPageDockButton(PAGE_DOCK_ICONS.palette, resolveText(language, 'dockPalette'), () => {
+      void commandPalette.open();
+    });
+
+    const helpBtn = createPageDockButton(PAGE_DOCK_ICONS.help, resolveText(language, 'dockHelp'), () => {
+      cpToggleCheatsheet(true);
+    });
+
+    dock.append(style, brand, overlayBtn, quickNewBtn, paletteBtn, helpBtn);
+    (document.body || document.documentElement).appendChild(dock);
+    pageDockEl = dock;
+  }
+
+  function attachPageDockStorageListener() {
+    if (pageDockStorageListenerAttached) return;
+    try {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'sync' || !Object.prototype.hasOwnProperty.call(changes, PAGE_DOCK_DISABLED_KEY)) return;
+        const disabled = Boolean(changes[PAGE_DOCK_DISABLED_KEY].newValue);
+        if (disabled) {
+          removePageDock();
+        } else if (isSupportedAppContextPage()) {
+          void mountPageDock();
+        }
+      });
+      pageDockStorageListenerAttached = true;
+    } catch (_) { /* ignore */ }
+  }
+
+  async function initPageDock() {
+    attachPageDockStorageListener();
+    if (await isPageDockDisabled()) return;
+    await mountPageDock();
+  }
+
   // App-only features are initialized only inside supported app contexts.
   function initAppOnlyFeatures() {
     if (appOnlyFeaturesInitialized) return true;
@@ -11024,6 +11157,7 @@
     startRecentRecordWatcher();
     if (!ensureOverlayControllerReady()) return false;
     attachOverlayShortcutListener();
+    void initPageDock();
     appOnlyFeaturesInitialized = true;
     return true;
   }
@@ -11096,7 +11230,7 @@
       node.id = 'pb-overlay-launch-notice';
       node.style.position = 'fixed';
       node.style.right = '24px';
-      node.style.bottom = '24px';
+      node.style.bottom = '72px'; /* クイックドックと重ならない位置 */
       node.style.zIndex = '2147483647';
       node.style.padding = '8px 12px';
       node.style.borderRadius = '8px';
@@ -11274,11 +11408,10 @@
     }
   }
   function cpToggleCheatsheet(forceOpen) {
-    const shouldOpen = forceOpen !== undefined
-      ? Boolean(forceOpen)
-      : !(cpCheatsheetEl && cpCheatsheetEl.style.display !== 'none');
+    const isOpen = Boolean(cpCheatsheetEl && cpCheatsheetEl.classList.contains('pb-cs--open'));
+    const shouldOpen = forceOpen !== undefined ? Boolean(forceOpen) : !isOpen;
     if (!shouldOpen) {
-      if (cpCheatsheetEl) cpCheatsheetEl.style.display = 'none';
+      if (cpCheatsheetEl) cpCheatsheetEl.classList.remove('pb-cs--open');
       document.removeEventListener('keydown', cpCheatsheetEscHandler, true);
       return;
     }
@@ -11291,7 +11424,8 @@
 
       const style = document.createElement('style');
       style.textContent = `
-        #pb-cp-cheatsheet{position:fixed!important;inset:0!important;background:rgba(0,0,0,.4)!important;z-index:2147483647!important;display:flex!important;align-items:flex-start!important;justify-content:center!important;padding-top:9vh!important}
+        #pb-cp-cheatsheet{position:fixed!important;inset:0!important;background:rgba(0,0,0,.4)!important;z-index:2147483647!important;display:none!important;align-items:flex-start!important;justify-content:center!important;padding-top:9vh!important}
+        #pb-cp-cheatsheet.pb-cs--open{display:flex!important}
         #pb-cp-cheatsheet .pb-cs__panel{width:520px!important;max-width:calc(100vw - 32px)!important;max-height:80vh!important;overflow-y:auto!important;background:#fff!important;border-radius:12px!important;box-shadow:0 24px 64px rgba(0,0,0,.25)!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;color:#374151!important;padding:20px 24px 22px!important;box-sizing:border-box!important}
         #pb-cp-cheatsheet .pb-cs__head{display:flex!important;align-items:center!important;justify-content:space-between!important;margin:0 0 6px!important}
         #pb-cp-cheatsheet .pb-cs__title{font-size:15px!important;font-weight:700!important;color:#111827!important;margin:0!important}
@@ -11343,7 +11477,7 @@
       document.body.appendChild(backdrop);
       cpCheatsheetEl = backdrop;
     }
-    cpCheatsheetEl.style.display = 'flex';
+    cpCheatsheetEl.classList.add('pb-cs--open');
     document.addEventListener('keydown', cpCheatsheetEscHandler, true);
   }
 

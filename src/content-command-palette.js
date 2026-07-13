@@ -110,11 +110,10 @@
     }
   }
   function cpToggleCheatsheet(forceOpen) {
-    const shouldOpen = forceOpen !== undefined
-      ? Boolean(forceOpen)
-      : !(cpCheatsheetEl && cpCheatsheetEl.style.display !== 'none');
+    const isOpen = Boolean(cpCheatsheetEl && cpCheatsheetEl.classList.contains('pb-cs--open'));
+    const shouldOpen = forceOpen !== undefined ? Boolean(forceOpen) : !isOpen;
     if (!shouldOpen) {
-      if (cpCheatsheetEl) cpCheatsheetEl.style.display = 'none';
+      if (cpCheatsheetEl) cpCheatsheetEl.classList.remove('pb-cs--open');
       document.removeEventListener('keydown', cpCheatsheetEscHandler, true);
       return;
     }
@@ -127,7 +126,8 @@
 
       const style = document.createElement('style');
       style.textContent = `
-        #pb-cp-cheatsheet{position:fixed!important;inset:0!important;background:rgba(0,0,0,.4)!important;z-index:2147483647!important;display:flex!important;align-items:flex-start!important;justify-content:center!important;padding-top:9vh!important}
+        #pb-cp-cheatsheet{position:fixed!important;inset:0!important;background:rgba(0,0,0,.4)!important;z-index:2147483647!important;display:none!important;align-items:flex-start!important;justify-content:center!important;padding-top:9vh!important}
+        #pb-cp-cheatsheet.pb-cs--open{display:flex!important}
         #pb-cp-cheatsheet .pb-cs__panel{width:520px!important;max-width:calc(100vw - 32px)!important;max-height:80vh!important;overflow-y:auto!important;background:#fff!important;border-radius:12px!important;box-shadow:0 24px 64px rgba(0,0,0,.25)!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;color:#374151!important;padding:20px 24px 22px!important;box-sizing:border-box!important}
         #pb-cp-cheatsheet .pb-cs__head{display:flex!important;align-items:center!important;justify-content:space-between!important;margin:0 0 6px!important}
         #pb-cp-cheatsheet .pb-cs__title{font-size:15px!important;font-weight:700!important;color:#111827!important;margin:0!important}
@@ -179,7 +179,7 @@
       document.body.appendChild(backdrop);
       cpCheatsheetEl = backdrop;
     }
-    cpCheatsheetEl.style.display = 'flex';
+    cpCheatsheetEl.classList.add('pb-cs--open');
     document.addEventListener('keydown', cpCheatsheetEscHandler, true);
   }
 

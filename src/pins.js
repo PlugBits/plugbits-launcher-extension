@@ -12,6 +12,13 @@ import {
 
 export function initPins(options = {}) {
   const doc = options.document || document;
+  // launcher の翻訳関数を受け取る（未指定時は既定文言にフォールバック）
+  const translate = typeof options.translate === 'function'
+    ? (key, fallback) => {
+        const text = options.translate(key);
+        return text && text !== key ? text : fallback;
+      }
+    : (_key, fallback) => fallback;
   const pinListEl = doc.getElementById('pinList');
   const pinNoticeEl = doc.getElementById('pinNotice');
   let refreshBtn = doc.getElementById('refreshPins');
@@ -288,19 +295,26 @@ export function initPins(options = {}) {
       const empty = doc.createElement('li');
       empty.className = 'pin-empty';
       const msg = doc.createElement('div');
-      msg.textContent = 'No pinned records yet.';
+      msg.textContent = translate('pins_empty_message', 'No pinned records yet.');
 
       const actions = doc.createElement('div');
       actions.className = 'pin-empty-actions';
-      const openOptionsBtn = doc.createElement('button');
-      openOptionsBtn.type = 'button';
-      openOptionsBtn.className = 'ghost-btn';
-      openOptionsBtn.textContent = 'Open settings';
-      openOptionsBtn.addEventListener('click', openOptionsPage);
-      actions.appendChild(openOptionsBtn);
+      const pinCurrentBtn = doc.createElement('button');
+      pinCurrentBtn.type = 'button';
+      pinCurrentBtn.className = 'empty-cta';
+      pinCurrentBtn.innerHTML = `${iconSvg('pin', '')} ${translate('pins_empty_pin_current', 'Pin current record')}`;
+      pinCurrentBtn.addEventListener('click', () => {
+        quickAddCurrentRecord().catch((error) => setNotice(String(error?.message || error)));
+      });
+      actions.appendChild(pinCurrentBtn);
+
+      const hint = doc.createElement('div');
+      hint.className = 'empty-hint';
+      hint.textContent = translate('pins_empty_hint', 'Open a kintone record first, then press this to save it with a note.');
 
       empty.appendChild(msg);
       empty.appendChild(actions);
+      empty.appendChild(hint);
       pinListEl.appendChild(empty);
       return;
     }

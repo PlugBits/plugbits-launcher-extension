@@ -79,6 +79,37 @@
       <div id="notice" class="launcher-notice hidden" role="status"></div>
 
       <div class="lists-scroll" id="listsScroll">
+        <section id="panelTour" class="panel-tour hidden" aria-labelledby="panelTourTitle">
+          <div class="panel-tour-head">
+            <span class="panel-tour-eyebrow" data-i18n="panel_tour_eyebrow">はじめに</span>
+            <button id="panelTourDismiss" class="icon-btn small" type="button" data-i18n-title="panel_tour_dismiss" data-i18n-aria-label="panel_tour_dismiss"><span class="lc" data-icon="x" aria-hidden="true"></span></button>
+          </div>
+          <h2 id="panelTourTitle" class="panel-tour-title" data-i18n="panel_tour_title">3ステップではじめる</h2>
+          <ol class="panel-tour-steps">
+            <li class="panel-tour-step">
+              <span class="panel-tour-num" aria-hidden="true">1</span>
+              <div class="panel-tour-body">
+                <p data-i18n="panel_tour_step1">kintoneの一覧を開いて、件数を見張るビューを登録</p>
+                <button id="panelTourAddView" class="empty-cta" type="button"><span class="lc" data-icon="plus" aria-hidden="true"></span> <span data-i18n="panel_tour_step1_cta">このビューを追加</span></button>
+              </div>
+            </li>
+            <li class="panel-tour-step">
+              <span class="panel-tour-num" aria-hidden="true">2</span>
+              <div class="panel-tour-body">
+                <p data-i18n="panel_tour_step2">一覧をExcelのように表示・編集（<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd>）</p>
+                <button id="panelTourOpenOverlay" class="empty-cta" type="button"><span class="lc" data-icon="table-2" aria-hidden="true"></span> <span data-i18n="panel_tour_step2_cta">今すぐ開く</span></button>
+              </div>
+            </li>
+            <li class="panel-tour-step">
+              <span class="panel-tour-num" aria-hidden="true">3</span>
+              <div class="panel-tour-body">
+                <p data-i18n="panel_tour_step3">コマンドパレットでどこへでも移動（<kbd>Ctrl</kbd>+<kbd>/</kbd>）</p>
+                <button id="panelTourShowKeys" class="empty-cta" type="button"><span class="lc" data-icon="keyboard" aria-hidden="true"></span> <span data-i18n="panel_tour_step3_cta">ショートカット一覧</span></button>
+              </div>
+            </li>
+          </ol>
+        </section>
+
         <section id="pinSection" class="list-section" data-i18n-aria-label="panel_section_watchlist_pinned">
           <div class="section-head">
             <span class="section-label"><span class="section-ico lc" data-icon="pin" aria-hidden="true"></span> <span data-i18n="panel_section_watchlist_pinned">ウォッチリスト（ピン）</span></span>

@@ -96,6 +96,8 @@ const I18N_MESSAGES = {
     general_language_ja: '日本語',
     general_language_en: 'English',
     general_language_help: 'Auto はPCまたはブラウザの表示言語に合わせます。',
+    general_page_dock_label: 'kintone画面の右下にクイックランチャーを表示する',
+    general_page_dock_help: 'Excel Overlay・クイック新規レコード・コマンドパレットをワンクリックで起動できる小さなボタン群です。',
     shortcuts_section_title: 'ショートカット',
     watchlist_section_title: 'ウォッチリスト',
     watchlist_refresh_preset_label: 'WatchList 更新頻度',
@@ -363,6 +365,8 @@ const I18N_MESSAGES = {
     general_language_ja: 'Japanese',
     general_language_en: 'English',
     general_language_help: 'Auto follows your PC or browser language.',
+    general_page_dock_label: 'Show the quick launcher in the corner of kintone pages',
+    general_page_dock_help: 'A small button cluster that opens Excel Overlay, quick new record, and the command palette in one click.',
     shortcuts_section_title: 'Shortcuts',
     watchlist_section_title: 'Watchlist',
     watchlist_refresh_preset_label: 'WatchList refresh frequency',
@@ -862,6 +866,7 @@ const watchlistLimitHintEl = document.getElementById('watchlist_limit_hint');
 const watchlistLimitStateEl = document.getElementById('watchlist_limit_state');
 const listEl = document.getElementById('list');
 const shortcutToggleEl = document.getElementById('shortcut_visible');
+const pageDockToggleEl = document.getElementById('page_dock_visible');
 const shortcutListEl = document.getElementById('shortcut_list');
 const shortcutSearchModeInputs = Array.from(document.querySelectorAll('input[name="shortcut_search_open_mode"]'));
 const excelListEl = document.getElementById('excel_columns_list');
@@ -1699,6 +1704,11 @@ function renderShortcutEntries() {
 shortcutToggleEl?.addEventListener('change', async () => {
   shortcutsVisible = Boolean(shortcutToggleEl.checked);
   await chrome.storage.sync.set({ kfavShortcutsVisible: shortcutsVisible });
+});
+
+pageDockToggleEl?.addEventListener('change', async () => {
+  // チェックON=表示。ストレージ上は「無効フラグ」なので反転して保存する
+  await chrome.storage.sync.set({ pbPageDockDisabled: !pageDockToggleEl.checked });
 });
 
 function createId() {
@@ -2870,8 +2880,11 @@ addBtn.addEventListener('click', async () => {
 
   const [core, shortcutStored] = await Promise.all([
     import('./core.js'),
-    chrome.storage.sync.get(['kfavShortcutsVisible'])
+    chrome.storage.sync.get(['kfavShortcutsVisible', 'pbPageDockDisabled'])
   ]);
+  if (pageDockToggleEl) {
+    pageDockToggleEl.checked = !shortcutStored.pbPageDockDisabled;
+  }
   shortcutEntries = core
     .sortShortcuts(await core.loadShortcuts())
     .map((item, idx) => normalizeShortcutEntryLocal(item, idx))
