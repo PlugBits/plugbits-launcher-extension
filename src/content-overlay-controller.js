@@ -1806,9 +1806,19 @@
 
       const actions = document.createElement('div');
       actions.className = 'pb-overlay__upsell-actions';
+      const trialBtn = document.createElement('button');
+      trialBtn.type = 'button';
+      trialBtn.className = 'pb-overlay__upsell-btn pb-overlay__upsell-btn--primary';
+      trialBtn.textContent = resolveText(lang, 'upsellCtaTrial');
+      trialBtn.addEventListener('click', () => {
+        try {
+          void chrome.runtime.sendMessage({ type: 'PB_OPEN_OPTIONS_PAGE', payload: { pane: 'pro-license' } });
+        } catch (_) { /* ignore */ }
+        this.closeProUpsell();
+      });
       const detailBtn = document.createElement('button');
       detailBtn.type = 'button';
-      detailBtn.className = 'pb-overlay__upsell-btn pb-overlay__upsell-btn--primary';
+      detailBtn.className = 'pb-overlay__upsell-btn';
       detailBtn.textContent = resolveText(lang, 'upsellCtaDetail');
       detailBtn.addEventListener('click', () => {
         window.open('https://plugbits.app/pro', '_blank', 'noopener,noreferrer');
@@ -1823,14 +1833,14 @@
         } catch (_) { /* ignore */ }
         this.closeProUpsell();
       });
-      actions.append(detailBtn, licenseBtn);
+      actions.append(trialBtn, detailBtn, licenseBtn);
 
       card.append(head, subtitle, cols, price, actions);
       layer.appendChild(card);
       this.root.appendChild(layer);
       this.proUpsellLayer = layer;
       try {
-        detailBtn.focus();
+        trialBtn.focus();
       } catch (_) { /* noop */ }
     }
 

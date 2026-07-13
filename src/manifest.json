@@ -23,7 +23,8 @@
     "type": "module"
   },
   "options_page": "options.html",
-  "permissions": ["storage", "scripting", "tabs", "alarms", "contextMenus", "sidePanel", "notifications"],
+  "permissions": ["storage", "scripting", "tabs", "alarms", "contextMenus", "sidePanel"],
+  "optional_permissions": ["notifications"],
   "host_permissions": [],
   "optional_host_permissions": [
   "https://*.kintone.com/*",

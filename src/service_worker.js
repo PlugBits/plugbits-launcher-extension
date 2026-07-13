@@ -1899,19 +1899,33 @@ chrome.alarms?.onAlarm?.addListener((alarm) => {
   }
 });
 
-chrome.notifications?.onClicked?.addListener((notificationId) => {
-  const id = String(notificationId || '');
-  if (!id.startsWith('pb-threshold-')) return;
-  const itemId = id.slice('pb-threshold-'.length);
-  (async () => {
-    try {
-      const stored = await chrome.storage.sync.get('kintoneFavorites');
-      const list = Array.isArray(stored?.kintoneFavorites) ? stored.kintoneFavorites : [];
-      const item = list.find((entry) => entry.id === itemId);
-      if (item?.url) await chrome.tabs.create({ url: item.url });
-      chrome.notifications?.clear?.(id);
-    } catch (_e) { /* ignore */ }
-  })();
+// notifications はオプション権限のため、許可済みのときだけリスナーを張る。
+// 許可直後（SW再起動前）にも効くよう permissions.onAdded でも再試行する。
+let thresholdNotificationClickHandlerRegistered = false;
+function registerThresholdNotificationClickHandler() {
+  if (thresholdNotificationClickHandlerRegistered) return;
+  if (!chrome.notifications?.onClicked) return;
+  thresholdNotificationClickHandlerRegistered = true;
+  chrome.notifications.onClicked.addListener((notificationId) => {
+    const id = String(notificationId || '');
+    if (!id.startsWith('pb-threshold-')) return;
+    const itemId = id.slice('pb-threshold-'.length);
+    (async () => {
+      try {
+        const stored = await chrome.storage.sync.get('kintoneFavorites');
+        const list = Array.isArray(stored?.kintoneFavorites) ? stored.kintoneFavorites : [];
+        const item = list.find((entry) => entry.id === itemId);
+        if (item?.url) await chrome.tabs.create({ url: item.url });
+        chrome.notifications?.clear?.(id);
+      } catch (_e) { /* ignore */ }
+    })();
+  });
+}
+registerThresholdNotificationClickHandler();
+chrome.permissions?.onAdded?.addListener((added) => {
+  if (added?.permissions?.includes('notifications')) {
+    registerThresholdNotificationClickHandler();
+  }
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {

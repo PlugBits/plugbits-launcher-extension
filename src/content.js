@@ -1403,6 +1403,7 @@
       upsellPro2: "コピー & 貼り付け・フィルハンドル",
       upsellPro3: "行の追加・削除・元に戻す/やり直し",
       upsellPrice: "¥980/月 ・ いつでも解約できます",
+      upsellCtaTrial: "14日間無料で試す",
       upsellCtaDetail: "Proの詳細を見る",
       upsellCtaLicense: "ライセンスキーを入力",
       upsellClose: "閉じる",
@@ -1659,6 +1660,7 @@
       upsellPro2: "Copy & paste and fill handle",
       upsellPro3: "Add/delete rows and undo/redo",
       upsellPrice: "¥980/month — cancel anytime",
+      upsellCtaTrial: "Start 14-day free trial",
       upsellCtaDetail: "Learn more about Pro",
       upsellCtaLicense: "Enter license key",
       upsellClose: "Close",
@@ -3860,9 +3862,19 @@
 
       const actions = document.createElement('div');
       actions.className = 'pb-overlay__upsell-actions';
+      const trialBtn = document.createElement('button');
+      trialBtn.type = 'button';
+      trialBtn.className = 'pb-overlay__upsell-btn pb-overlay__upsell-btn--primary';
+      trialBtn.textContent = resolveText(lang, 'upsellCtaTrial');
+      trialBtn.addEventListener('click', () => {
+        try {
+          void chrome.runtime.sendMessage({ type: 'PB_OPEN_OPTIONS_PAGE', payload: { pane: 'pro-license' } });
+        } catch (_) { /* ignore */ }
+        this.closeProUpsell();
+      });
       const detailBtn = document.createElement('button');
       detailBtn.type = 'button';
-      detailBtn.className = 'pb-overlay__upsell-btn pb-overlay__upsell-btn--primary';
+      detailBtn.className = 'pb-overlay__upsell-btn';
       detailBtn.textContent = resolveText(lang, 'upsellCtaDetail');
       detailBtn.addEventListener('click', () => {
         window.open('https://plugbits.app/pro', '_blank', 'noopener,noreferrer');
@@ -3877,14 +3889,14 @@
         } catch (_) { /* ignore */ }
         this.closeProUpsell();
       });
-      actions.append(detailBtn, licenseBtn);
+      actions.append(trialBtn, detailBtn, licenseBtn);
 
       card.append(head, subtitle, cols, price, actions);
       layer.appendChild(card);
       this.root.appendChild(layer);
       this.proUpsellLayer = layer;
       try {
-        detailBtn.focus();
+        trialBtn.focus();
       } catch (_) { /* noop */ }
     }
 

@@ -287,6 +287,7 @@ const I18N_MESSAGES = {
     pins_detail_title_field: 'Title field',
     watch_empty: '登録済みのウォッチリストはまだありません。',
     watchlist_threshold_hint: '各項目の「通知」に件数を入れると、しきい値以上でデスクトップ通知します（対象kintoneのタブが開いているときに約10分間隔で確認）。',
+    watch_threshold_perm_denied: '通知の権限が許可されなかったため、しきい値通知は設定できませんでした。',
     watch_threshold_label: '通知',
     watch_threshold_title: '件数がこのしきい値以上になるとデスクトップ通知します（対象kintoneのタブが開いているとき、約10分間隔で確認）。空欄で無効。',
     watch_threshold_placeholder: 'オフ',
@@ -374,6 +375,19 @@ const I18N_MESSAGES = {
     pro_verify_activated: 'Pro が有効になりました 🎉',
     pro_verify_network_error: 'ネットワークエラーが発生しました。接続を確認してください。',
     pro_clear_confirm: 'ライセンスを解除しますか？Pro 機能が無効になります。',
+    pro_status_trial_active: 'Pro トライアル中',
+    pro_status_trial_days_left: '残り {days} 日',
+    pro_status_trial_verify_pending: 'メール確認が未完了です（確認メールのリンクを開いてください）',
+    pro_trial_title: '14日間の無料トライアル',
+    pro_trial_desc: 'メールアドレスを入力すると、その場で Pro が有効になります。確認メールのリンクを48時間以内に開くと、トライアルが継続されます（おひとり様1回）。',
+    pro_trial_email_label: 'メールアドレス',
+    pro_trial_start_btn: '無料で試す',
+    pro_trial_starting: '開始しています...',
+    pro_trial_started_msg: 'トライアルを開始しました！確認メールを送信したので、48時間以内にメール内のリンクを開いてください。',
+    pro_trial_already_used: 'このメールアドレスではすでにトライアルを利用済みです。継続利用には Pro へのアップグレードをご検討ください。',
+    pro_trial_invalid_email: '有効なメールアドレスを入力してください。',
+    pro_trial_expired_msg: 'トライアル期間（14日間）が終了しました。継続するには Pro にアップグレードしてください。',
+    pro_trial_unverified_msg: 'メール確認が完了しなかったため、トライアルは停止しました。確認メールのリンクを開くと再開できます。',
     pro_features_title: 'Pro でできること',
     pro_feat_nav: 'クイックナビゲーション',
     pro_feat_nav_desc: 'お気に入り・ウォッチリスト・ピン止めで素早く移動',
@@ -592,6 +606,7 @@ const I18N_MESSAGES = {
     pins_detail_title_field: 'Title field',
     watch_empty: 'No watchlist items yet.',
     watchlist_threshold_hint: 'Set a count in each item\'s "Alert" field to get a desktop notification when the count reaches it (checked about every 10 minutes while a tab for that kintone is open).',
+    watch_threshold_perm_denied: 'Notification permission was not granted, so the alert threshold was not saved.',
     watch_threshold_label: 'Alert',
     watch_threshold_title: 'Shows a desktop notification when the count reaches this threshold (checked about every 10 minutes while a tab for that kintone is open). Leave empty to disable.',
     watch_threshold_placeholder: 'Off',
@@ -679,6 +694,19 @@ const I18N_MESSAGES = {
     pro_verify_activated: 'Pro is now active 🎉',
     pro_verify_network_error: 'A network error occurred. Check your connection.',
     pro_clear_confirm: 'Remove this license? Pro features will be disabled.',
+    pro_status_trial_active: 'Pro trial active',
+    pro_status_trial_days_left: '{days} days left',
+    pro_status_trial_verify_pending: 'Email not verified yet (open the link in the confirmation email)',
+    pro_trial_title: '14-day free trial',
+    pro_trial_desc: 'Enter your email and Pro activates immediately. Open the link in the confirmation email within 48 hours to keep the trial going (one per person).',
+    pro_trial_email_label: 'Email address',
+    pro_trial_start_btn: 'Start free trial',
+    pro_trial_starting: 'Starting...',
+    pro_trial_started_msg: 'Trial started! We sent a confirmation email — open the link inside within 48 hours.',
+    pro_trial_already_used: 'This email address has already used a trial. Consider upgrading to Pro to continue.',
+    pro_trial_invalid_email: 'Enter a valid email address.',
+    pro_trial_expired_msg: 'Your 14-day trial has ended. Upgrade to Pro to continue.',
+    pro_trial_unverified_msg: 'The trial was paused because the email was not verified. Open the confirmation link to resume.',
     pro_features_title: 'What Pro unlocks',
     pro_feat_nav: 'Quick navigation',
     pro_feat_nav_desc: 'Jump quickly with favorites, watchlist, and pins',
@@ -816,6 +844,10 @@ const proUpgradeBtn = document.getElementById('pro_upgrade_btn');
 const proPriceLine = document.getElementById('pro_price_line');
 const proPortalBtn = document.getElementById('pro_portal_btn');
 const proClearBtn = document.getElementById('pro_clear_btn');
+const proTrialCard = document.getElementById('pro_trial_card');
+const proTrialEmailInput = document.getElementById('pro_trial_email');
+const proTrialStartBtn = document.getElementById('pro_trial_start');
+const proTrialMsg = document.getElementById('pro_trial_msg');
 
 let proPortalUrl = '';
 
@@ -824,20 +856,37 @@ function updateProStatusUI(cache, key) {
   const isActive = cache?.status === 'active';
   const hasKey = Boolean(key);
 
+  const isTrial = cache?.kind === 'trial';
+
   proStatusBanner.dataset.status = isActive ? 'active' : (hasKey ? 'inactive' : 'free');
   if (proBadge) proBadge.hidden = !isActive;
+  // トライアルカードは「未使用かつ有料キー未設定」のときだけ見せる
+  if (proTrialCard) proTrialCard.hidden = Boolean(isActive || isTrial || hasKey);
 
   if (isActive) {
-    if (proStatusLabel) proStatusLabel.textContent = t('pro_status_active');
-    if (proStatusSub) proStatusSub.textContent = cache.email ? `${t('pro_status_registered_email')}: ${cache.email}` : '';
+    if (proStatusLabel) {
+      proStatusLabel.textContent = isTrial ? t('pro_status_trial_active') : t('pro_status_active');
+    }
+    if (proStatusSub) {
+      if (isTrial) {
+        const expiryMs = Date.parse(cache.expiry || '') || 0;
+        const daysLeft = expiryMs ? Math.max(0, Math.ceil((expiryMs - Date.now()) / 86400000)) : 0;
+        const parts = [t('pro_status_trial_days_left', { days: daysLeft })];
+        if (!cache.trial_verified) parts.push(t('pro_status_trial_verify_pending'));
+        proStatusSub.textContent = parts.join(' / ');
+      } else {
+        proStatusSub.textContent = cache.email ? `${t('pro_status_registered_email')}: ${cache.email}` : '';
+      }
+    }
     if (proInfoEmail) proInfoEmail.textContent = cache.email || '—';
     if (proInfoExpiry && cache.expiry) {
       const d = new Date(cache.expiry);
       proInfoExpiry.textContent = isNaN(d.getTime()) ? cache.expiry : d.toLocaleDateString(currentLang === 'en' ? 'en-US' : 'ja-JP');
     }
     if (proInfoSection) proInfoSection.hidden = false;
-    if (proUpgradeBtn) proUpgradeBtn.hidden = true;
-    if (proPriceLine) proPriceLine.hidden = true;
+    // トライアル中もアップグレード導線は見せ続ける
+    if (proUpgradeBtn) proUpgradeBtn.hidden = !isTrial;
+    if (proPriceLine) proPriceLine.hidden = !isTrial;
     proPortalUrl = cache.portalUrl || '';
     if (proPortalBtn) proPortalBtn.hidden = !proPortalUrl;
     if (proClearBtn) proClearBtn.hidden = false;
@@ -903,8 +952,15 @@ async function doVerifyLicense(key) {
       updateProStatusUI(cache, key);
       setProVerifyState('ok', t('pro_verify_activated'));
     } else {
-      const reason = body?.reason || body?.status || `HTTP ${resp.status}`;
-      setProVerifyState('error', `${t('pro_verify_failed_prefix')}: ${reason}`);
+      const status = String(body?.status || '');
+      if (status === 'trial_expired') {
+        setProVerifyState('error', t('pro_trial_expired_msg'));
+      } else if (status === 'trial_unverified') {
+        setProVerifyState('error', t('pro_trial_unverified_msg'));
+      } else {
+        const reason = body?.reason || status || `HTTP ${resp.status}`;
+        setProVerifyState('error', `${t('pro_verify_failed_prefix')}: ${reason}`);
+      }
     }
   } catch (err) {
     setProVerifyState('error', t('pro_verify_network_error'));
@@ -937,6 +993,69 @@ if (proClearBtn) {
     if (proLicenseKeyInput) proLicenseKeyInput.value = '';
     updateProStatusUI(null, '');
     setProVerifyState('idle');
+  });
+
+  // 解除後はトライアルカードの表示状態も更新される（updateProStatusUI内）
+}
+
+// ── 14日トライアル ───────────────────────────────────────────────────────────
+
+function setProTrialMsg(message, kind = '') {
+  if (!proTrialMsg) return;
+  proTrialMsg.textContent = message || '';
+  proTrialMsg.className = `hint${kind ? ` hint--${kind}` : ''}`;
+}
+
+async function startProTrial() {
+  const email = String(proTrialEmailInput?.value || '').trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    setProTrialMsg(t('pro_trial_invalid_email'), 'error');
+    return;
+  }
+  if (proTrialStartBtn) {
+    proTrialStartBtn.disabled = true;
+    proTrialStartBtn.textContent = t('pro_trial_starting');
+  }
+  setProTrialMsg('');
+  try {
+    const resp = await fetch(TRIAL_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ email }),
+      signal: AbortSignal.timeout(10000)
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (resp.ok && body?.ok && body?.key) {
+      const { ok: _ok, key, ...record } = body;
+      const cache = { ...record, cachedAt: Date.now() };
+      await chrome.storage.local.set({ [PRO_LICENSE_KEY]: key, [PRO_LICENSE_CACHE_KEY]: cache });
+      if (proLicenseKeyInput) proLicenseKeyInput.value = key;
+      updateProStatusUI(cache, key);
+      setProVerifyState('ok');
+      setProTrialMsg(t('pro_trial_started_msg'), 'success');
+    } else if (body?.reason === 'trial_already_used') {
+      setProTrialMsg(t('pro_trial_already_used'), 'error');
+    } else if (body?.reason === 'invalid_email') {
+      setProTrialMsg(t('pro_trial_invalid_email'), 'error');
+    } else {
+      setProTrialMsg(`${t('pro_verify_failed_prefix')}: ${body?.reason || `HTTP ${resp.status}`}`, 'error');
+    }
+  } catch (_err) {
+    setProTrialMsg(t('pro_verify_network_error'), 'error');
+  } finally {
+    if (proTrialStartBtn) {
+      proTrialStartBtn.disabled = false;
+      proTrialStartBtn.textContent = t('pro_trial_start_btn');
+    }
+  }
+}
+
+if (proTrialStartBtn) {
+  proTrialStartBtn.addEventListener('click', () => { void startProTrial(); });
+}
+if (proTrialEmailInput) {
+  proTrialEmailInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); proTrialStartBtn?.click(); }
   });
 }
 
@@ -1008,6 +1127,7 @@ const PRO_LICENSE_KEY = 'pbLicenseKey';
 const PRO_LICENSE_CACHE_KEY = 'pbLicenseCache';
 const PRO_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const VERIFY_ENDPOINT = 'https://api.plugbits.app/verify';
+const TRIAL_ENDPOINT = 'https://api.plugbits.app/trial';
 const PB_METADATA_CACHE_PREFIX = 'pb:meta:v1:';
 const API_USAGE_RETENTION_DAYS = 31;
 const API_USAGE_FEATURE_ORDER = [
@@ -2171,6 +2291,20 @@ async function render(items) {
       if (!me) return;
       const value = Number(thInput.value);
       if (Number.isFinite(value) && value > 0) {
+        // 通知はオプション権限。初回設定時にユーザー操作の流れで取得する
+        // （必須権限にするとアップデート時に全ユーザーへ再承認が走るため）
+        try {
+          const granted = await chrome.permissions.request({ permissions: ['notifications'] });
+          if (!granted) {
+            thInput.value = '';
+            delete me.notifyThreshold;
+            await saveFavorites(all);
+            alert(t('watch_threshold_perm_denied'));
+            return;
+          }
+        } catch (_err) {
+          // permissions APIが使えない環境では従来通り保存だけ行う
+        }
         me.notifyThreshold = Math.floor(value);
       } else {
         delete me.notifyThreshold;

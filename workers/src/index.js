@@ -2,8 +2,10 @@
  * PlugBits API – Cloudflare Workers
  *
  * Routes:
- *   POST /webhook   – Stripe webhook（署名検証 → KV更新 → Brevoメール）
- *   GET  /verify    – ライセンスキー認証（KVキャッシュ → Stripe確認）
+ *   POST /webhook       – Stripe webhook（署名検証 → KV更新 → Brevoメール）
+ *   GET  /verify        – ライセンスキー認証（KVキャッシュ → Stripe確認）
+ *   POST /trial         – 14日トライアルキー発行（メール単位・即時有効）
+ *   GET  /trial/verify  – トライアルのメール確認（48時間以内・後追い検証）
  */
 
 const CORS_HEADERS = {
@@ -119,6 +121,143 @@ function generateLicenseKey() {
   bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
   const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+// ── Trial ────────────────────────────────────────────────────────────────────
+//
+// 個人（メールアドレス）単位で14日トライアルを1回だけ発行する。
+// キーは応答で即時返却して拡張内で自動有効化し、同時に確認リンク付きの
+// メールを送る。48時間以内にリンクが開かれなければ /verify が
+// trial_unverified を返してトライアルは停止する（後追い検証）。
+//
+// KVレイアウト:
+//   lic_{key}        … ライセンス本体（kind:'trial' を含む）
+//   trial_{email}    … 正規化メール → key（重複取得の防止）
+//   trialtok_{token} … 確認トークン → key（確認後に削除）
+
+const TRIAL_EMAIL_PREFIX = 'trial_';
+const TRIAL_TOKEN_PREFIX = 'trialtok_';
+const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
+const TRIAL_VERIFY_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+// メール正規化: 小文字化 + ローカル部の +エイリアス除去
+function normalizeTrialEmail(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return null;
+  const at = s.lastIndexOf('@');
+  const local = s.slice(0, at).split('+')[0];
+  const domain = s.slice(at + 1);
+  if (!local) return null;
+  return `${local}@${domain}`;
+}
+
+async function handleTrialStart(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (_err) {
+    return json({ ok: false, reason: 'bad_request' }, 400);
+  }
+  const email = String(body?.email || '').trim();
+  const normalized = normalizeTrialEmail(email);
+  if (!normalized) return json({ ok: false, reason: 'invalid_email' }, 400);
+
+  const existing = await env.LICENSES.get(TRIAL_EMAIL_PREFIX + normalized);
+  if (existing) return json({ ok: false, reason: 'trial_already_used' }, 409);
+
+  const licenseKey = generateLicenseKey();
+  const verifyToken = generateLicenseKey();
+  const now = Date.now();
+  const record = {
+    email,
+    kind: 'trial',
+    status: 'active',
+    expiry: new Date(now + TRIAL_DURATION_MS).toISOString(),
+    trial_verified: false,
+    trial_verify_deadline: new Date(now + TRIAL_VERIFY_WINDOW_MS).toISOString()
+  };
+  await kvSet(env, licenseKey, record);
+  await env.LICENSES.put(TRIAL_EMAIL_PREFIX + normalized, licenseKey);
+  await env.LICENSES.put(TRIAL_TOKEN_PREFIX + verifyToken, licenseKey);
+
+  const origin = new URL(request.url).origin;
+  await sendTrialEmail(env, { email, licenseKey, verifyToken, origin, record });
+
+  return json({ ok: true, key: licenseKey, ...record });
+}
+
+async function handleTrialVerify(request, env) {
+  const url = new URL(request.url);
+  const token = url.searchParams.get('token')?.trim() || '';
+  const page = (title, message, ok) => new Response(
+    `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title></head>` +
+    `<body style="margin:0;background:#f6f8fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Sans',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh">` +
+    `<div style="background:#fff;border:1px solid #e4e9f0;border-radius:14px;padding:32px 36px;max-width:420px;text-align:center;box-shadow:0 14px 34px rgba(10,20,40,.08)">` +
+    `<div style="font-size:34px;margin-bottom:8px">${ok ? '✅' : '⚠️'}</div>` +
+    `<h1 style="font-size:18px;margin:0 0 8px;color:#101828">${title}</h1>` +
+    `<p style="font-size:14px;line-height:1.7;color:#5c6b84;margin:0">${message}</p>` +
+    `</div></body></html>`,
+    { status: ok ? 200 : 404, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+  );
+
+  if (!token) return page('リンクが無効です', 'URLが正しくありません。メールのリンクをもう一度開いてください。', false);
+  const licenseKey = await env.LICENSES.get(TRIAL_TOKEN_PREFIX + token);
+  if (!licenseKey) return page('リンクが無効です', 'このリンクは使用済みか、期限切れです。', false);
+  const record = await kvGet(env, licenseKey);
+  if (!record) return page('リンクが無効です', 'トライアル情報が見つかりませんでした。', false);
+
+  await kvSet(env, licenseKey, { ...record, trial_verified: true });
+  await env.LICENSES.delete(TRIAL_TOKEN_PREFIX + token);
+  return page(
+    'メール確認が完了しました',
+    'PlugBits Launcher Pro の14日間トライアルが継続されます。このページは閉じて構いません。',
+    true
+  );
+}
+
+async function sendTrialEmail(env, { email, licenseKey, verifyToken, origin, record }) {
+  if (!env.BREVO_API_KEY) return; // 未設定時はスキップ
+  const verifyUrl = `${origin}/trial/verify?token=${encodeURIComponent(verifyToken)}`;
+  const expiryDate = new Date(record.expiry).toLocaleDateString('ja-JP');
+  await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': env.BREVO_API_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      sender: {
+        email: env.BREVO_SENDER_EMAIL || 'no-reply@plugbits.app',
+        name: env.BREVO_SENDER_NAME || 'PlugBits Launcher'
+      },
+      to: [{ email }],
+      subject: '【要確認】PlugBits Launcher Pro 14日間トライアル開始のご案内',
+      htmlContent: `
+        <h2>PlugBits Launcher Pro トライアルへようこそ！</h2>
+        <p>14日間の無料トライアルはすでに拡張機能内で有効になっています（${expiryDate} まで）。</p>
+        <p style="background:#fff7ed;border:1px solid #fed7aa;padding:12px;border-radius:6px;">
+          <strong>トライアルを継続するには、48時間以内に下のボタンでメールアドレスの確認をお願いします。</strong>
+        </p>
+        <p style="text-align:center;margin:24px 0;">
+          <a href="${verifyUrl}"
+             style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:bold;">
+            メールアドレスを確認する
+          </a>
+        </p>
+        <p>ライセンスキー（控え）:</p>
+        <p style="font-family:monospace;font-size:16px;background:#f3f4f6;padding:12px;border-radius:6px;">
+          ${licenseKey}
+        </p>
+        <p style="font-size:12px;color:#6b7280;">
+          このキーは個人のものです。別のPCや転職先でも、設定画面の「Pro ライセンス」に入力すれば引き続き利用できます。
+        </p>
+        <hr/>
+        <p style="font-size:12px;color:#6b7280;">
+          トライアル終了後も継続する場合は <a href="https://plugbits.app/pro">plugbits.app/pro</a> からアップグレードできます（¥980/月・いつでも解約可）。
+        </p>
+      `
+    })
+  });
 }
 
 // ── Brevo メール送信 ────────────────────────────────────────────────────────
@@ -276,6 +415,21 @@ async function handleVerify(request, env) {
   // 1. KVキャッシュ確認
   const cached = await kvGet(env, rawKey);
   if (cached) {
+    // トライアルは有効期限と後追い検証（48時間）を評価してstatusを決める
+    if (cached.kind === 'trial') {
+      const now = Date.now();
+      const expiryMs = Date.parse(cached.expiry || '') || 0;
+      const verifyDeadlineMs = Date.parse(cached.trial_verify_deadline || '') || 0;
+      let status = cached.status || 'active';
+      if (status === 'active') {
+        if (expiryMs && now > expiryMs) {
+          status = 'trial_expired';
+        } else if (!cached.trial_verified && verifyDeadlineMs && now > verifyDeadlineMs) {
+          status = 'trial_unverified';
+        }
+      }
+      return json({ ok: status === 'active', ...cached, status, reason: status === 'active' ? undefined : status, portal_url: '' });
+    }
     const portalUrl = cached.stripe_customer_id
       ? await createPortalSession(env, cached.stripe_customer_id)
       : '';
@@ -303,6 +457,10 @@ export default {
       response = await handleWebhook(request, env);
     } else if (request.method === 'GET' && url.pathname === '/verify') {
       response = await handleVerify(request, env);
+    } else if (request.method === 'POST' && url.pathname === '/trial') {
+      response = await handleTrialStart(request, env);
+    } else if (request.method === 'GET' && url.pathname === '/trial/verify') {
+      response = await handleTrialVerify(request, env);
     } else {
       response = json({ ok: false, error: 'Not found' }, 404);
     }
