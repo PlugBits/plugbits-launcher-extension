@@ -138,6 +138,16 @@ const I18N_MESSAGES = {
     panel_entry_no_label: '(no label)',
     panel_tab_main: 'メイン',
     panel_tab_pins: 'レコードピン',
+    panel_action_pin_entry: '固定表示にする',
+    panel_action_unpin_entry: '固定を解除',
+    panel_action_rename_entry: '名前を変更',
+    panel_action_delete_entry: '削除',
+    panel_dialog_rename_title: '表示名を変更',
+    panel_dialog_delete_title: 'ウォッチリストから削除',
+    panel_dialog_delete_message: '「{label}」を削除します。よろしいですか？',
+    panel_dialog_save: '保存',
+    panel_dialog_cancel: 'キャンセル',
+    panel_dialog_delete_confirm: '削除',
     panel_tour_eyebrow: 'はじめに',
     panel_tour_title: '3ステップではじめる',
     panel_tour_dismiss: 'このガイドを閉じる（再表示されません）',
@@ -268,6 +278,16 @@ const I18N_MESSAGES = {
     panel_entry_no_label: '(no label)',
     panel_tab_main: 'Main',
     panel_tab_pins: 'Record pins',
+    panel_action_pin_entry: 'Star (keep at top)',
+    panel_action_unpin_entry: 'Unstar',
+    panel_action_rename_entry: 'Rename',
+    panel_action_delete_entry: 'Delete',
+    panel_dialog_rename_title: 'Rename item',
+    panel_dialog_delete_title: 'Remove from watchlist',
+    panel_dialog_delete_message: 'Remove "{label}" from the watchlist?',
+    panel_dialog_save: 'Save',
+    panel_dialog_cancel: 'Cancel',
+    panel_dialog_delete_confirm: 'Remove',
     panel_tour_eyebrow: 'Getting started',
     panel_tour_title: 'Start in 3 steps',
     panel_tour_dismiss: 'Dismiss this guide (it will not show again)',
@@ -3122,7 +3142,9 @@ function normalizeFavorites(list) {
         order: typeof item.order === 'number' ? item.order : index,
         icon: normalizeIconName(item.icon),
         iconColor: normalizeIconColor(item.iconColor),
-        category: normalizeCategoryName(item.category)
+        category: normalizeCategoryName(item.category),
+        // 通知しきい値（設定画面で管理）。正の数のみ保持する
+        ...(Number(item?.notifyThreshold) > 0 ? { notifyThreshold: Math.floor(Number(item.notifyThreshold)) } : {})
       };
     })
   );
@@ -3513,6 +3535,43 @@ function createEntryElement(entry, pinned) {
   button.appendChild(right);
 
   li.appendChild(button);
+
+  // ホバー/フォーカスで現れる行内操作（行本体がbuttonなので外側に重ねる）
+  const actions = doc.createElement('div');
+  actions.className = 'entry-actions';
+  const makeEntryAction = (iconName2, label, onClick, extraClass = '') => {
+    const btn = doc.createElement('button');
+    btn.type = 'button';
+    btn.className = `entry-action-btn${extraClass ? ` ${extraClass}` : ''}`;
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    const svg = iconToSvg(iconName2, 13);
+    if (svg) btn.innerHTML = svg;
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    });
+    return btn;
+  };
+  actions.appendChild(makeEntryAction(
+    pinned ? 'star-off' : 'star',
+    pinned ? t('panel_action_unpin_entry') : t('panel_action_pin_entry'),
+    () => { togglePin(entry.id, !pinned).catch(() => {}); },
+    pinned ? 'entry-action-btn--active' : ''
+  ));
+  actions.appendChild(makeEntryAction(
+    'pencil',
+    t('panel_action_rename_entry'),
+    () => { renameEntry(entry).catch(() => {}); }
+  ));
+  actions.appendChild(makeEntryAction(
+    'trash-2',
+    t('panel_action_delete_entry'),
+    () => { confirmDeleteEntry(entry).catch(() => {}); },
+    'entry-action-btn--danger'
+  ));
+  li.appendChild(actions);
   return li;
 }
 
@@ -4181,6 +4240,136 @@ async function quickAddFromActiveTab() {
     console.error('Failed to add favorite', error);
     setNoticeKey('panel_notice_add_failed');
   }
+}
+
+// ── パネル内ダイアログ（prompt/confirm の代替。i18n・キーボード対応） ────────
+function showPanelDialog(options = {}) {
+  return new Promise((resolve) => {
+    const overlay = doc.createElement('div');
+    overlay.className = 'panel-dialog';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    if (options.title) overlay.setAttribute('aria-label', options.title);
+
+    const card = doc.createElement('div');
+    card.className = 'panel-dialog__card';
+
+    if (options.title) {
+      const title = doc.createElement('h2');
+      title.className = 'panel-dialog__title';
+      title.textContent = options.title;
+      card.appendChild(title);
+    }
+    if (options.message) {
+      const message = doc.createElement('p');
+      message.className = 'panel-dialog__message';
+      message.textContent = options.message;
+      card.appendChild(message);
+    }
+
+    let inputEl = null;
+    if (options.inputValue !== undefined) {
+      inputEl = doc.createElement('input');
+      inputEl.type = 'text';
+      inputEl.className = 'panel-dialog__input';
+      inputEl.value = String(options.inputValue ?? '');
+      card.appendChild(inputEl);
+    }
+
+    const actions = doc.createElement('div');
+    actions.className = 'panel-dialog__actions';
+    const cancelBtn = doc.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'panel-dialog__btn';
+    cancelBtn.textContent = options.cancelLabel || t('panel_dialog_cancel');
+    const confirmBtn = doc.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'panel-dialog__btn panel-dialog__btn--primary'
+      + (options.danger ? ' panel-dialog__btn--danger' : '');
+    confirmBtn.textContent = options.confirmLabel || t('panel_dialog_save');
+    actions.append(cancelBtn, confirmBtn);
+    card.appendChild(actions);
+    overlay.appendChild(card);
+
+    const close = (result) => {
+      doc.removeEventListener('keydown', onKeydown, true);
+      overlay.remove();
+      resolve(result);
+    };
+    const onKeydown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        close(null);
+        return;
+      }
+      if (event.key === 'Enter' && (event.target === inputEl || event.target === confirmBtn)) {
+        event.preventDefault();
+        event.stopPropagation();
+        close(inputEl ? inputEl.value : true);
+        return;
+      }
+      if (event.key === 'Tab') {
+        const focusables = [inputEl, cancelBtn, confirmBtn].filter(Boolean);
+        const idx = focusables.indexOf(doc.activeElement);
+        const next = idx === -1 ? 0 : (idx + (event.shiftKey ? -1 : 1) + focusables.length) % focusables.length;
+        event.preventDefault();
+        event.stopPropagation();
+        focusables[next].focus();
+      }
+    };
+    overlay.addEventListener('mousedown', (event) => {
+      if (event.target === overlay) close(null);
+    });
+    cancelBtn.addEventListener('click', () => close(null));
+    confirmBtn.addEventListener('click', () => close(inputEl ? inputEl.value : true));
+    doc.addEventListener('keydown', onKeydown, true);
+
+    doc.body.appendChild(overlay);
+    try {
+      if (inputEl) {
+        inputEl.focus();
+        inputEl.select();
+      } else {
+        confirmBtn.focus();
+      }
+    } catch (_e) { /* noop */ }
+  });
+}
+
+async function renameEntry(entry) {
+  const next = await showPanelDialog({
+    title: t('panel_dialog_rename_title'),
+    inputValue: entry.label || '',
+    confirmLabel: t('panel_dialog_save')
+  });
+  if (next == null) return;
+  const label = String(next).trim();
+  if (!label || label === entry.label) return;
+  entry.label = label;
+  entry.title = label;
+  await persistFavorites();
+  renderLists();
+  setNoticeKey('panel_notice_updated');
+}
+
+async function confirmDeleteEntry(entry) {
+  const ok = await showPanelDialog({
+    title: t('panel_dialog_delete_title'),
+    message: t('panel_dialog_delete_message', { label: entry.label || '' }),
+    confirmLabel: t('panel_dialog_delete_confirm'),
+    danger: true
+  });
+  if (!ok) return;
+  state.favorites = state.favorites.filter((item) => item.id !== entry.id);
+  reindexOrders();
+  await persistFavorites();
+  state.badgeStatus.delete(entry.id);
+  if (removeWatchlistCountCacheValue(entry.id)) {
+    saveWatchlistCountCache().catch(() => {});
+    renderWatchlistUpdatedLabel();
+  }
+  renderLists();
 }
 
 async function togglePin(id, pinned) {

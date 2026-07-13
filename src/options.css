@@ -1682,3 +1682,25 @@ ul {
 }
 .pro-verify-btn:hover:not(:disabled) { background: var(--pb-accent-strong); }
 .pro-verify-btn:disabled { background: var(--pb-accent-border); cursor: default; }
+
+/* ── ウォッチリスト: 通知しきい値 ── */
+.watch-threshold {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 4px 0 0;
+  font-size: 12px;
+  color: var(--pb-muted);
+  white-space: nowrap;
+}
+
+.watch-threshold-input {
+  width: 64px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  border: 1px solid var(--kt-border);
+  border-radius: 8px;
+  background: var(--pb-surface);
+  font-variant-numeric: tabular-nums;
+}

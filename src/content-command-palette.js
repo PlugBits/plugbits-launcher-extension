@@ -94,6 +94,8 @@
           ['Enter / Shift + Enter', cpText('csConfirmMove')],
           ['Tab / Shift + Tab', cpText('csTabMove')],
           ['F2 / Space', cpText('csEditStart')],
+          [cpText('csTypeKeys'), cpText('csTypeReplace')],
+          ['Delete / Backspace', cpText('csDeleteClear')],
           ['Ctrl / ⌘ + C / V', cpText('csCopyPaste')],
           ['Ctrl / ⌘ + Z / Y', cpText('csUndoRedo')],
           ['Ctrl / ⌘ + S', cpText('csSave')],

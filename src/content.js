@@ -1604,6 +1604,9 @@
       csConfirmMove: "確定して下 / 上へ",
       csTabMove: "右 / 左へ",
       csEditStart: "編集開始・ピッカーを開く",
+      csTypeKeys: "文字入力",
+      csTypeReplace: "選択セルの内容を置き換えて編集開始",
+      csDeleteClear: "選択範囲をクリア",
       csCopyPaste: "コピー / 貼り付け",
       csUndoRedo: "元に戻す / やり直し",
       csSave: "保存",
@@ -1850,6 +1853,9 @@
       csConfirmMove: "Confirm and move down / up",
       csTabMove: "Move right / left",
       csEditStart: "Start editing / open picker",
+      csTypeKeys: "Type",
+      csTypeReplace: "Replace the selected cell and start editing",
+      csDeleteClear: "Clear the selected range",
       csCopyPaste: "Copy / paste",
       csUndoRedo: "Undo / redo",
       csSave: "Save",
@@ -9221,6 +9227,19 @@
       return true;
     }
 
+    clearSelectionValues() {
+      if (!this.canMutateOverlay(true)) return;
+      this.exitEditMode();
+      const sel = this.selection;
+      if (!sel) return;
+      const rows = Math.max(1, (sel.endRow ?? sel.startRow) - sel.startRow + 1);
+      const cols = Math.max(1, (sel.endCol ?? sel.startCol) - sel.startCol + 1);
+      // 空文字の行列を「貼り付け」ることで、権限フィルタ・履歴・
+      // フラッシュ表示などpasteと同じ経路でクリアを適用する
+      const matrix = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ''));
+      this.applyPastedMatrixAt(matrix, sel.startRow, sel.startCol);
+    }
+
     async copySelectionToClipboard() {
       this.exitEditMode();
       let sel = this.selection;
@@ -9931,6 +9950,53 @@
         this.armedCell = { rowIndex, colIndex };
         this.enterEditMode(rowIndex, colIndex, targetInput, true);
         return;
+      }
+
+      // Delete/Backspace: 選択範囲のセルを一括クリア（Excel互換）
+      if (
+        targetInput && targetInput.readOnly
+        && (event.key === 'Delete' || event.key === 'Backspace')
+        && !event.ctrlKey && !event.metaKey && !event.altKey
+        && !this.isComposing
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        this.clearSelectionValues();
+        return;
+      }
+
+      // type-to-replace: 選択セルで文字を打ち始めたら内容を置き換えて編集開始（Excel互換）
+      if (
+        targetInput && targetInput.readOnly
+        && this.isOverlayEditable() && isEditableField
+        && !isChoiceField && !isMultiChoiceField && !isSubtableField
+        && !event.ctrlKey && !event.metaKey && !event.altKey
+        && !this.isComposing
+        && typeof event.key === 'string' && event.key.length === 1 && !isSpaceKey
+      ) {
+        const cellField = field;
+        const typeSupported = cellField
+          && !this.isRichTextField(cellField)
+          && !this.isFileField(cellField)
+          && !this.isCalcField(cellField)
+          && !this.isMultiLineField(cellField);
+        if (typeSupported) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          const rowIndex = Number(targetInput.dataset.rowIndex || '0');
+          const colIndex = Number(targetInput.dataset.colIndex || '0');
+          this.enterEditMode(rowIndex, colIndex, targetInput, true);
+          if (this.isEditingCell(rowIndex, colIndex) && !targetInput.readOnly) {
+            targetInput.value = event.key;
+            try {
+              targetInput.setSelectionRange(targetInput.value.length, targetInput.value.length);
+            } catch (_e) { /* type=dateなど非対応入力 */ }
+            targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          return;
+        }
       }
 
       if (targetInput && targetInput.readOnly && isSubtableField) {
@@ -11753,6 +11819,8 @@
           ['Enter / Shift + Enter', cpText('csConfirmMove')],
           ['Tab / Shift + Tab', cpText('csTabMove')],
           ['F2 / Space', cpText('csEditStart')],
+          [cpText('csTypeKeys'), cpText('csTypeReplace')],
+          ['Delete / Backspace', cpText('csDeleteClear')],
           ['Ctrl / ⌘ + C / V', cpText('csCopyPaste')],
           ['Ctrl / ⌘ + Z / Y', cpText('csUndoRedo')],
           ['Ctrl / ⌘ + S', cpText('csSave')],

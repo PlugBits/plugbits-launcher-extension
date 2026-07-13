@@ -1876,3 +1876,172 @@ body.launcher {
   margin: 0;
   align-self: flex-start;
 }
+
+/* ── 行内ホバー操作 ── */
+.entry-actions {
+  position: absolute;
+  top: 50%;
+  right: 52px;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--launcher-surface);
+  border: 1px solid var(--launcher-line);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entry-actions {
+    transition: none;
+  }
+}
+
+.entry:hover .entry-actions,
+.entry:focus-within .entry-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.entry-action-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--launcher-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  line-height: 0;
+}
+
+.entry-action-btn:hover {
+  background: var(--launcher-accent-muted);
+  color: var(--launcher-accent);
+}
+
+.entry-action-btn--active {
+  color: var(--launcher-accent);
+}
+
+.entry-action-btn--danger:hover {
+  background: rgba(220, 38, 38, 0.10);
+  color: var(--launcher-danger);
+}
+
+.entry-action-btn:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 1px;
+}
+
+/* ── パネル内ダイアログ ── */
+.panel-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16px;
+  background: var(--pb-backdrop);
+}
+
+.panel-dialog__card {
+  width: min(320px, 100%);
+  margin-top: 96px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--launcher-line);
+  background: var(--launcher-surface);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.24);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-dialog__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.panel-dialog__message {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--launcher-muted);
+}
+
+.panel-dialog__input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--launcher-line-strong);
+  border-radius: 8px;
+  background: var(--launcher-surface);
+  color: var(--launcher-text);
+}
+
+.panel-dialog__input:focus {
+  outline: none;
+  border-color: var(--launcher-accent);
+  box-shadow: 0 0 0 3px var(--launcher-accent-muted);
+}
+
+.panel-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.panel-dialog__btn {
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--launcher-line);
+  background: var(--launcher-surface);
+  color: var(--launcher-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.panel-dialog__btn:hover {
+  background: var(--launcher-surface-2);
+}
+
+.panel-dialog__btn--primary {
+  border-color: transparent;
+  background: var(--launcher-accent);
+  color: var(--pb-on-accent);
+}
+
+.panel-dialog__btn--primary:hover {
+  background: var(--launcher-accent-2);
+}
+
+.panel-dialog__btn--danger {
+  background: var(--launcher-danger);
+  color: #fff;
+}
+
+.panel-dialog__btn--danger:hover {
+  background: var(--launcher-danger);
+  opacity: 0.88;
+}
+
+.panel-dialog__btn:focus-visible {
+  outline: 2px solid var(--launcher-accent);
+  outline-offset: 2px;
+}

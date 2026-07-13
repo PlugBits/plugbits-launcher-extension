@@ -20,6 +20,7 @@ function disableLegacyWatchlistBadgeRefresh() {
 // MV3 起動時セットアップ
 chrome.runtime.onInstalled.addListener(() => {
   disableLegacyWatchlistBadgeRefresh();
+  ensureThresholdAlarm();
  // Edge/Chrome: サイドパネルを有効化 & アイコンクリックで開く挙動を設定
   try {
     if (chrome.sidePanel) {
@@ -119,6 +120,8 @@ async function loadWatchlistLimit() {
 const MENU_MESSAGES = {
   ja: {
     menu_pin_record: 'このレコードをピン留め',
+    notify_threshold_title: 'ウォッチリスト通知',
+    notify_threshold_message: '{label} が {count} 件になりました（しきい値 {threshold}）',
     menu_favorite_parent: 'ウォッチリストに追加',
     menu_favorite_app: 'アプリトップ',
     menu_favorite_view: 'ビューを追加',
@@ -134,6 +137,8 @@ const MENU_MESSAGES = {
   },
   en: {
     menu_pin_record: 'Pin this record',
+    notify_threshold_title: 'Watchlist alert',
+    notify_threshold_message: '{label} reached {count} records (threshold {threshold})',
     menu_favorite_parent: 'Add to watchlist',
     menu_favorite_app: 'App top',
     menu_favorite_view: 'Add view',
@@ -1780,6 +1785,141 @@ async function ensureConnectorTab(host) {
   throw new Error(SIGN_IN_REQUIRED_MESSAGE);
 }
 
+// ── WatchList 閾値通知 ────────────────────────────────────────────────────────
+// notifyThreshold が設定された項目の件数を定期チェックし、しきい値以上に
+// なった瞬間にデスクトップ通知する。件数の取得には対象ホストのkintoneタブが
+// 開いている必要がある（無ければ静かにスキップして次回に持ち越す）。
+const THRESHOLD_ALARM_NAME = 'pb-watchlist-threshold-check';
+const THRESHOLD_ALARM_PERIOD_MIN = 10;
+const THRESHOLD_STATE_KEY = 'pbThresholdNotifyState';
+
+function ensureThresholdAlarm() {
+  try {
+    chrome.alarms?.create?.(THRESHOLD_ALARM_NAME, { periodInMinutes: THRESHOLD_ALARM_PERIOD_MIN });
+  } catch (_e) { /* ignore */ }
+}
+
+async function loadThresholdItems() {
+  try {
+    const stored = await chrome.storage.sync.get('kintoneFavorites');
+    const list = Array.isArray(stored?.kintoneFavorites) ? stored.kintoneFavorites : [];
+    return list.filter((item) => Number(item?.notifyThreshold) > 0 && item?.host && item?.appId);
+  } catch (_e) {
+    return [];
+  }
+}
+
+async function checkWatchlistThresholds() {
+  const items = await loadThresholdItems();
+  if (!items.length) return;
+  let notifyState = {};
+  try {
+    const stored = await chrome.storage.local.get(THRESHOLD_STATE_KEY);
+    if (stored?.[THRESHOLD_STATE_KEY] && typeof stored[THRESHOLD_STATE_KEY] === 'object') {
+      notifyState = stored[THRESHOLD_STATE_KEY];
+    }
+  } catch (_e) { /* ignore */ }
+
+  const lang = await resolveUiLanguage();
+  const byHost = new Map();
+  items.forEach((item) => {
+    const host = normalizeHostOrigin(item.host);
+    if (!host) return;
+    if (!byHost.has(host)) byHost.set(host, []);
+    byHost.get(host).push(item);
+  });
+
+  let stateChanged = false;
+  for (const [host, hostItems] of byHost) {
+    let res;
+    try {
+      res = await runForwardOnHost(host, {
+        type: 'COUNT_BULK',
+        payload: {
+          items: hostItems.map((item) => ({
+            id: item.id,
+            appId: String(item.appId),
+            viewIdOrName: item.viewIdOrName || '',
+            query: item.query || ''
+          })),
+          __pbTrigger: 'threshold_check',
+          __pbSource: 'service_worker'
+        }
+      });
+    } catch (_e) {
+      continue; // 対象ホストのタブが無い等
+    }
+    if (!res?.ok) continue;
+    const counts = res.counts || {};
+    for (const item of hostItems) {
+      if (!Object.prototype.hasOwnProperty.call(counts, item.id)) continue;
+      const count = Number(counts[item.id]);
+      if (!Number.isFinite(count)) continue;
+      const threshold = Math.floor(Number(item.notifyThreshold));
+      const wasOver = Boolean(notifyState[item.id]?.over);
+      const isOver = count >= threshold;
+      if (isOver && !wasOver) {
+        try {
+          chrome.notifications?.create?.(`pb-threshold-${item.id}`, {
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+            title: tMenu(lang, 'notify_threshold_title'),
+            message: tMenu(lang, 'notify_threshold_message')
+              .replace('{label}', item.label || `App ${item.appId}`)
+              .replace('{count}', String(count))
+              .replace('{threshold}', String(threshold))
+          });
+        } catch (_e) { /* ignore */ }
+      }
+      if (isOver !== wasOver) {
+        notifyState[item.id] = { over: isOver, count, at: Date.now() };
+        stateChanged = true;
+      }
+    }
+  }
+
+  // しきい値設定が外れた/削除された項目の状態を掃除
+  const validIds = new Set(items.map((item) => item.id));
+  Object.keys(notifyState).forEach((id) => {
+    if (!validIds.has(id)) {
+      delete notifyState[id];
+      stateChanged = true;
+    }
+  });
+  if (stateChanged) {
+    try {
+      await chrome.storage.local.set({ [THRESHOLD_STATE_KEY]: notifyState });
+    } catch (_e) { /* ignore */ }
+  }
+}
+
+chrome.alarms?.onAlarm?.addListener((alarm) => {
+  if (alarm?.name === THRESHOLD_ALARM_NAME) {
+    checkWatchlistThresholds().catch(() => {});
+  }
+});
+
+chrome.notifications?.onClicked?.addListener((notificationId) => {
+  const id = String(notificationId || '');
+  if (!id.startsWith('pb-threshold-')) return;
+  const itemId = id.slice('pb-threshold-'.length);
+  (async () => {
+    try {
+      const stored = await chrome.storage.sync.get('kintoneFavorites');
+      const list = Array.isArray(stored?.kintoneFavorites) ? stored.kintoneFavorites : [];
+      const item = list.find((entry) => entry.id === itemId);
+      if (item?.url) await chrome.tabs.create({ url: item.url });
+      chrome.notifications?.clear?.(id);
+    } catch (_e) { /* ignore */ }
+  })();
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, 'kintoneFavorites')) {
+    ensureThresholdAlarm();
+  }
+});
+
 async function runForwardOnHost(host, forward) {
   const safeHost = normalizeHostOrigin(host);
   if (!safeHost) throw new Error('host required');
@@ -2138,6 +2278,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // ブラウザ起動時も念のため再設定（MV3はSWが落ちるため）
 chrome.runtime.onStartup?.addListener(() => {
+  ensureThresholdAlarm();
   try {
     if (chrome.sidePanel) {
       chrome.sidePanel.setOptions?.({ path: 'sidepanel.html', enabled: true });

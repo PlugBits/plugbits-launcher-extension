@@ -286,6 +286,10 @@ const I18N_MESSAGES = {
     pins_detail_record_id: 'Record ID',
     pins_detail_title_field: 'Title field',
     watch_empty: '登録済みのウォッチリストはまだありません。',
+    watchlist_threshold_hint: '各項目の「通知」に件数を入れると、しきい値以上でデスクトップ通知します（対象kintoneのタブが開いているときに約10分間隔で確認）。',
+    watch_threshold_label: '通知',
+    watch_threshold_title: '件数がこのしきい値以上になるとデスクトップ通知します（対象kintoneのタブが開いているとき、約10分間隔で確認）。空欄で無効。',
+    watch_threshold_placeholder: 'オフ',
     watch_badge_target_title: 'このウォッチリストをバッジ対象にする',
     watch_pin_set: '固定する',
     watch_pin_remove: '固定を解除',
@@ -587,6 +591,10 @@ const I18N_MESSAGES = {
     pins_detail_record_id: 'Record ID',
     pins_detail_title_field: 'Title field',
     watch_empty: 'No watchlist items yet.',
+    watchlist_threshold_hint: 'Set a count in each item\'s "Alert" field to get a desktop notification when the count reaches it (checked about every 10 minutes while a tab for that kintone is open).',
+    watch_threshold_label: 'Alert',
+    watch_threshold_title: 'Shows a desktop notification when the count reaches this threshold (checked about every 10 minutes while a tab for that kintone is open). Leave empty to disable.',
+    watch_threshold_placeholder: 'Off',
     watch_badge_target_title: 'Set this watchlist as badge target',
     watch_pin_set: 'Pin',
     watch_pin_remove: 'Unpin',
@@ -2144,6 +2152,35 @@ async function render(items) {
       render(all);
     });
 
+    // 通知しきい値
+    const thWrap = document.createElement('label');
+    thWrap.className = 'watch-threshold';
+    thWrap.title = t('watch_threshold_title');
+    const thText = document.createElement('span');
+    thText.className = 'watch-threshold-label';
+    thText.textContent = t('watch_threshold_label');
+    const thInput = document.createElement('input');
+    thInput.type = 'number';
+    thInput.min = '1';
+    thInput.className = 'watch-threshold-input';
+    thInput.placeholder = t('watch_threshold_placeholder');
+    thInput.value = Number(it.notifyThreshold) > 0 ? String(Math.floor(Number(it.notifyThreshold))) : '';
+    thInput.addEventListener('change', async () => {
+      const all = await loadFavorites();
+      const me = all.find((x) => x.id === it.id);
+      if (!me) return;
+      const value = Number(thInput.value);
+      if (Number.isFinite(value) && value > 0) {
+        me.notifyThreshold = Math.floor(value);
+      } else {
+        delete me.notifyThreshold;
+        thInput.value = '';
+      }
+      await saveFavorites(all);
+    });
+    thWrap.appendChild(thText);
+    thWrap.appendChild(thInput);
+
     // 開く・削除
     const openA = document.createElement('a');
     openA.textContent = '↗';
@@ -2174,6 +2211,7 @@ async function render(items) {
       render(next);
     });
 
+    right.appendChild(thWrap);
     right.appendChild(badgeWrap);
     right.appendChild(pinBtn);
     right.appendChild(openA);
