@@ -101,6 +101,17 @@
           ['Ctrl / ⌘ + S', cpText('csSave')],
           ['Esc', cpText('csEscDesc')]
         ]
+      },
+      {
+        title: cpText('csSecDate'),
+        items: [
+          ['t / today', cpText('csDateToday')],
+          ['+N / -N', cpText('csDateRelative')],
+          ['YYYYMMDD', cpText('csDateCompact')],
+          ['end / first', cpText('csDateMonth')],
+          ['mon 〜 sun', cpText('csDateWeekday')],
+          ['now / +Nd / +Nh / +Nm', cpText('csDateTime')]
+        ]
       }
     ];
   }

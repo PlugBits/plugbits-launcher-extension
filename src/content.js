@@ -1611,6 +1611,13 @@
       csUndoRedo: "元に戻す / やり直し",
       csSave: "保存",
       csEscDesc: "パネル / Overlay を閉じる",
+      csSecDate: "日付セルのコマンド入力（Overlay / クイック新規）",
+      csDateToday: "今日（yesterday / tomorrow も可）",
+      csDateRelative: "N日後 / N日前（例: +3, -7）",
+      csDateCompact: "8桁で日付入力（例: 20260713）",
+      csDateMonth: "月末 / 月初（end+1 で来月末、first-1 で先月初）",
+      csDateWeekday: "今週の曜日（mon+1 で来週月曜、fri-1 で先週金曜）",
+      csDateTime: "日時セル: 現在時刻 / N日・N時間・N分後（-も可）",
       btnNewRecord: "＋ 新規",
       newRecordTitle: "新規レコード作成",
       newRecordSave: "保存",
@@ -1860,6 +1867,13 @@
       csUndoRedo: "Undo / redo",
       csSave: "Save",
       csEscDesc: "Close panel / overlay",
+      csSecDate: "Date cell commands (Overlay / Quick New)",
+      csDateToday: "Today (also yesterday / tomorrow)",
+      csDateRelative: "N days ahead / ago (e.g. +3, -7)",
+      csDateCompact: "8-digit date (e.g. 20260713)",
+      csDateMonth: "End / first of month (end+1 = next month, first-1 = last month)",
+      csDateWeekday: "Weekday this week (mon+1 = next Monday, fri-1 = last Friday)",
+      csDateTime: "Datetime cells: now / N days, hours, minutes from now (- works too)",
       btnNewRecord: "+ New",
       newRecordTitle: "Create New Record",
       newRecordSave: "Save",
@@ -11825,6 +11839,17 @@
           ['Ctrl / ⌘ + Z / Y', cpText('csUndoRedo')],
           ['Ctrl / ⌘ + S', cpText('csSave')],
           ['Esc', cpText('csEscDesc')]
+        ]
+      },
+      {
+        title: cpText('csSecDate'),
+        items: [
+          ['t / today', cpText('csDateToday')],
+          ['+N / -N', cpText('csDateRelative')],
+          ['YYYYMMDD', cpText('csDateCompact')],
+          ['end / first', cpText('csDateMonth')],
+          ['mon 〜 sun', cpText('csDateWeekday')],
+          ['now / +Nd / +Nh / +Nm', cpText('csDateTime')]
         ]
       }
     ];
