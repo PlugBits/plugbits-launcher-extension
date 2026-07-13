@@ -41,8 +41,8 @@ export function initPins(options = {}) {
       btn.id = 'refreshPins';
       btn.className = 'ghost-btn';
       btn.type = 'button';
-      btn.innerHTML = `${iconSvg('refresh-cw', '↻')} Refresh`;
-      btn.title = 'Refresh pinned records';
+      btn.innerHTML = `${iconSvg('refresh-cw', '↻')} ${translate('pins_refresh_label', 'Refresh')}`;
+      btn.title = translate('pins_refresh_title', 'Refresh pinned records');
       sectionActions.appendChild(btn);
       refreshBtn = btn;
     }
@@ -66,7 +66,8 @@ export function initPins(options = {}) {
 
   // Lucideアイコン(1色ストロークSVG)を返す。取得できない環境では
   // フォールバック文字を返し、字形頼みの見た目のバラつきを避ける。
-  const iconSvg = (name, fallback, size = 14) => {
+  // 関数宣言（ホイスティング）にして、モジュール冒頭のボタン生成からも呼べるようにする
+  function iconSvg(name, fallback, size = 14) {
     try {
       const icons = globalThis.lucide?.icons;
       const pascal = String(name || '')
@@ -81,7 +82,7 @@ export function initPins(options = {}) {
       }
     } catch (_) { /* ignore */ }
     return fallback || '';
-  };
+  }
 
   function normalizeTimestamp(value) {
     const num = Number(value);
@@ -162,8 +163,9 @@ export function initPins(options = {}) {
   }
 
   function defaultLabel(entry) {
-    const app = entry.appId ? `App ${entry.appId}` : 'App (unset)';
-    const record = entry.recordId ? `Record ${entry.recordId}` : 'Record (unset)';
+    const unset = translate('pins_unset', '(unset)');
+    const app = entry.appId ? `App ${entry.appId}` : `App ${unset}`;
+    const record = entry.recordId ? `Record ${entry.recordId}` : `Record ${unset}`;
     return `${app} / ${record}`;
   }
 
@@ -193,12 +195,12 @@ export function initPins(options = {}) {
     titleWrap.className = 'pin-title-wrap record-pin-title';
     const dragHandle = doc.createElement('span');
     dragHandle.className = 'pin-drag-handle';
-    dragHandle.title = 'Drag to reorder';
+    dragHandle.title = translate('pins_drag_reorder', 'Drag to reorder');
     dragHandle.innerHTML = iconSvg('grip-vertical', '::');
     dragHandle.draggable = true;
     dragHandle.dataset.cardId = entry.id;
     dragHandle.setAttribute('role', 'button');
-    dragHandle.setAttribute('aria-label', 'Drag to reorder');
+    dragHandle.setAttribute('aria-label', translate('pins_drag_reorder', 'Drag to reorder'));
     dragHandle.addEventListener('dragstart', handleDragStart);
     dragHandle.addEventListener('dragend', handleDragEnd);
     dragHandle.addEventListener('click', (ev) => ev.preventDefault());
@@ -226,7 +228,7 @@ export function initPins(options = {}) {
     const actions = doc.createElement('div');
     actions.className = 'pin-actions record-pin-actions';
     const openBtn = doc.createElement('a');
-    openBtn.textContent = 'Open';
+    openBtn.textContent = translate('pins_open', 'Open');
     openBtn.className = 'btn record-pin-open';
     openBtn.href = buildKintoneUrl(entry.host, entry.appId, { recordId: entry.recordId });
     openBtn.target = '_blank';
@@ -235,8 +237,8 @@ export function initPins(options = {}) {
     const removeBtn = doc.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'pin-remove btn record-pin-remove x-only';
-    removeBtn.title = 'Remove';
-    removeBtn.setAttribute('aria-label', 'Remove');
+    removeBtn.title = translate('pins_remove', 'Remove');
+    removeBtn.setAttribute('aria-label', translate('pins_remove', 'Remove'));
     removeBtn.innerHTML = iconSvg('x', '✖');
     removeBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -256,7 +258,7 @@ export function initPins(options = {}) {
     ];
     const updatedAtText = formatUpdatedAt(entry.modifiedAt || entry.pinnedAt);
     if (updatedAtText) {
-      metaItems.push(`Updated: ${updatedAtText}`);
+      metaItems.push(`${translate('pins_meta_updated', 'Updated')}: ${updatedAtText}`);
     }
     metaItems.forEach((text) => {
       const span = doc.createElement('span');
@@ -270,7 +272,7 @@ export function initPins(options = {}) {
 
     const note = doc.createElement('textarea');
     note.className = 'pin-note-input';
-    note.placeholder = 'Notes';
+    note.placeholder = translate('pins_note_placeholder', 'Notes');
     note.value = entry.note || '';
     note.addEventListener('input', () => {
       entry.note = note.value;
@@ -367,16 +369,16 @@ export function initPins(options = {}) {
     try {
       const tab = await getActiveTab();
       if (!tab || !isKintoneUrl(tab.url || '')) {
-        setNotice('Open a kintone record tab first.', 2000);
+        setNotice(translate('pins_notice_open_kintone_first', 'Open a kintone record tab first.'), 2000);
         return false;
       }
       const parsed = parseKintoneUrl(tab.url || '');
       if (!parsed.host || !parsed.appId || !parsed.recordId) {
-        setNotice('Open a record detail page and try again.', 2000);
+        setNotice(translate('pins_notice_open_record_detail', 'Open a record detail page and try again.'), 2000);
         return false;
       }
       if (state.entries.some((entry) => entry.host === parsed.host && entry.appId === parsed.appId && entry.recordId === parsed.recordId)) {
-        setNotice('This record is already pinned.', 2000);
+        setNotice(translate('pins_notice_already_pinned', 'This record is already pinned.'), 2000);
         return false;
       }
       const labelFromTab = (tab.title || '').replace(/\s+-\s+kintone.*/i, '').trim();
@@ -394,7 +396,7 @@ export function initPins(options = {}) {
       state.entries.push(entry);
       await persistPins();
       renderList();
-      setNotice('Pinned.', 2000);
+      setNotice(translate('pins_notice_pinned', 'Pinned.'), 2000);
       return true;
     } catch (error) {
       setNotice(String(error?.message || error), 2000);
@@ -408,7 +410,7 @@ export function initPins(options = {}) {
     state.entries.splice(idx, 1);
     await persistPins();
     renderList();
-    setNotice('Pin removed.', 2000);
+    setNotice(translate('pins_notice_removed', 'Pin removed.'), 2000);
   }
 
   function handleDragStart(event) {

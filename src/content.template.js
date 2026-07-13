@@ -1501,6 +1501,8 @@
       dockPalette: "コマンドパレット (Ctrl+/)",
       dockHelp: "キーボードショートカット一覧 (?)",
       dockQuickNewUnsupported: "クイック新規レコードは一覧画面で利用できます。",
+      dockHide: "クイックランチャーを非表示（設定の「全般」から再表示できます）",
+      dockHiddenNotice: "クイックランチャーを非表示にしました。設定画面の「全般」から再表示できます。",
       btnNewRecord: "＋ 新規",
       newRecordTitle: "新規レコード作成",
       newRecordSave: "保存",
@@ -1644,6 +1646,8 @@
       dockPalette: "Command palette (Ctrl+/)",
       dockHelp: "Keyboard shortcuts (?)",
       dockQuickNewUnsupported: "Quick new record is available on list pages.",
+      dockHide: "Hide the quick launcher (re-enable it from the General settings)",
+      dockHiddenNotice: "Quick launcher hidden. You can re-enable it from the General section of the options page.",
       btnNewRecord: "+ New",
       newRecordTitle: "Create New Record",
       newRecordSave: "Save",
@@ -1869,7 +1873,8 @@
     overlay: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>',
     quickNew: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
     palette: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6M12 19h8"/></svg>',
-    help: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>'
+    help: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
+    close: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>'
   };
 
   async function isPageDockDisabled() {
@@ -1918,10 +1923,18 @@
       #pb-quick-dock .pb-dock__btn:hover{background:#eff4ff;color:#2563eb}
       #pb-quick-dock .pb-dock__btn:focus-visible{outline:2px solid #2563eb;outline-offset:1px}
       #pb-quick-dock .pb-dock__brand{width:22px;height:22px;border-radius:999px;margin:0 2px 0 4px;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+      #pb-quick-dock .pb-dock__hide{width:20px;height:20px;color:#94a3b8;opacity:0;transition:opacity .12s ease;margin-left:1px}
+      #pb-quick-dock:hover .pb-dock__hide,#pb-quick-dock:focus-within .pb-dock__hide{opacity:1}
+      #pb-quick-dock .pb-dock__hide:hover{background:rgba(220,38,38,.10);color:#dc2626}
+      @media (prefers-reduced-motion: reduce){
+        #pb-quick-dock .pb-dock__hide{transition:none}
+      }
       @media (prefers-color-scheme: dark){
         #pb-quick-dock{background:rgba(22,30,44,.94);border-color:rgba(148,163,184,.28);box-shadow:0 8px 24px rgba(0,0,0,.5)}
         #pb-quick-dock .pb-dock__btn{color:#9fb0c7}
         #pb-quick-dock .pb-dock__btn:hover{background:rgba(124,177,255,.16);color:#7cb1ff}
+        #pb-quick-dock .pb-dock__hide{color:#7b8aa0}
+        #pb-quick-dock .pb-dock__hide:hover{background:rgba(248,113,113,.14);color:#f87171}
       }
     `;
 
@@ -1953,7 +1966,18 @@
       cpToggleCheatsheet(true);
     });
 
-    dock.append(style, brand, overlayBtn, quickNewBtn, paletteBtn, helpBtn);
+    // ページ要素と位置が干渉するケース向けに、その場で非表示にできる
+    // （設定に永続化されるので全タブから消える。再表示は設定の「全般」から）
+    const hideBtn = createPageDockButton(PAGE_DOCK_ICONS.close, resolveText(language, 'dockHide'), () => {
+      removePageDock();
+      showOverlayLaunchNotice(resolveText(language, 'dockHiddenNotice'));
+      try {
+        void chrome.storage.sync.set({ [PAGE_DOCK_DISABLED_KEY]: true });
+      } catch (_) { /* ignore */ }
+    });
+    hideBtn.classList.add('pb-dock__hide');
+
+    dock.append(style, brand, overlayBtn, quickNewBtn, paletteBtn, helpBtn, hideBtn);
     (document.body || document.documentElement).appendChild(dock);
     pageDockEl = dock;
   }

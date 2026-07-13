@@ -118,6 +118,22 @@ const I18N_MESSAGES = {
     pins_empty_message: 'ピン留めされたレコードはまだありません',
     pins_empty_pin_current: '現在のレコードをピン',
     pins_empty_hint: 'kintoneのレコード詳細を開いた状態で押すと、メモ付きで保存できます',
+    pins_refresh_label: '更新',
+    pins_refresh_title: 'ピン留めレコードを更新',
+    pins_drag_reorder: 'ドラッグで並び替え',
+    pins_open: '開く',
+    pins_remove: '削除',
+    pins_note_placeholder: 'メモ',
+    pins_meta_updated: '更新',
+    pins_unset: '未設定',
+    pins_notice_open_kintone_first: 'kintoneのレコードタブを開いてください',
+    pins_notice_open_record_detail: 'レコード詳細画面を開いてから再試行してください',
+    pins_notice_already_pinned: 'このレコードは既にピン留めされています',
+    pins_notice_pinned: 'ピン留めしました',
+    pins_notice_removed: 'ピンを削除しました',
+    panel_watchlist_status_refreshing: '更新中...',
+    panel_watchlist_status_stale: '情報が古い可能性があります',
+    panel_watchlist_status_queued: '更新待ち',
     panel_empty_shortcuts: 'ショートカットを設定',
     panel_entry_no_label: '(no label)',
     panel_tab_main: 'メイン',
@@ -232,6 +248,22 @@ const I18N_MESSAGES = {
     pins_empty_message: 'No pinned records yet',
     pins_empty_pin_current: 'Pin current record',
     pins_empty_hint: 'Open a kintone record first, then press this to save it with a note',
+    pins_refresh_label: 'Refresh',
+    pins_refresh_title: 'Refresh pinned records',
+    pins_drag_reorder: 'Drag to reorder',
+    pins_open: 'Open',
+    pins_remove: 'Remove',
+    pins_note_placeholder: 'Notes',
+    pins_meta_updated: 'Updated',
+    pins_unset: '(unset)',
+    pins_notice_open_kintone_first: 'Open a kintone record tab first.',
+    pins_notice_open_record_detail: 'Open a record detail page and try again.',
+    pins_notice_already_pinned: 'This record is already pinned.',
+    pins_notice_pinned: 'Pinned.',
+    pins_notice_removed: 'Pin removed.',
+    panel_watchlist_status_refreshing: 'refreshing...',
+    panel_watchlist_status_stale: 'may be stale',
+    panel_watchlist_status_queued: 'sync queued',
     panel_empty_shortcuts: 'Configure shortcuts',
     panel_entry_no_label: '(no label)',
     panel_tab_main: 'Main',
@@ -1534,15 +1566,15 @@ async function getWatchlistRefreshContext() {
 }
 
 function getWatchlistRefreshingText() {
-  return 'refreshing...';
+  return t('panel_watchlist_status_refreshing');
 }
 
 function getWatchlistStaleText() {
-  return 'may be stale';
+  return t('panel_watchlist_status_stale');
 }
 
 function getWatchlistQueuedText() {
-  return 'sync queued';
+  return t('panel_watchlist_status_queued');
 }
 
 function formatWatchlistRelativeAge(timestamp) {

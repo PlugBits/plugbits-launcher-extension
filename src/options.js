@@ -2958,6 +2958,10 @@ if (chrome?.storage?.onChanged) {
         .then(() => renderOverlayLayoutPresets())
         .catch(() => {});
     }
+    if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, 'pbPageDockDisabled') && pageDockToggleEl) {
+      // ページ上の✕で非表示にした場合もチェック状態へ即時反映する
+      pageDockToggleEl.checked = !changes.pbPageDockDisabled.newValue;
+    }
     if (area === 'sync' && Object.prototype.hasOwnProperty.call(changes, EXCEL_OVERLAY_MODE_KEY)) {
       const requestedMode = normalizeExcelOverlayMode(changes[EXCEL_OVERLAY_MODE_KEY].newValue);
       isProActive().then((proOk) => {
