@@ -83,11 +83,6 @@ const SHORTCUT_PARENT_ID = 'kfav-shortcut-parent';
 const SHORTCUT_MENU_APP = 'kfav-shortcut-app';
 const SHORTCUT_MENU_VIEW = 'kfav-shortcut-view';
 const SHORTCUT_MENU_CREATE = 'kfav-shortcut-create';
-const DEV_PARENT_MENU_ID = 'kf-dev-root';
-const DEV_COPY_QUERY_MENU_ID = 'kf-dev-copy-query';
-const DEV_COPY_FIELDS_LIST_MENU_ID = 'kf-dev-copy-fields-list';
-const DEV_COPY_APP_ID_MENU_ID = 'kf-dev-copy-app-id';
-const DEV_COPY_VIEW_ID_MENU_ID = 'kf-dev-copy-view-id';
 const PRO_INSTALL_TYPE_MESSAGE_ID = 'PB_GET_INSTALL_TYPE';
 const UI_LANGUAGE_KEY = 'uiLanguage';
 const UI_LANGUAGE_VALUES = new Set(['auto', 'ja', 'en']);
@@ -128,12 +123,7 @@ const MENU_MESSAGES = {
     menu_shortcut_parent: 'ショートカットに追加',
     menu_shortcut_app: 'アプリトップ',
     menu_shortcut_view: 'ビューを開く',
-    menu_shortcut_create: 'レコード新規',
-    menu_dev_root: '開発者ツール',
-    menu_copy_query: '絞り込みクエリをコピー',
-    menu_copy_fields: 'フィールド一覧をコピー',
-    menu_copy_app_id: 'appId をコピー',
-    menu_copy_view_id: 'viewId をコピー'
+    menu_shortcut_create: 'レコード新規'
   },
   en: {
     menu_pin_record: 'Pin this record',
@@ -145,12 +135,7 @@ const MENU_MESSAGES = {
     menu_shortcut_parent: 'Add to shortcuts',
     menu_shortcut_app: 'App top',
     menu_shortcut_view: 'Open view',
-    menu_shortcut_create: 'New record',
-    menu_dev_root: 'Development Tools',
-    menu_copy_query: 'Copy Filter Query',
-    menu_copy_fields: 'Copy Field List',
-    menu_copy_app_id: 'Copy appId',
-    menu_copy_view_id: 'Copy viewId'
+    menu_shortcut_create: 'New record'
   }
 };
 
@@ -240,15 +225,6 @@ function tMenu(lang, key) {
     ?? key;
 }
 
-async function getActiveTabForDevAction(fallbackTab) {
-  try {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tabs?.[0]?.id) return tabs[0];
-  } catch (_err) {
-    // ignore
-  }
-  return fallbackTab || null;
-}
 
 async function fetchFieldsListFromMainWorld(tabId) {
   const injected = await chrome.scripting.executeScript({
@@ -477,7 +453,6 @@ async function copyDevTextToActiveTab(tabId, text, label) {
   return { ok: false, reason: copied?.reason || fallback?.reason || 'copy_failed' };
 }
 
-const ENABLE_DEV_MENU = false; // 開発者向けメニューを有効化する場合は true に変更
 
 async function setupContextMenus() {
   if (!chrome.contextMenus?.create) return;
@@ -547,204 +522,12 @@ async function setupContextMenus() {
       documentUrlPatterns: patterns
     });
 
-    if (ENABLE_DEV_MENU) {
-      chrome.contextMenus.create({
-        id: DEV_PARENT_MENU_ID,
-        title: tMenu(lang, 'menu_dev_root'),
-        contexts: ['all'],
-        documentUrlPatterns: patterns
-      });
-      chrome.contextMenus.create({
-        id: DEV_COPY_QUERY_MENU_ID,
-        parentId: DEV_PARENT_MENU_ID,
-        title: tMenu(lang, 'menu_copy_query'),
-        contexts: ['all'],
-        documentUrlPatterns: patterns
-      });
-      chrome.contextMenus.create({
-        id: DEV_COPY_FIELDS_LIST_MENU_ID,
-        parentId: DEV_PARENT_MENU_ID,
-        title: tMenu(lang, 'menu_copy_fields'),
-        contexts: ['all'],
-        documentUrlPatterns: patterns
-      });
-      chrome.contextMenus.create({
-        id: DEV_COPY_APP_ID_MENU_ID,
-        parentId: DEV_PARENT_MENU_ID,
-        title: tMenu(lang, 'menu_copy_app_id'),
-        contexts: ['all'],
-        documentUrlPatterns: patterns
-      });
-      chrome.contextMenus.create({
-        id: DEV_COPY_VIEW_ID_MENU_ID,
-        parentId: DEV_PARENT_MENU_ID,
-        title: tMenu(lang, 'menu_copy_view_id'),
-        contexts: ['all'],
-        documentUrlPatterns: patterns
-      });
-    }
   } catch (_err) {
     // ignore
   }
 }
 
 chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === DEV_COPY_QUERY_MENU_ID) {
-    try {
-      const activeTab = await getActiveTabForDevAction(tab);
-      if (!activeTab?.id) {
-        console.debug('[kfav][DEV] no tab for context menu click');
-        return;
-      }
-      const res = await chrome.tabs.sendMessage(activeTab.id, { type: 'DEV_COPY_QUERY' });
-      if (!res?.ok) {
-        console.debug('[kfav][DEV] copy failed', { type: 'DEV_COPY_QUERY', reason: res?.reason || res?.error || 'unknown' });
-      } else {
-        console.debug('[kfav][DEV] copied', { type: 'DEV_COPY_QUERY', value: res?.value || '' });
-      }
-    } catch (error) {
-      console.error('[kfav][DEV] context menu action failed', error);
-    }
-    return;
-  }
-  if (info.menuItemId === DEV_COPY_FIELDS_LIST_MENU_ID) {
-    try {
-      const activeTab = await getActiveTabForDevAction(tab);
-      if (!activeTab?.id) {
-        console.debug('[kfav][DEV] no tab for fields list copy');
-        return;
-      }
-      const tabId = activeTab.id;
-      const tabUrl = activeTab.url || '';
-      console.log('[kfav][DEV] copy fields start', { tabId, url: tabUrl });
-
-      const fetched = await fetchFieldsListFromMainWorld(tabId);
-      console.log('[kfav][DEV] copy fields fetched', {
-        ok: Boolean(fetched?.ok),
-        appId: fetched?.appId || '',
-        url: fetched?.url || tabUrl,
-        rowCount: Number(fetched?.rowCount || 0)
-      });
-      if (!fetched?.ok || !fetched?.text) {
-        console.warn('[kfav][DEV] copy fields failed', {
-          reason: fetched?.reason || 'unknown',
-          tabId,
-          url: fetched?.url || tabUrl
-        });
-        return;
-      }
-      let copied = null;
-      try {
-        copied = await chrome.tabs.sendMessage(tabId, {
-          type: 'DEV_COPY_TEXT',
-          text: fetched.text,
-          label: 'fields-list'
-        });
-      } catch (sendError) {
-        copied = {
-          ok: false,
-          reason: 'receiving_end_does_not_exist',
-          detail: String(sendError?.message || sendError)
-        };
-      }
-      if (!copied?.ok) {
-        const fallback = await copyTextViaInjectedScript(tabId, fetched.text);
-        if (!fallback?.ok) {
-          console.warn('[kfav][DEV] copy fields failed', {
-            reason: copied?.reason || fallback?.reason || 'unknown',
-            tabId,
-            url: fetched?.url || tabUrl
-          });
-          return;
-        }
-      }
-      console.log('[kfav][DEV] copied fields list', {
-        tabId,
-        url: fetched?.url || tabUrl
-      });
-    } catch (error) {
-      console.warn('[kfav][DEV] copy fields failed', {
-        reason: String(error?.message || error),
-        tabId: tab?.id || null,
-        url: tab?.url || ''
-      });
-    }
-    return;
-  }
-  if (info.menuItemId === DEV_COPY_APP_ID_MENU_ID) {
-    try {
-      const activeTab = await getActiveTabForDevAction(tab);
-      if (!activeTab?.id) {
-        console.warn('[kfav][DEV] copy appId failed', { reason: 'no_active_tab' });
-        return;
-      }
-      const result = await fetchAppOrViewIdFromMainWorld(activeTab.id, 'appId');
-      if (!result?.ok || !String(result?.value || '').trim()) {
-        console.warn('[kfav][DEV] copy appId failed', {
-          reason: result?.reason || 'app_id_not_found',
-          tabId: activeTab.id,
-          url: result?.url || activeTab.url || ''
-        });
-        return;
-      }
-      const copied = await copyDevTextToActiveTab(activeTab.id, String(result.value), 'appId');
-      if (!copied?.ok) {
-        console.warn('[kfav][DEV] copy appId failed', {
-          reason: copied?.reason || 'clipboard_failed',
-          tabId: activeTab.id,
-          url: result?.url || activeTab.url || ''
-        });
-        return;
-      }
-      console.log('[kfav][DEV] copied appId');
-    } catch (error) {
-      console.warn('[kfav][DEV] copy appId failed', { reason: String(error?.message || error) });
-    }
-    return;
-  }
-  if (info.menuItemId === DEV_COPY_VIEW_ID_MENU_ID) {
-    try {
-      const activeTab = await getActiveTabForDevAction(tab);
-      if (!activeTab?.id) {
-        console.warn('[kfav][DEV] copy viewId failed', { reason: 'no_active_tab' });
-        return;
-      }
-      const result = await fetchAppOrViewIdFromMainWorld(activeTab.id, 'view');
-      if (!result?.ok) {
-        console.warn('[kfav][DEV] copy viewId failed', {
-          reason: result?.reason || 'not_kintone_page',
-          tabId: activeTab.id,
-          href: result?.url || activeTab.url || ''
-        });
-        return;
-      }
-      const value = String(result?.value || '').trim();
-      if (!value) {
-        console.warn('[kfav][DEV] copy viewId failed', {
-          reason: 'view_id_not_found',
-          tabId: activeTab.id,
-          href: result?.url || activeTab.url || ''
-        });
-        return;
-      }
-      const copied = await copyDevTextToActiveTab(activeTab.id, value, 'viewId');
-      if (!copied?.ok) {
-        console.warn('[kfav][DEV] copy viewId failed', {
-          reason: copied?.reason || 'clipboard_failed',
-          tabId: activeTab.id,
-          href: result?.url || activeTab.url || ''
-        });
-        return;
-      }
-      console.log('[kfav][DEV] copied viewId', { value, source: result?.source || 'unknown' });
-    } catch (error) {
-      console.warn('[kfav][DEV] copy viewId failed', {
-        reason: String(error?.message || error),
-        href: tab?.url || ''
-      });
-    }
-    return;
-  }
   if (info.menuItemId === FAVORITE_MENU_APP || info.menuItemId === FAVORITE_MENU_VIEW) {
     await handleFavoriteContextMenu(info.menuItemId, info, tab);
     return;

@@ -534,24 +534,7 @@ ul {
   gap: 12px;
 }
 
-.watchlist-debug-card .shortcut-toggle {
-  margin-top: 10px;
-}
 
-.watchlist-debug-log {
-  margin: 10px 0 0;
-  padding: 10px;
-  border: 1px solid var(--kt-border);
-  border-radius: 8px;
-  background: var(--pb-surface-2);
-  color: var(--pb-text-2);
-  font-size: 11px;
-  line-height: 1.45;
-  max-height: 240px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 
 .api-usage-breakdown {
   border: 1px solid var(--kt-border);
@@ -619,27 +602,8 @@ ul {
   margin-top: 14px;
 }
 
-.developer-pro-override-row {
-  margin-top: 12px;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 6px;
-}
 
-.developer-pro-override-label {
-  margin: 0;
-  width: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-}
 
-.developer-pro-override-label input[type="checkbox"] {
-  width: auto;
-  margin: 0;
-}
 
 .general-language-label {
   margin: 0;

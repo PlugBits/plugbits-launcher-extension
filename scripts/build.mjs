@@ -41,7 +41,9 @@ const EXCLUDE_FILES = new Set([
   'content.template.js',
   'content-overlay-controller.js',
   'content-command-palette.js',
-  'content-quick-new-record-modal.js'
+  'content-quick-new-record-modal.js',
+  // フルのlucideは lucide-subset.js の生成元としてのみ保持（配布不要）
+  'lucide.umd.js'
 ]);
 
 const EXCLUDE_DIRS = new Set([
