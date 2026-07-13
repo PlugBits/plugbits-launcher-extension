@@ -1,10 +1,14 @@
 {
   "name": "plugbits-launcher",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "generate-content": "node ./scripts/generate-content.mjs",
-    "build": "npm run clean && node ./scripts/build.mjs"
+    "build": "npm run clean && node ./scripts/build.mjs",
+    "test": "node tests/run-all.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
   }
 }
