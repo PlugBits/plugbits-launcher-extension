@@ -13175,6 +13175,17 @@
     'SUBTABLE', 'FILE'
   ]);
 
+  // 数値フィールド向けの入力正規化。全角数字・全角記号を半角化し、
+  // 桁区切りカンマを除去する（"１，０００" → "1000"）。
+  function qnrNormalizeNumberText(raw) {
+    let text = String(raw ?? '').trim();
+    if (!text) return '';
+    text = text.replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+    text = text.replace(/．/g, '.').replace(/[－ー−]/g, '-').replace(/＋/g, '+');
+    text = text.replace(/[,，\s]/g, '');
+    return text;
+  }
+
   class QuickNewRecordModal {
     constructor(postFn) {
       this.postFn = postFn;
@@ -13609,13 +13620,21 @@
         let value;
         if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
           value = Array.isArray(raw) ? raw : [];
+        } else if (type === 'USER_SELECT' || type === 'ORGANIZATION_SELECT' || type === 'GROUP_SELECT') {
+          value = String(raw ?? '').split(/[,、\s]+/)
+            .map((code) => code.trim())
+            .filter(Boolean)
+            .map((code) => ({ code }));
         } else {
           value = String(raw ?? '');
+          if (type === 'NUMBER') value = qnrNormalizeNumberText(value);
         }
-        if (field.required) {
-          const isEmpty = Array.isArray(value) ? value.length === 0 : value === '';
-          if (isEmpty) hasRequiredMissing = true;
-        }
+        const isEmpty = Array.isArray(value) ? value.length === 0 : value === '';
+        if (field.required && isEmpty) hasRequiredMissing = true;
+        // 未入力フィールドはリクエストに含めない。
+        // value:'' で明示送信するとkintoneアプリ側の初期値が適用されず
+        // 空で確定し、そのフィールドを参照する計算フィールドがエラーになる。
+        if (isEmpty) return;
         record[field.code] = { value };
       });
 
