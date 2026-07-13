@@ -15,7 +15,8 @@ const srcDir = path.join(testsDir, '..', 'src');
 const SUITES = [
   ['sidepanel', './sidepanel.test.mjs'],
   ['palette', './palette.test.mjs'],
-  ['trial', './trial.test.mjs']
+  ['trial', './trial.test.mjs'],
+  ['options-api-usage', './options-api-usage.test.mjs']
 ];
 
 const filter = process.argv[2];

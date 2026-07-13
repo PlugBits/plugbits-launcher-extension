@@ -344,7 +344,7 @@ const I18N_MESSAGES = {
     metadata_cache_clear_btn: 'キャッシュを更新',
     metadata_cache_clear_desc: 'アプリ・ビュー・フィールド情報のキャッシュを更新します。',
     metadata_cache_clear_confirm: 'キャッシュを削除します。よろしいですか？',
-    metadata_cache_clear_done: 'キャッシュを削除しました。',
+    metadata_cache_clear_done: 'キャッシュを削除しました（{count}件）。次回アクセス時に最新の情報を取得します。※API使用状況の統計は対象外です',
     metadata_cache_clear_failed: 'キャッシュの削除に失敗しました。',
     app_catalog_cache_refresh_btn: 'App一覧キャッシュを再取得',
     app_catalog_cache_refresh_desc: 'コマンドパレットのApp検索・ショートカット候補が使うアプリ名一覧を、全ホストぶん取得し直します。',
@@ -663,7 +663,7 @@ const I18N_MESSAGES = {
     metadata_cache_clear_btn: 'Clear metadata cache',
     metadata_cache_clear_desc: 'Clears 24h cache for app / views / fields.',
     metadata_cache_clear_confirm: 'Clear metadata cache?',
-    metadata_cache_clear_done: 'Metadata cache was cleared.',
+    metadata_cache_clear_done: 'Cleared {count} cached entries. Fresh data will be fetched on next access. (API usage stats are not affected.)',
     metadata_cache_clear_failed: 'Failed to clear metadata cache.',
     app_catalog_cache_refresh_btn: 'Refetch app list cache',
     app_catalog_cache_refresh_desc: 'Refetches the app name list used by the command palette App search and shortcuts, across all hosts.',
@@ -3459,7 +3459,7 @@ metadataCacheClearBtn?.addEventListener('click', async () => {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'PB_CLEAR_METADATA_CACHE_ALL' });
     if (response?.ok) {
-      setMetadataCacheStatus(t('metadata_cache_clear_done'));
+      setMetadataCacheStatus(t('metadata_cache_clear_done', { count: Number(response.removed || 0) }));
       return;
     }
     setMetadataCacheStatus(t('metadata_cache_clear_failed'));
@@ -3824,6 +3824,17 @@ function renderApiUsageStats() {
 
 }
 
+
+async function resetApiUsageStats() {
+  try {
+    // 管理用内訳（apiUsageAdminBreakdownDaily）も合わせてクリアする
+    await chrome.storage.local.remove([API_USAGE_DAILY_KEY, 'apiUsageAdminBreakdownDaily']);
+  } catch (_err) {
+    // ignore
+  }
+  apiUsageDaily = {};
+  renderApiUsageStats();
+}
 
 async function loadApiUsageStats() {
   const stored = await chrome.storage.local.get([API_USAGE_DAILY_KEY]);
