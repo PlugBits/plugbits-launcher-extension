@@ -12,6 +12,30 @@
     'SUBTABLE', 'FILE'
   ]);
 
+  // kintone標準UIのレコード追加ではサブテーブルに必ず空行が1行できる。
+  // 0行で登録するとサブテーブル値を参照する計算フィールド
+  // （SUM(テーブル.金額) など）がエラーになるため、標準UIと同じく
+  // 空行を1行含めて送信する。行内の各列にはkintone側の初期値が適用される。
+  // ただし「必須かつ初期値なし」の列を持つテーブルは、空行を送ると
+  // 保存自体が失敗するため従来どおり0行のままにする。
+  function qnrAppendEmptySubtableRows(record, fields) {
+    if (!record || !fields || typeof fields.forEach !== 'function') return;
+    fields.forEach((field) => {
+      if (String(field?.type || '').toUpperCase() !== 'SUBTABLE') return;
+      if (!field.code || record[field.code] !== undefined) return;
+      const columns = Array.isArray(field.subtable?.fields) ? field.subtable.fields : [];
+      const hasBlockingRequired = columns.some((col) => {
+        if (!col?.required) return false;
+        if (col.defaultNowValue) return false;
+        const dv = col.defaultValue;
+        if (dv === undefined || dv === null) return true;
+        return Array.isArray(dv) ? dv.length === 0 : String(dv) === '';
+      });
+      if (hasBlockingRequired) return;
+      record[field.code] = { value: [{ value: {} }] };
+    });
+  }
+
   // 数値フィールド向けの入力正規化。全角数字・全角記号を半角化し、
   // 桁区切りカンマを除去する（"１，０００" → "1000"）。
   function qnrNormalizeNumberText(raw) {
@@ -432,7 +456,7 @@
       presetSelect.addEventListener('change', () => renderBody(presetSelect.value));
 
       saveBtn.addEventListener('click', () => {
-        void this._submit(appId, language, fieldInputMap, saveBtn, cancelBtn, listUrl);
+        void this._submit(appId, language, fieldInputMap, allFieldsMap, saveBtn, cancelBtn, listUrl);
       });
 
       panel.appendChild(head);
@@ -446,7 +470,7 @@
       });
     }
 
-    async _submit(appId, language, fieldInputMap, saveBtn, cancelBtn, listUrl) {
+    async _submit(appId, language, fieldInputMap, allFieldsMap, saveBtn, cancelBtn, listUrl) {
       const t = (key) => resolveText(language, key);
       const record = {};
       let hasRequiredMissing = false;
@@ -474,6 +498,8 @@
         if (isEmpty) return;
         record[field.code] = { value };
       });
+
+      qnrAppendEmptySubtableRows(record, allFieldsMap);
 
       if (hasRequiredMissing) {
         this._showNotice(t('newRecordRequiredMissing'));

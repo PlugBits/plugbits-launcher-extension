@@ -5687,15 +5687,25 @@
         let value;
         if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
           value = Array.isArray(raw) ? raw : [];
+        } else if (type === 'USER_SELECT' || type === 'ORGANIZATION_SELECT' || type === 'GROUP_SELECT') {
+          value = String(raw ?? '').split(/[,、\s]+/)
+            .map((code) => code.trim())
+            .filter(Boolean)
+            .map((code) => ({ code }));
         } else {
           value = String(raw ?? '');
+          if (type === 'NUMBER') value = qnrNormalizeNumberText(value);
         }
-        if (field.required) {
-          const isEmpty = Array.isArray(value) ? value.length === 0 : value === '';
-          if (isEmpty) hasRequiredMissing = true;
-        }
+        const isEmpty = Array.isArray(value) ? value.length === 0 : value === '';
+        if (field.required && isEmpty) hasRequiredMissing = true;
+        // 未入力はリクエストに含めず、kintone側の初期値適用に任せる
+        // （value:'' の明示送信は初期値を打ち消し、計算フィールドのエラー要因になる）
+        if (isEmpty) return;
         record[field.code] = { value };
       });
+
+      // サブテーブルは標準UIと同様に空行1行を含める（計算フィールド対策）
+      qnrAppendEmptySubtableRows(record, this.fieldsMeta);
 
       if (hasRequiredMissing) {
         this.notify(resolveText(this.language, 'newRecordRequiredMissing'));
