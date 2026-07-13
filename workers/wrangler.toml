@@ -3,6 +3,10 @@ main = "src/index.js"
 compatibility_date = "2024-01-01"
 account_id = "c1b523f7c9512c4e19a953d80a216f57"
 
+# トライアルのリマインダーメール送信（毎日 00:00 UTC = 09:00 JST）
+[triggers]
+crons = ["0 0 * * *"]
+
 [[kv_namespaces]]
 binding = "LICENSES"
 id = "306e0240845b49709b3333a7fb3d85ee"

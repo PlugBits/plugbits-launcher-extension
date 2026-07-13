@@ -56,6 +56,56 @@ async function kvSet(env, licenseKey, data) {
   await env.LICENSES.put(kvKey(licenseKey), JSON.stringify(data));
 }
 
+// ── subscription → licenseKey[] 逆引きindex ──────────────────────────────────
+// webhook処理のたびに全ライセンスをlist走査しないための索引。
+// index未整備の旧レコードのために、フォールバックとして従来のプレフィックス
+// 走査も残し、見つかったキーはその場でindexへ登録する（読み時マイグレーション）。
+
+const SUB_INDEX_PREFIX = 'sub_';
+
+async function getKeysForSubscription(env, subscriptionId) {
+  try {
+    const raw = await env.LICENSES.get(SUB_INDEX_PREFIX + subscriptionId);
+    if (raw) {
+      const keys = JSON.parse(raw);
+      if (Array.isArray(keys) && keys.length) return keys;
+    }
+  } catch (_err) { /* fall through */ }
+
+  // フォールバック: 旧データ向けの全走査 + index構築
+  const found = [];
+  const list = await env.LICENSES.list({ prefix: KV_PREFIX });
+  for (const key of list.keys) {
+    const licenseKey = key.name.slice(KV_PREFIX.length);
+    const record = await kvGet(env, licenseKey);
+    if (record?.stripe_subscription_id === subscriptionId) found.push(licenseKey);
+  }
+  if (found.length) {
+    await env.LICENSES.put(SUB_INDEX_PREFIX + subscriptionId, JSON.stringify(found));
+  }
+  return found;
+}
+
+async function addKeyToSubscriptionIndex(env, subscriptionId, licenseKey) {
+  let keys = [];
+  try {
+    const raw = await env.LICENSES.get(SUB_INDEX_PREFIX + subscriptionId);
+    if (raw) keys = JSON.parse(raw);
+  } catch (_err) { /* ignore */ }
+  if (!Array.isArray(keys)) keys = [];
+  if (!keys.includes(licenseKey)) keys.push(licenseKey);
+  await env.LICENSES.put(SUB_INDEX_PREFIX + subscriptionId, JSON.stringify(keys));
+}
+
+async function updateRecordsForSubscription(env, subscriptionId, patch) {
+  const keys = await getKeysForSubscription(env, subscriptionId);
+  for (const licenseKey of keys) {
+    const record = await kvGet(env, licenseKey);
+    if (record) await kvSet(env, licenseKey, { ...record, ...patch });
+  }
+  return keys.length;
+}
+
 // ── Stripe ──────────────────────────────────────────────────────────────────
 
 async function stripeRequest(env, path, method = 'GET', body = null) {
@@ -151,7 +201,27 @@ function normalizeTrialEmail(raw) {
   return `${local}@${domain}`;
 }
 
+// IP単位の簡易レート制限（KVのTTL付きカウンタ）。悪戯POSTによる
+// KV書き込みとメール送信の浪費を防ぐ。
+const TRIAL_RATE_LIMIT_PER_HOUR = 5;
+
+async function isTrialRateLimited(request, env) {
+  try {
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const key = `ratelimit_trial_${ip}`;
+    const current = Number(await env.LICENSES.get(key)) || 0;
+    if (current >= TRIAL_RATE_LIMIT_PER_HOUR) return true;
+    await env.LICENSES.put(key, String(current + 1), { expirationTtl: 3600 });
+    return false;
+  } catch (_err) {
+    return false; // 制限機構の障害でトライアル自体を止めない
+  }
+}
+
 async function handleTrialStart(request, env) {
+  if (await isTrialRateLimited(request, env)) {
+    return json({ ok: false, reason: 'rate_limited' }, 429);
+  }
   let body;
   try {
     body = await request.json();
@@ -345,6 +415,7 @@ async function handleWebhook(request, env) {
       expiry
     };
     await kvSet(env, licenseKey, record);
+    await addKeyToSubscriptionIndex(env, subscriptionId, licenseKey);
     await sendLicenseEmail(env, { email, licenseKey });
     return json({ ok: true, action: 'key_issued' });
   }
@@ -357,18 +428,8 @@ async function handleWebhook(request, env) {
     const periodEnd = obj.lines?.data?.[0]?.period?.end;
     const expiry = periodEnd ? new Date(periodEnd * 1000).toISOString() : '';
 
-    // そのサブスクに紐づく全ライセンスキーを更新
-    const list = await env.LICENSES.list({ prefix: KV_PREFIX });
-    for (const key of list.keys) {
-      const record = await kvGet(env, key.name.slice(KV_PREFIX.length));
-      if (record?.stripe_subscription_id === subscriptionId) {
-        await kvSet(env, key.name.slice(KV_PREFIX.length), {
-          ...record,
-          status: 'active',
-          expiry
-        });
-      }
-    }
+    // そのサブスクに紐づく全ライセンスキーを逆引きindex経由で更新
+    await updateRecordsForSubscription(env, subscriptionId, { status: 'active', expiry });
     return json({ ok: true, action: 'subscription_renewed' });
   }
 
@@ -376,13 +437,7 @@ async function handleWebhook(request, env) {
     const subscriptionId = obj?.subscription;
     if (!subscriptionId) return json({ ok: true, skipped: 'missing_ids' });
 
-    const list = await env.LICENSES.list({ prefix: KV_PREFIX });
-    for (const key of list.keys) {
-      const record = await kvGet(env, key.name.slice(KV_PREFIX.length));
-      if (record?.stripe_subscription_id === subscriptionId) {
-        await kvSet(env, key.name.slice(KV_PREFIX.length), { ...record, status: 'past_due' });
-      }
-    }
+    await updateRecordsForSubscription(env, subscriptionId, { status: 'past_due' });
     return json({ ok: true, action: 'marked_past_due' });
   }
 
@@ -390,13 +445,7 @@ async function handleWebhook(request, env) {
     const subscriptionId = obj?.id;
     if (!subscriptionId) return json({ ok: true, skipped: 'missing_ids' });
 
-    const list = await env.LICENSES.list({ prefix: KV_PREFIX });
-    for (const key of list.keys) {
-      const record = await kvGet(env, key.name.slice(KV_PREFIX.length));
-      if (record?.stripe_subscription_id === subscriptionId) {
-        await kvSet(env, key.name.slice(KV_PREFIX.length), { ...record, status: 'canceled' });
-      }
-    }
+    await updateRecordsForSubscription(env, subscriptionId, { status: 'canceled' });
     return json({ ok: true, action: 'subscription_canceled' });
   }
 
@@ -441,9 +490,114 @@ async function handleVerify(request, env) {
   return json({ ok: false, status: 'not_found', reason: 'key_not_found' }, 404);
 }
 
+// ── トライアル リマインダー（Cron） ─────────────────────────────────────────
+//
+// 毎日1回、トライアルレコードを走査して転換メールを送る:
+//   - 終了3日前（確認済み・有効なもの）
+//   - 終了時
+//   - メール未確認のまま停止したとき
+// 送信済みフラグをレコードに立てて二重送信を防ぐ。
+// トライアル件数が数千を超えたら日付バケットのindexに切り替えること。
+
+async function sendTrialLifecycleEmail(env, { email, type, expiry }) {
+  if (!env.BREVO_API_KEY || !email) return;
+  const expiryDate = expiry ? new Date(expiry).toLocaleDateString('ja-JP') : '';
+  const upgradeBlock = `
+    <p style="text-align:center;margin:24px 0;">
+      <a href="https://plugbits.app/pro"
+         style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:bold;">
+        Pro にアップグレード（¥980/月）
+      </a>
+    </p>
+    <p style="font-size:12px;color:#6b7280;">いつでも解約できます。ライセンスは個人のものなので、転職先でもそのまま使えます。</p>`;
+  const contents = {
+    ending_soon: {
+      subject: 'PlugBits Launcher Pro トライアル終了まであと3日です',
+      html: `
+        <h2>トライアル終了まであと3日です</h2>
+        <p>PlugBits Launcher Pro の14日間トライアルは <strong>${expiryDate}</strong> に終了します。</p>
+        <p>一覧でのセル編集・コピー&貼り付け・一括保存を続けてお使いいただくには、Pro へのアップグレードをご検討ください。</p>
+        ${upgradeBlock}`
+    },
+    ended: {
+      subject: 'PlugBits Launcher Pro トライアルが終了しました',
+      html: `
+        <h2>トライアルが終了しました</h2>
+        <p>14日間のトライアルをご利用いただきありがとうございました。現在は無料プラン（閲覧・単票編集）に戻っています。</p>
+        <p>一覧の一括編集をもう一度使うには、Pro へのアップグレードをどうぞ。</p>
+        ${upgradeBlock}`
+    },
+    unverified: {
+      subject: '【ご確認ください】PlugBits Launcher Pro トライアルが一時停止しました',
+      html: `
+        <h2>メール確認が完了していません</h2>
+        <p>48時間以内にメールアドレスの確認が完了しなかったため、トライアルを一時停止しました。</p>
+        <p>以前お送りした確認メールのリンクを開くと、トライアルを再開できます（メールが見つからない場合はこのメールにご返信ください）。</p>`
+    }
+  };
+  const content = contents[type];
+  if (!content) return;
+  await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: { 'api-key': env.BREVO_API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sender: {
+        email: env.BREVO_SENDER_EMAIL || 'no-reply@plugbits.app',
+        name: env.BREVO_SENDER_NAME || 'PlugBits Launcher'
+      },
+      to: [{ email }],
+      subject: content.subject,
+      htmlContent: content.html
+    })
+  });
+}
+
+async function runTrialReminderSweep(env) {
+  const now = Date.now();
+  const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+  let cursor;
+  do {
+    const page = await env.LICENSES.list({ prefix: KV_PREFIX, cursor });
+    cursor = page.list_complete ? undefined : page.cursor;
+    for (const key of page.keys) {
+      const licenseKey = key.name.slice(KV_PREFIX.length);
+      const record = await kvGet(env, licenseKey);
+      if (!record || record.kind !== 'trial' || !record.email) continue;
+
+      const expiryMs = Date.parse(record.expiry || '') || 0;
+      const deadlineMs = Date.parse(record.trial_verify_deadline || '') || 0;
+      const isExpired = expiryMs && now > expiryMs;
+      const isUnverifiedStopped = !record.trial_verified && deadlineMs && now > deadlineMs;
+
+      if (isUnverifiedStopped && !isExpired && !record.trial_unverified_mail_sent) {
+        await sendTrialLifecycleEmail(env, { email: record.email, type: 'unverified', expiry: record.expiry });
+        await kvSet(env, licenseKey, { ...record, trial_unverified_mail_sent: true });
+        continue;
+      }
+      if (isExpired && !record.trial_ended_mail_sent) {
+        await sendTrialLifecycleEmail(env, { email: record.email, type: 'ended', expiry: record.expiry });
+        await kvSet(env, licenseKey, { ...record, trial_ended_mail_sent: true });
+        continue;
+      }
+      if (
+        !isExpired && !isUnverifiedStopped && record.trial_verified
+        && expiryMs && expiryMs - now <= THREE_DAYS_MS
+        && !record.trial_reminder_mail_sent
+      ) {
+        await sendTrialLifecycleEmail(env, { email: record.email, type: 'ending_soon', expiry: record.expiry });
+        await kvSet(env, licenseKey, { ...record, trial_reminder_mail_sent: true });
+      }
+    }
+  } while (cursor);
+}
+
 // ── Router ──────────────────────────────────────────────────────────────────
 
 export default {
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(runTrialReminderSweep(env));
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     const cors = corsHeaders(env);
