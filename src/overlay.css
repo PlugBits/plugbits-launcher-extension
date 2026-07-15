@@ -2853,6 +2853,10 @@
 
 /* Lookup field */
 .pb-newrec__lookup-wrap {
+  /* コンボボックスのアンカー。行いっぱいに広げてモーダル幅を活かす */
+  position: relative;
+  flex: 1;
+  min-width: 0;
   display: flex;
   gap: 6px;
   align-items: center;
@@ -2892,13 +2896,16 @@
 
 /* Lookup picker floating panel */
 .pb-newrec__lookup-picker {
+  /* 入力欄の直下に、入力欄と同じ幅で表示（入力欄には被せない） */
   position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
   z-index: 99999;
   background: #fff;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-  width: 320px;
   max-height: 360px;
   display: flex;
   flex-direction: column;
