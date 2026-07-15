@@ -482,11 +482,14 @@
             const input = document.createElement('input');
             input.type = 'text';
             input.className = 'pb-newrec__input';
-            input.readOnly = true;
+            // 手打ち可: 値を覚えているユーザーは直接入力できる。
+            // 妥当性は保存時にkintoneが検証し、コピー先も自動取得される
+            input.placeholder = t('newRecordLookupManualPh');
             const searchBtn = document.createElement('button');
             searchBtn.type = 'button';
             searchBtn.className = 'pb-newrec__lookup-btn';
             searchBtn.textContent = '🔍';
+            searchBtn.title = t('newRecordLookupPickTitle');
             wrap.appendChild(input);
             wrap.appendChild(searchBtn);
             controlWrap.appendChild(wrap);
@@ -499,6 +502,14 @@
             const relatedKeyField = String(lookupInfo.relatedKeyField || lookupInfo.keyField || '').trim();
             const pickerFields = Array.isArray(lookupInfo.lookupPickerFields) ? lookupInfo.lookupPickerFields : [];
             const mappings = Array.isArray(lookupInfo.fieldMappings) ? lookupInfo.fieldMappings : [];
+            // 手入力されたらコピー先の表示をクリア（保存時にkintoneが取得し直すため、
+            // ピッカーで入れた古い表示が残ると誤解を招く）
+            input.addEventListener('input', () => {
+              mappings.forEach((m) => {
+                const autoEntry = fieldInputMap.get(m.field);
+                if (autoEntry?.setValue) autoEntry.setValue('');
+              });
+            });
             searchBtn.addEventListener('click', () => {
               buildNewRecordLookupPicker(wrap, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, input, this.postFn, language);
             });
@@ -738,6 +749,9 @@
 
       fieldInputMap.forEach((entry) => {
         const { field, getValue } = entry;
+        // ルックアップのコピー先は送信しない。保存時にkintoneがルックアップを
+        // 実行して自動設定するため（手打ちされたキーにも正しく追従する）
+        if (field._isLookupAuto) return;
         const raw = getValue();
         const type = String(field.type || '').toUpperCase();
         let value;

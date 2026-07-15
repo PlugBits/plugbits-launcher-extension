@@ -3327,3 +3327,32 @@
   font-size: 11px;
   margin-top: 4px;
 }
+
+/* ── Quick New: ルックアップ候補の件数表示・追加読み込み ── */
+.pb-newrec__lookup-count {
+  padding: 4px 10px 2px;
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+.pb-newrec__lookup-count:empty {
+  display: none;
+}
+
+.pb-newrec__lookup-more {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-top: 1px solid #eef1f6;
+  background: #f8fafc;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+
+.pb-newrec__lookup-more:hover {
+  background: #eff4ff;
+}

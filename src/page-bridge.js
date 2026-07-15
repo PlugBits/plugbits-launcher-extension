@@ -1637,13 +1637,51 @@ function markLookupAutoFields(properties, metas) {
         const relatedAppId = String(payload?.relatedAppId || '').trim();
         if (!relatedAppId) throw new Error('relatedAppId is required');
         const sort = String(payload?.sort || '').trim();
-        const query = sort ? `order by ${sort} limit 100` : 'limit 100';
-        const resp = await callKintoneApi('/k/v1/records', 'GET', { app: relatedAppId, query }, {
+        const keyword = String(payload?.keyword || '').trim();
+        const keyField = String(payload?.keyField || '').trim();
+        const offsetRaw = Number(payload?.offset);
+        const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
+        const buildQuery = (conditionOp) => {
+          const parts = [];
+          if (keyword && keyField) {
+            const escaped = keyword.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            parts.push(`${keyField} ${conditionOp} "${escaped}"`);
+          }
+          if (sort) parts.push(`order by ${sort}`);
+          parts.push('limit 100');
+          if (offset) parts.push(`offset ${offset}`);
+          return parts.join(' ');
+        };
+        const apiMeta = {
           feature: 'lookup_candidates',
           source: 'new_record',
           logGroup: 'overlay'
-        });
-        window.postMessage({ __kfav__: true, replyTo: id, ok: true, result: { records: resp.records || [] } }, ORIGIN);
+        };
+        let resp;
+        try {
+          resp = await callKintoneApi('/k/v1/records', 'GET', {
+            app: relatedAppId,
+            query: buildQuery('like'),
+            totalCount: true
+          }, apiMeta);
+        } catch (error) {
+          // like非対応のキー項目（数値・日付など）は完全一致で再試行
+          if (!(keyword && keyField)) throw error;
+          resp = await callKintoneApi('/k/v1/records', 'GET', {
+            app: relatedAppId,
+            query: buildQuery('='),
+            totalCount: true
+          }, apiMeta);
+        }
+        window.postMessage({
+          __kfav__: true,
+          replyTo: id,
+          ok: true,
+          result: {
+            records: resp.records || [],
+            totalCount: typeof resp.totalCount === 'number' ? resp.totalCount : Number(resp.totalCount || 0)
+          }
+        }, ORIGIN);
         return;
       }
 

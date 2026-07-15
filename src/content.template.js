@@ -1421,6 +1421,13 @@
       confirmDelete: "削除",
       confirmCloseAction: "閉じる",
       confirmPageMoveUnsaved: "未保存の変更があります。ページを移動しますか？",
+      newRecordLookupManualPh: "直接入力 または 🔍 で選択",
+      newRecordLookupPickTitle: "候補から選択",
+      quickNewLookupSearchPh: "キー項目で検索...",
+      quickNewLookupEmpty: "レコードがありません",
+      quickNewLookupError: "取得に失敗しました",
+      quickNewLookupCount: (shown, total) => `全 ${total} 件中 ${shown} 件を表示（検索で絞り込めます）`,
+      quickNewLookupMore: "さらに読み込む",
       newRecordSaveNext: "保存して次へ",
       newRecordSavedNext: "保存しました。続けて入力できます",
       newRecordRequiredField: "必須項目です",
@@ -1700,6 +1707,13 @@
       confirmDelete: "Delete",
       confirmCloseAction: "Close",
       confirmPageMoveUnsaved: "You have unsaved changes. Move to another page?",
+      newRecordLookupManualPh: "Type directly or pick with 🔍",
+      newRecordLookupPickTitle: "Pick from candidates",
+      quickNewLookupSearchPh: "Search by key field...",
+      quickNewLookupEmpty: "No records",
+      quickNewLookupError: "Failed to load candidates",
+      quickNewLookupCount: (shown, total) => `Showing ${shown} of ${total} (type to narrow down)`,
+      quickNewLookupMore: "Load more",
       newRecordSaveNext: "Save & next",
       newRecordSavedNext: "Saved. Ready for the next record.",
       newRecordRequiredField: "This field is required",
@@ -2432,9 +2446,13 @@
 
   // ── Lookup Picker (shared by overlay modal and QuickNewRecordModal) ───────
 
+  // ルックアップ候補ピッカー。
+  // 候補はサーバーサイドで検索する（1回100件・関連アプリが100件を超えても
+  // キー項目のlike検索と「さらに読み込む」で全件に到達できる）。
   function buildNewRecordLookupPicker(anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, keyInput, postFn, language) {
     document.querySelectorAll('.pb-newrec__lookup-picker').forEach((el) => el.remove());
     if (!relatedAppId) return;
+    const t = (key, ...args) => resolveText(language, key, ...args);
 
     const picker = document.createElement('div');
     picker.className = 'pb-newrec__lookup-picker';
@@ -2444,21 +2462,26 @@
     const searchInput = document.createElement('input');
     searchInput.type = 'text';
     searchInput.className = 'pb-newrec__lookup-search-input';
-    searchInput.placeholder = '検索...';
+    searchInput.placeholder = t('quickNewLookupSearchPh');
     searchWrap.appendChild(searchInput);
+
+    const countEl = document.createElement('div');
+    countEl.className = 'pb-newrec__lookup-count';
 
     const list = document.createElement('div');
     list.className = 'pb-newrec__lookup-list';
-    const loadingEl = document.createElement('div');
-    loadingEl.className = 'pb-newrec__lookup-status';
-    loadingEl.textContent = resolveText(language, 'quickNewLoading');
-    list.appendChild(loadingEl);
 
     picker.appendChild(searchWrap);
+    picker.appendChild(countEl);
     picker.appendChild(list);
     anchorEl.appendChild(picker);
 
-    let allRecords = [];
+    let records = [];
+    let totalCount = 0;
+    let currentKeyword = '';
+    let loading = false;
+    let searchTimer = null;
+    let requestSeq = 0;
 
     function getDisplayValue(record, fieldCode) {
       const v = record[fieldCode];
@@ -2468,13 +2491,21 @@
       return String(val ?? '');
     }
 
-    function renderList(records) {
+    function setStatus(message) {
       list.innerHTML = '';
+      const el = document.createElement('div');
+      el.className = 'pb-newrec__lookup-status';
+      el.textContent = message;
+      list.appendChild(el);
+    }
+
+    function renderList() {
+      list.innerHTML = '';
+      countEl.textContent = totalCount > records.length
+        ? t('quickNewLookupCount', records.length, totalCount)
+        : '';
       if (!records.length) {
-        const empty = document.createElement('div');
-        empty.className = 'pb-newrec__lookup-status';
-        empty.textContent = 'レコードがありません';
-        list.appendChild(empty);
+        setStatus(t('quickNewLookupEmpty'));
         return;
       }
       records.forEach((record) => {
@@ -2495,7 +2526,7 @@
         item.addEventListener('mousedown', (e) => {
           e.preventDefault();
           keyInput.value = mainVal;
-          const entry = fieldInputMap.get(keyInput.closest('[data-field-code]')?.dataset.fieldCode || '');
+          keyInput.dispatchEvent(new Event('change', { bubbles: true }));
           mappings.forEach((m) => {
             const autoEntry = fieldInputMap.get(m.field);
             if (autoEntry?.setValue) autoEntry.setValue(getDisplayValue(record, m.relatedField));
@@ -2504,16 +2535,57 @@
         });
         list.appendChild(item);
       });
+      // 100件を超える場合はサーバーから追加読み込みできる
+      if (records.length < totalCount) {
+        const moreBtn = document.createElement('button');
+        moreBtn.type = 'button';
+        moreBtn.className = 'pb-newrec__lookup-more';
+        moreBtn.textContent = t('quickNewLookupMore');
+        moreBtn.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+        moreBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          void fetchCandidates({ keyword: currentKeyword, append: true });
+        });
+        list.appendChild(moreBtn);
+      }
     }
 
+    async function fetchCandidates({ keyword = '', append = false } = {}) {
+      if (loading) return;
+      loading = true;
+      const seq = ++requestSeq;
+      if (!append) setStatus(resolveText(language, 'quickNewLoading'));
+      try {
+        const resp = await postFn('EXCEL_GET_LOOKUP_CANDIDATES', {
+          relatedAppId,
+          sort: '',
+          keyword,
+          keyField: relatedKeyField,
+          offset: append ? records.length : 0
+        });
+        if (seq !== requestSeq || !picker.isConnected) return;
+        if (!resp?.ok) throw new Error(resp?.error || 'lookup fetch failed');
+        const fetched = Array.isArray(resp?.result?.records) ? resp.result.records.map((r) => r.fields || r) : [];
+        records = append ? records.concat(fetched) : fetched;
+        totalCount = Number(resp?.result?.totalCount || fetched.length);
+        currentKeyword = keyword;
+        renderList();
+      } catch (err) {
+        if (seq !== requestSeq || !picker.isConnected) return;
+        setStatus(t('quickNewLookupError'));
+      } finally {
+        if (seq === requestSeq) loading = false;
+      }
+    }
+
+    // サーバーサイド検索（デバウンス300ms）。ローカルの部分一致では
+    // 先頭100件しか対象にならないため、キー項目のlike検索をAPIで行う
     searchInput.addEventListener('input', () => {
-      const q = searchInput.value.toLowerCase();
-      if (!q) { renderList(allRecords); return; }
-      const filtered = allRecords.filter((record) => {
-        const checkFields = pickerFields.length ? pickerFields : [relatedKeyField];
-        return checkFields.some((f) => getDisplayValue(record, f).toLowerCase().includes(q));
-      });
-      renderList(filtered);
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        void fetchCandidates({ keyword: searchInput.value.trim() });
+      }, 300);
     });
 
     document.addEventListener('mousedown', function onOutside(e) {
@@ -2523,23 +2595,9 @@
       }
     }, true);
 
-    void (async () => {
-      try {
-        const resp = await postFn('EXCEL_GET_LOOKUP_CANDIDATES', {
-          relatedAppId,
-          sort: ''
-        });
-        allRecords = Array.isArray(resp?.result?.records) ? resp.result.records.map((r) => r.fields || r) : [];
-        renderList(allRecords);
-        searchInput.focus();
-      } catch (err) {
-        list.innerHTML = '';
-        const errEl = document.createElement('div');
-        errEl.className = 'pb-newrec__lookup-status';
-        errEl.textContent = '取得に失敗しました';
-        list.appendChild(errEl);
-      }
-    })();
+    void fetchCandidates().then(() => {
+      try { searchInput.focus(); } catch (_e) { /* noop */ }
+    });
   }
 
   // @@INCLUDE: content-quick-new-record-modal.js
