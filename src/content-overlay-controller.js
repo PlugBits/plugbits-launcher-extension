@@ -360,6 +360,15 @@
       columnsBtn.addEventListener('click', () => { this.openColumnManager(); });
       this.columnButton = columnsBtn;
 
+      // 計算フィールドの再計算（表示中レコードの空更新＝再保存。100件で1リクエスト）
+      const recalcBtn = document.createElement('button');
+      recalcBtn.type = 'button';
+      recalcBtn.className = 'pb-overlay__btn';
+      recalcBtn.textContent = resolveText(this.language, 'btnRecalc');
+      recalcBtn.title = resolveText(this.language, 'titleRecalc');
+      recalcBtn.addEventListener('click', () => { void this.recalcCurrentPage(); });
+      this.recalcButton = recalcBtn;
+
       const layoutToggle = document.createElement('div');
       layoutToggle.className = 'pb-overlay__layout-toggle';
       const gridLayoutBtn = document.createElement('button');
@@ -515,6 +524,7 @@
       const secondaryActions = document.createElement('div');
       secondaryActions.className = 'pb-overlay__toolbar-secondary';
       secondaryActions.appendChild(columnsBtn);
+      secondaryActions.appendChild(recalcBtn);
       secondaryActions.appendChild(dirty);
       secondaryActions.appendChild(addRowBtn);
       secondaryActions.appendChild(undoBtn);
@@ -2746,6 +2756,51 @@
       }
     }
 
+    // 計算フィールドの再計算: 表示中レコードを値を変えずに再保存する。
+    // kintoneは保存時に計算フィールドを再計算するため、計算式を追加・変更した
+    // 後の既存レコードもこれで最新の値になる（1ページ=最大100件=PUT 1リクエスト）。
+    // 更新日時・更新者が変わり、プロセス管理や通知が動く可能性があるため
+    // 実行前に必ず確認ダイアログを挟む。
+    async recalcCurrentPage() {
+      if (this.saving || this.paging || !this.isOpen || !this.appId) return;
+      if (!this.canMutateOverlay(true)) return;
+      const proceed = await this.confirmPageMoveIfNeeded();
+      if (!proceed) return;
+      const ids = Array.from(new Set(
+        this.rows
+          .map((row) => String(row?.id || '').trim())
+          .filter((id) => id && !this.isNewRowId(id))
+          .filter((id) => this.permissionService.canEditRecord(id))
+      ));
+      if (!ids.length) {
+        this.notify(resolveText(this.language, 'recalcNoTargets'));
+        return;
+      }
+      const ok = await this.overlayConfirm(resolveText(this.language, 'recalcConfirm', ids.length), {
+        confirmLabel: resolveText(this.language, 'recalcConfirmAction')
+      });
+      if (!ok) return;
+      if (this.recalcButton) this.recalcButton.disabled = true;
+      this.showLoading(resolveText(this.language, 'loading'), { skeleton: true });
+      try {
+        const response = await this.postFn('EXCEL_PUT_RECORDS', {
+          appId: this.appId,
+          records: ids.map((id) => ({ id, record: {} })),
+          __pbTrigger: 'recalc_click'
+        });
+        if (!response?.ok) throw new Error(response?.error || 'recalc failed');
+        this.hideLoading();
+        await this.reloadPage();
+        this.notify(resolveText(this.language, 'recalcDone', ids.length));
+      } catch (error) {
+        console.error('[kintone-excel-overlay] recalc failed', error);
+        this.hideLoading();
+        this.notify(resolveText(this.language, 'recalcFailed'));
+      } finally {
+        this.updatePermissionUiState();
+      }
+    }
+
     async refreshListRowsAfterSave() {
       if (!this.isListMode()) return;
       await this.loadCurrentPageRecords();
@@ -3238,6 +3293,13 @@
         dirtyCount += this.pendingDeletes.size;
         this.saveButton.disabled = !canSave || dirtyCount === 0;
         this.saveButton.title = canSave ? '' : resolveText(this.language, 'toastViewOnlyBlocked');
+      }
+      if (this.recalcButton) {
+        // 再保存を伴うため、編集（Pro）と同じ条件で有効化する
+        this.recalcButton.disabled = this.saving || !canEdit;
+        this.recalcButton.title = canEdit
+          ? resolveText(this.language, 'titleRecalc')
+          : resolveText(this.language, 'toastViewOnlyBlocked');
       }
       if (this.permissionWarningEl) {
         const showWarning = this.aclStatus.failed === true && this.aclStatus.loaded === false;
