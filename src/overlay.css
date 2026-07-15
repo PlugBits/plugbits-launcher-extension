@@ -3298,3 +3298,32 @@
     background-size: 240% 100%;
   }
 }
+
+/* ── Quick New: ヘッダーのアプリ名・フィールド単位エラー表示 ── */
+.pb-newrec__title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pb-newrec__app {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #2563eb;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pb-newrec__field-row--error .pb-newrec__input,
+.pb-newrec__field-row--error .pb-newrec__textarea,
+.pb-newrec__field-row--error .pb-newrec__select {
+  border-color: #dc2626 !important;
+}
+
+.pb-newrec__field-error {
+  color: #dc2626;
+  font-size: 11px;
+  margin-top: 4px;
+}

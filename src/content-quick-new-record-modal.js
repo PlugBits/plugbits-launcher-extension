@@ -52,23 +52,159 @@
       this.postFn = postFn;
       this.el = null;
       this.kintoneTimezone = _browserTz;
+      this._language = DEFAULT_OVERLAY_LANGUAGE;
+      this._listUrl = '';
+      this._fieldInputMap = null;
+      this._dirtySnapshot = '';
+      this._confirmEl = null;
+      this._savedAny = false;
+      this._triggerSave = null;
+      this._triggerSaveNext = null;
     }
 
     isVisible() { return Boolean(this.el); }
 
-    close() {
+    close(options = {}) {
+      if (this._confirmEl) { this._confirmEl.remove(); this._confirmEl = null; }
       if (this.el) { this.el.remove(); this.el = null; }
+      const needReload = this._savedAny && !options.skipReload;
+      const listUrl = this._listUrl;
+      this._savedAny = false;
+      this._fieldInputMap = null;
+      this._dirtySnapshot = '';
+      this._triggerSave = null;
+      this._triggerSaveNext = null;
+      // 「保存して次へ」で保存済みのまま閉じた場合は、一覧に反映するためリロード
+      if (needReload && listUrl) this._reloadList(listUrl);
+    }
+
+    // ユーザー操作によるクローズ（背景クリック/Esc/✕/キャンセル）。
+    // 未保存の入力がある場合は破棄確認を挟む。
+    async requestClose() {
+      if (!this.el) return;
+      if (this._isDirty()) {
+        const ok = await this._confirmDiscard();
+        if (!ok) return;
+      }
+      this.close();
+    }
+
+    _snapshotValues() {
+      if (!this._fieldInputMap) return '';
+      const values = {};
+      this._fieldInputMap.forEach(({ field, getValue }) => {
+        values[field.code] = getValue();
+      });
+      try {
+        return JSON.stringify(values);
+      } catch (_e) {
+        return '';
+      }
+    }
+
+    _isDirty() {
+      if (!this._fieldInputMap) return false;
+      return this._snapshotValues() !== this._dirtySnapshot;
+    }
+
+    // 未保存入力の破棄確認。overlay.css の確認モーダルスタイルを流用する。
+    _confirmDiscard() {
+      return new Promise((resolve) => {
+        if (!this.el || this._confirmEl) { resolve(true); return; }
+        const t = (key) => resolveText(this._language, key);
+        const layer = document.createElement('div');
+        layer.className = 'pb-overlay__confirm-layer';
+        const card = document.createElement('div');
+        card.className = 'pb-overlay__confirm-card';
+        card.setAttribute('role', 'alertdialog');
+        card.setAttribute('aria-modal', 'true');
+        const text = document.createElement('p');
+        text.className = 'pb-overlay__confirm-message';
+        text.textContent = t('newRecordDiscardConfirm');
+        const actions = document.createElement('div');
+        actions.className = 'pb-overlay__confirm-actions';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'pb-overlay__upsell-btn';
+        cancelBtn.textContent = t('confirmCancel');
+        const okBtn = document.createElement('button');
+        okBtn.type = 'button';
+        okBtn.className = 'pb-overlay__upsell-btn pb-overlay__upsell-btn--primary pb-overlay__confirm-btn--danger';
+        okBtn.textContent = t('newRecordDiscardAction');
+        actions.append(cancelBtn, okBtn);
+        card.append(text, actions);
+        layer.appendChild(card);
+        // 確認を閉じたらフォーカスをモーダル内へ戻す
+        // （bodyに落ちるとEsc等のキーボード操作が届かなくなる）
+        const prevFocus = document.activeElement;
+        const finish = (result) => {
+          if (this._confirmEl !== layer) return;
+          this._confirmEl = null;
+          layer.remove();
+          if (!result) {
+            try {
+              if (prevFocus && prevFocus.isConnected && this.el?.contains(prevFocus)) {
+                prevFocus.focus();
+              } else {
+                const fallback = this.el?.querySelector('.pb-newrec__body input:not([tabindex="-1"]), .pb-newrec__body textarea, .pb-newrec__body select');
+                if (fallback) fallback.focus();
+              }
+            } catch (_e) { /* noop */ }
+          }
+          resolve(result);
+        };
+        layer.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          if (e.target === layer) finish(false);
+        });
+        layer.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            finish(false);
+            return;
+          }
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            e.stopPropagation();
+            (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
+          }
+        });
+        cancelBtn.addEventListener('click', () => finish(false));
+        okBtn.addEventListener('click', () => finish(true));
+        this._confirmEl = layer;
+        this.el.appendChild(layer);
+        try { okBtn.focus(); } catch (_e) { /* noop */ }
+      });
+    }
+
+    // 一覧をスクロール位置を保ったままリロードする
+    _reloadList(listUrl) {
+      if (window.location.href === listUrl) {
+        try {
+          sessionStorage.setItem(QUICK_NEW_SCROLL_KEY, JSON.stringify({
+            url: listUrl,
+            y: Math.round(window.scrollY || 0),
+            savedAt: Date.now()
+          }));
+        } catch (_e) { /* noop */ }
+        window.location.reload();
+      } else {
+        window.location.href = listUrl;
+      }
     }
 
     async open() {
-      if (this.el) { this.close(); return; }
+      if (this.el) { void this.requestClose(); return; }
       const listCtx = parseListOverlayContext(location.href);
       if (!listCtx?.appId) return;
       const appId = listCtx.appId;
       const listUrl = listCtx.href;
+      this._listUrl = listUrl;
 
       ensureOverlayCss();
       const { language } = await resolveOverlayUiLanguage();
+      this._language = language;
       const t = (key) => resolveText(language, key);
       try {
         const userRes = await this.postFn('EXCEL_GET_LOGIN_USER');
@@ -101,6 +237,13 @@
           : [];
         const allFieldsMap = new Map(allFieldsMeta.map((f) => [f.code, f]));
 
+        // アプリ名（どのアプリに作成するかをヘッダーに明示する。失敗しても続行）
+        let appName = '';
+        try {
+          const nameRes = await this.postFn('GET_APP_NAME', { appId, source: 'quick_new', __pbTrigger: 'quick_new_open' });
+          if (nameRes?.ok) appName = String(nameRes.name || '').trim();
+        } catch (_e) { /* noop */ }
+
         // Load layout presets
         const appKey = `${String(location.origin || '').trim()}::${appId}`;
         let presets = [];
@@ -122,7 +265,7 @@
 
         // Rebuild panel
         panel.innerHTML = '';
-        this._buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl);
+        this._buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName);
       } catch (err) {
         console.error('[kintone-excel-overlay] quick new record load failed', err);
         this.close();
@@ -134,7 +277,26 @@
       layer.className = 'pb-newrec__layer pb-newrec__layer--standalone';
       layer.setAttribute('role', 'dialog');
       layer.setAttribute('aria-modal', 'true');
-      layer.addEventListener('mousedown', (e) => { if (e.target === layer) this.close(); });
+      layer.addEventListener('mousedown', (e) => { if (e.target === layer) void this.requestClose(); });
+      // Esc: 破棄確認つきで閉じる / Ctrl(⌘)+Enter: 保存 / +Shift: 保存して次へ
+      layer.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          if (this._confirmEl) return;
+          e.preventDefault();
+          e.stopPropagation();
+          void this.requestClose();
+          return;
+        }
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.shiftKey) {
+            if (this._triggerSaveNext) this._triggerSaveNext();
+          } else if (this._triggerSave) {
+            this._triggerSave();
+          }
+        }
+      });
       // フォーカストラップ: Tabはモーダル内でループさせる
       layer.addEventListener('keydown', (e) => {
         if (e.key !== 'Tab') return;
@@ -195,16 +357,25 @@
       return result;
     }
 
-    _buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl) {
+    _buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName = '') {
       const t = (key) => resolveText(language, key);
 
-      // Header
+      // Header（アプリ名 + タイトル）
       const head = document.createElement('div');
       head.className = 'pb-newrec__head';
+      const titleWrap = document.createElement('div');
+      titleWrap.className = 'pb-newrec__title-wrap';
+      if (appName) {
+        const app = document.createElement('div');
+        app.className = 'pb-newrec__app';
+        app.textContent = appName;
+        titleWrap.appendChild(app);
+      }
       const title = document.createElement('div');
       title.className = 'pb-newrec__title';
       title.id = 'pb-newrec-title';
       title.textContent = t('newRecordTitle');
+      titleWrap.appendChild(title);
       if (panel?.closest) {
         const layerEl = panel.closest('.pb-newrec__layer');
         if (layerEl) layerEl.setAttribute('aria-labelledby', 'pb-newrec-title');
@@ -214,8 +385,8 @@
       closeBtn.className = 'pb-newrec__close';
       closeBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
       closeBtn.setAttribute('aria-label', t('newRecordCancel'));
-      closeBtn.addEventListener('click', () => this.close());
-      head.appendChild(title);
+      closeBtn.addEventListener('click', () => { void this.requestClose(); });
+      head.appendChild(titleWrap);
       head.appendChild(closeBtn);
 
       // Preset selector
@@ -240,19 +411,26 @@
       const body = document.createElement('div');
       body.className = 'pb-newrec__body';
 
-      // Footer
+      // Footer: [キャンセル] [保存して次へ] [保存]
       const foot = document.createElement('div');
       foot.className = 'pb-newrec__foot';
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.className = 'pb-overlay__btn';
       cancelBtn.textContent = t('newRecordCancel');
-      cancelBtn.addEventListener('click', () => this.close());
+      cancelBtn.addEventListener('click', () => { void this.requestClose(); });
+      const saveNextBtn = document.createElement('button');
+      saveNextBtn.type = 'button';
+      saveNextBtn.className = 'pb-overlay__btn';
+      saveNextBtn.textContent = t('newRecordSaveNext');
+      saveNextBtn.title = 'Ctrl+Shift+Enter';
       const saveBtn = document.createElement('button');
       saveBtn.type = 'button';
       saveBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
       saveBtn.textContent = t('newRecordSave');
+      saveBtn.title = 'Ctrl+Enter';
       foot.appendChild(cancelBtn);
+      foot.appendChild(saveNextBtn);
       foot.appendChild(saveBtn);
 
       let fieldInputMap = new Map();
@@ -444,10 +622,31 @@
           if (!field._isLookupAuto && hasFieldDefaultValue(field) && typeof setValue === 'function') {
             setValue(normalizeFieldDefaultValue(field, this.kintoneTimezone));
           }
-          fieldInputMap.set(field.code, { field, getValue, setValue });
+          const focusFn = () => {
+            const el = controlWrap.querySelector('input:not([tabindex="-1"]), textarea, select');
+            if (el) { try { el.focus(); } catch (_e) { /* noop */ } }
+          };
+          // 入力したらそのフィールドのエラー表示を消す
+          const clearError = () => {
+            row.classList.remove('pb-newrec__field-row--error');
+            const msg = row.querySelector('.pb-newrec__field-error');
+            if (msg) msg.remove();
+          };
+          row.addEventListener('input', clearError);
+          row.addEventListener('change', clearError);
+          fieldInputMap.set(field.code, { field, getValue, setValue, row, focusFn });
           row.appendChild(labelEl);
           row.appendChild(controlWrap);
           body.appendChild(row);
+        });
+        this._fieldInputMap = fieldInputMap;
+        this._dirtySnapshot = this._snapshotValues();
+      };
+
+      const focusFirst = () => {
+        requestAnimationFrame(() => {
+          const first = panel.querySelector('.pb-newrec__body input:not([tabindex="-1"]):not([readonly]), .pb-newrec__body textarea, .pb-newrec__body select');
+          if (first) { try { first.focus(); } catch (_e) { /* noop */ } }
         });
       };
 
@@ -455,27 +654,90 @@
 
       presetSelect.addEventListener('change', () => renderBody(presetSelect.value));
 
+      // 「保存して次へ」成功後にフォームを初期状態へ戻す
+      const resetForm = () => {
+        renderBody(presetSelect.value || activePresetId || (presets[0]?.id || ''));
+        focusFirst();
+      };
+
+      const buttons = { saveBtn, saveNextBtn, cancelBtn };
       saveBtn.addEventListener('click', () => {
-        void this._submit(appId, language, fieldInputMap, allFieldsMap, saveBtn, cancelBtn, listUrl);
+        void this._submit(appId, language, fieldInputMap, allFieldsMap, buttons, listUrl, { keepOpen: false, resetForm });
       });
+      saveNextBtn.addEventListener('click', () => {
+        void this._submit(appId, language, fieldInputMap, allFieldsMap, buttons, listUrl, { keepOpen: true, resetForm });
+      });
+      this._triggerSave = () => { if (!saveBtn.disabled) saveBtn.click(); };
+      this._triggerSaveNext = () => { if (!saveNextBtn.disabled) saveNextBtn.click(); };
 
       panel.appendChild(head);
       panel.appendChild(presetRow);
       panel.appendChild(body);
       panel.appendChild(foot);
 
-      requestAnimationFrame(() => {
-        const first = panel.querySelector('input:not([type="date"]):not([type="datetime-local"]), textarea, select:not(.pb-newrec__preset-select)');
-        if (first) first.focus();
+      focusFirst();
+    }
+
+    _markFieldError(entry, message) {
+      if (!entry?.row) return;
+      entry.row.classList.add('pb-newrec__field-row--error');
+      let msg = entry.row.querySelector('.pb-newrec__field-error');
+      if (!msg) {
+        msg = document.createElement('div');
+        msg.className = 'pb-newrec__field-error';
+        entry.row.appendChild(msg);
+      }
+      msg.textContent = message;
+    }
+
+    _clearFieldErrors(fieldInputMap) {
+      fieldInputMap.forEach((entry) => {
+        if (!entry?.row) return;
+        entry.row.classList.remove('pb-newrec__field-row--error');
+        const msg = entry.row.querySelector('.pb-newrec__field-error');
+        if (msg) msg.remove();
       });
     }
 
-    async _submit(appId, language, fieldInputMap, allFieldsMap, saveBtn, cancelBtn, listUrl) {
-      const t = (key) => resolveText(language, key);
-      const record = {};
-      let hasRequiredMissing = false;
+    _focusFirstError(fieldInputMap) {
+      for (const entry of fieldInputMap.values()) {
+        if (entry?.row?.classList.contains('pb-newrec__field-row--error')) {
+          try { entry.row.scrollIntoView({ block: 'center' }); } catch (_e) { /* noop */ }
+          entry.focusFn?.();
+          return;
+        }
+      }
+    }
 
-      fieldInputMap.forEach(({ field, getValue }) => {
+    // kintone APIのフィールド単位エラー（errorDetails）を該当フィールドに表示する。
+    // キー例: "records[0].数量.value" / "record.数量.value"
+    _applyServerErrors(fieldInputMap, response, t) {
+      const details = response?.errorDetails;
+      if (!details || typeof details !== 'object') return false;
+      let matched = false;
+      Object.entries(details).forEach(([key, val]) => {
+        const match = String(key).match(/(?:records\[\d+\]\.)?(?:record\.)?([^.\[\]]+)(?:\.value|\[|$)/);
+        const code = match ? match[1] : '';
+        const entry = code ? fieldInputMap.get(code) : null;
+        if (!entry) return;
+        const messages = Array.isArray(val?.messages) ? val.messages.join(' ') : String(val?.message || '');
+        this._markFieldError(entry, messages || t('toastNewRecordFailed'));
+        matched = true;
+      });
+      return matched;
+    }
+
+    async _submit(appId, language, fieldInputMap, allFieldsMap, buttons, listUrl, options = {}) {
+      const t = (key) => resolveText(language, key);
+      const { saveBtn, saveNextBtn, cancelBtn } = buttons;
+      const keepOpen = Boolean(options.keepOpen);
+      const record = {};
+      const missingEntries = [];
+
+      this._clearFieldErrors(fieldInputMap);
+
+      fieldInputMap.forEach((entry) => {
+        const { field, getValue } = entry;
         const raw = getValue();
         const type = String(field.type || '').toUpperCase();
         let value;
@@ -491,7 +753,7 @@
           if (type === 'NUMBER') value = qnrNormalizeNumberText(value);
         }
         const isEmpty = Array.isArray(value) ? value.length === 0 : value === '';
-        if (field.required && isEmpty) hasRequiredMissing = true;
+        if (field.required && isEmpty) missingEntries.push(entry);
         // 未入力フィールドはリクエストに含めない。
         // value:'' で明示送信するとkintoneアプリ側の初期値が適用されず
         // 空で確定し、そのフィールドを参照する計算フィールドがエラーになる。
@@ -501,14 +763,19 @@
 
       qnrAppendEmptySubtableRows(record, allFieldsMap);
 
-      if (hasRequiredMissing) {
+      if (missingEntries.length) {
+        missingEntries.forEach((entry) => this._markFieldError(entry, t('newRecordRequiredField')));
+        this._focusFirstError(fieldInputMap);
         this._showNotice(t('newRecordRequiredMissing'));
         return;
       }
 
+      const activeSaveBtn = keepOpen ? saveNextBtn : saveBtn;
+      const originalLabel = activeSaveBtn.textContent;
       saveBtn.disabled = true;
+      saveNextBtn.disabled = true;
       cancelBtn.disabled = true;
-      saveBtn.textContent = t('newRecordSaving');
+      activeSaveBtn.textContent = t('newRecordSaving');
 
       try {
         const response = await this.postFn('EXCEL_POST_RECORDS', {
@@ -516,26 +783,34 @@
           records: [record],
           __pbTrigger: 'quick_new_record'
         });
-        if (!response?.ok) throw new Error(response?.error || 'create failed');
-        this.close();
-        if (window.location.href === listUrl) {
-          try {
-            sessionStorage.setItem(QUICK_NEW_SCROLL_KEY, JSON.stringify({
-              url: listUrl,
-              y: Math.round(window.scrollY || 0),
-              savedAt: Date.now()
-            }));
-          } catch (_e) { /* noop */ }
-          window.location.reload();
-        } else {
-          window.location.href = listUrl;
+        if (!response?.ok) {
+          // フィールド単位のエラーは該当行に表示し、全体メッセージはトーストで伝える
+          const matched = this._applyServerErrors(fieldInputMap, response, t);
+          if (matched) this._focusFirstError(fieldInputMap);
+          const summary = String(response?.error || '').trim();
+          this._showNotice(summary ? `${t('toastNewRecordFailed')}: ${summary}` : t('toastNewRecordFailed'));
+          return;
         }
+        if (keepOpen) {
+          // 連続作成: フォームを初期状態に戻して次の入力へ。
+          // 一覧のリロードはモーダルを閉じるときにまとめて行う。
+          this._savedAny = true;
+          this._showNotice(t('newRecordSavedNext'));
+          if (typeof options.resetForm === 'function') options.resetForm();
+          return;
+        }
+        this.close({ skipReload: true });
+        this._reloadList(listUrl);
       } catch (err) {
         console.error('[kintone-excel-overlay] quick new record failed', err);
         this._showNotice(t('toastNewRecordFailed'));
-        saveBtn.disabled = false;
-        cancelBtn.disabled = false;
-        saveBtn.textContent = t('newRecordSave');
+      } finally {
+        if (this.el) {
+          saveBtn.disabled = false;
+          saveNextBtn.disabled = false;
+          cancelBtn.disabled = false;
+          activeSaveBtn.textContent = originalLabel;
+        }
       }
     }
 
@@ -592,7 +867,7 @@
     e.stopPropagation();
     e.stopImmediatePropagation();
     if (quickNewRecord.isVisible()) {
-      quickNewRecord.close();
+      void quickNewRecord.requestClose();
     } else {
       void quickNewRecord.open();
     }
