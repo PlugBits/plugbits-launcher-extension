@@ -2960,6 +2960,10 @@
   background: #eff6ff;
 }
 
+.pb-newrec__lookup-item--active {
+  background: #eff6ff;
+}
+
 .pb-newrec__lookup-item-main {
   font-size: 13px;
   font-weight: 600;

@@ -13299,6 +13299,8 @@
     let allLocalRecords = null;
     let outsideHandler = null;
     let searchTimer = null;
+    let activeIndex = -1;
+    let itemEls = [];
 
     function getDisplayValue(record, fieldCode) {
       const v = record?.[fieldCode];
@@ -13384,6 +13386,14 @@
       });
     }
 
+    // 手打ち値（または任意の文字列）と完全一致する候補を返す。
+    // 全件ローカルモードでは全件から、そうでなければ現在の絞り込み結果から探す
+    function findExactMatch(typed) {
+      if (!typed) return null;
+      const source = fullLocal ? allLocalRecords : records;
+      return (source || []).find((r) => getDisplayValue(r, relatedKeyField) === typed) || null;
+    }
+
     // 手打ち値と候補の完全一致を表示し、一致すればコピー先の表示も埋める。
     // 部分入力中（候補が下に見えている状態）は警告を出さず、
     // 候補がゼロになった時だけ「一致なし」を警告する
@@ -13395,8 +13405,7 @@
         indicatorEl.className = 'pb-newrec__lookup-indicator';
         return;
       }
-      const source = fullLocal ? allLocalRecords : records;
-      const exact = (source || []).find((r) => getDisplayValue(r, relatedKeyField) === typed);
+      const exact = findExactMatch(typed);
       if (exact) {
         indicatorEl.textContent = t('quickNewLookupMatch');
         indicatorEl.className = 'pb-newrec__lookup-indicator pb-newrec__lookup-indicator--ok';
@@ -13410,9 +13419,32 @@
       }
     }
 
+    // ハイライト移動: 現在のactiveIndexからdelta分だけ移動する（端でクランプ）。
+    // 開いている間のArrow操作はカーソル移動を奪うのでkeydown側でpreventDefaultする
+    function setActiveIndex(idx) {
+      if (activeIndex >= 0 && itemEls[activeIndex]) {
+        itemEls[activeIndex].classList.remove('pb-newrec__lookup-item--active');
+      }
+      activeIndex = idx;
+      if (activeIndex >= 0 && itemEls[activeIndex]) {
+        itemEls[activeIndex].classList.add('pb-newrec__lookup-item--active');
+        itemEls[activeIndex].scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    function moveActive(delta) {
+      if (!records.length) return;
+      let idx = activeIndex + delta;
+      if (idx < 0) idx = 0;
+      if (idx > records.length - 1) idx = records.length - 1;
+      setActiveIndex(idx);
+    }
+
     function renderList() {
       if (!listEl) return;
       listEl.innerHTML = '';
+      activeIndex = -1;
+      itemEls = [];
       countEl.textContent = totalCount > records.length
         ? t('quickNewLookupCount', records.length, totalCount)
         : '';
@@ -13421,7 +13453,7 @@
         setStatus(t('quickNewLookupEmpty'));
         return;
       }
-      records.forEach((record) => {
+      records.forEach((record, idx) => {
         const item = document.createElement('div');
         item.className = 'pb-newrec__lookup-item';
         const main = document.createElement('div');
@@ -13439,6 +13471,7 @@
           e.preventDefault();
           applyPick(record);
         });
+        itemEls[idx] = item;
         listEl.appendChild(item);
       });
     }
@@ -13494,6 +13527,54 @@
       }
     }
 
+    // 手打ち: 入力値で検索して候補を表示（デバウンス内蔵。
+    // 全件ローカルモードは体感即時、サーバーモードはAPI節約のため300ms）
+    function search(keyword) {
+      if (searchTimer) clearTimeout(searchTimer);
+      const delay = fullLocal ? 100 : 300;
+      searchTimer = setTimeout(() => {
+        searchTimer = null;
+        void load({ keyword: String(keyword || '').trim() });
+      }, delay);
+    }
+
+    // キーボード操作: ↑↓でハイライト移動、Enterで確定/離脱。
+    // Ctrl/Meta付きEnterはモーダル側の保存ショートカットに譲るため触らない
+    keyInput.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        if (!isOpen()) {
+          e.preventDefault();
+          search(keyInput.value);
+          return;
+        }
+        e.preventDefault();
+        moveActive(1);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        if (!isOpen()) return;
+        e.preventDefault();
+        moveActive(-1);
+        return;
+      }
+      if (e.key === 'Enter') {
+        if (e.ctrlKey || e.metaKey) return;
+        if (!isOpen()) return;
+        // IME変換確定のEnterでドロップダウンを閉じてしまわないようにする
+        if (e.isComposing || e.keyCode === 229) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const picked = activeIndex >= 0 && activeIndex < records.length
+          ? records[activeIndex]
+          : findExactMatch(String(keyInput.value || '').trim());
+        if (picked) {
+          applyPick(picked);
+        } else {
+          close();
+        }
+      }
+    });
+
     return {
       isOpen,
       close,
@@ -13502,16 +13583,7 @@
         if (isOpen() && !currentKeyword) { close(); return; }
         void load({ keyword: '' });
       },
-      // 手打ち: 入力値で検索して候補を表示（デバウンス内蔵。
-      // 全件ローカルモードは体感即時、サーバーモードはAPI節約のため300ms）
-      search(keyword) {
-        if (searchTimer) clearTimeout(searchTimer);
-        const delay = fullLocal ? 100 : 300;
-        searchTimer = setTimeout(() => {
-          searchTimer = null;
-          void load({ keyword: String(keyword || '').trim() });
-        }, delay);
-      }
+      search
     };
   }
 
