@@ -284,6 +284,13 @@
           if (this._confirmEl) return;
           e.preventDefault();
           e.stopPropagation();
+          // ルックアップのドロップダウンが開いていれば、まずそれだけ閉じる
+          const openPicker = layer.querySelector('.pb-newrec__lookup-picker');
+          if (openPicker) {
+            if (typeof openPicker.__pbClose === 'function') openPicker.__pbClose();
+            else openPicker.remove();
+            return;
+          }
           void this.requestClose();
           return;
         }
@@ -502,16 +509,31 @@
             const relatedKeyField = String(lookupInfo.relatedKeyField || lookupInfo.keyField || '').trim();
             const pickerFields = Array.isArray(lookupInfo.lookupPickerFields) ? lookupInfo.lookupPickerFields : [];
             const mappings = Array.isArray(lookupInfo.fieldMappings) ? lookupInfo.fieldMappings : [];
-            // 手入力されたらコピー先の表示をクリア（保存時にkintoneが取得し直すため、
-            // ピッカーで入れた古い表示が残ると誤解を招く）
+            const lookupPicker = relatedAppId
+              ? createNewRecordLookupPicker({
+                anchorEl: wrap,
+                relatedAppId,
+                relatedKeyField,
+                pickerFields,
+                mappings,
+                fieldInputMap,
+                keyInput: input,
+                postFn: this.postFn,
+                language
+              })
+              : null;
+            // 手打ち = インクリメンタル検索（デバウンスはピッカー内蔵）。
+            // コピー先の表示は一旦クリアし、完全一致が見つかれば
+            // インジケータ側で再度埋まる
             input.addEventListener('input', () => {
               mappings.forEach((m) => {
                 const autoEntry = fieldInputMap.get(m.field);
                 if (autoEntry?.setValue) autoEntry.setValue('');
               });
+              if (lookupPicker) lookupPicker.search(input.value);
             });
             searchBtn.addEventListener('click', () => {
-              buildNewRecordLookupPicker(wrap, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, input, this.postFn, language);
+              if (lookupPicker) lookupPicker.browse();
             });
           } else if (type === 'MULTI_LINE_TEXT') {
             const ta = document.createElement('textarea');

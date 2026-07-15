@@ -1427,11 +1427,11 @@
       confirmPageMoveUnsaved: "未保存の変更があります。ページを移動しますか？",
       newRecordLookupManualPh: "直接入力 または 🔍 で選択",
       newRecordLookupPickTitle: "候補から選択",
-      quickNewLookupSearchPh: "キー項目で検索...",
       quickNewLookupEmpty: "レコードがありません",
       quickNewLookupError: "取得に失敗しました",
-      quickNewLookupCount: (shown, total) => `全 ${total} 件中 ${shown} 件を表示（検索で絞り込めます）`,
-      quickNewLookupMore: "さらに読み込む",
+      quickNewLookupCount: (shown, total) => `全 ${total} 件中 ${shown} 件を表示（入力で絞り込み・スクロールで追加読み込み）`,
+      quickNewLookupMatch: "✓ 候補と一致しています",
+      quickNewLookupNoMatch: "一致する候補が見つかりません（このままでは保存できません）",
       newRecordSaveNext: "保存して次へ",
       newRecordSavedNext: "保存しました。続けて入力できます",
       newRecordRequiredField: "必須項目です",
@@ -1713,11 +1713,11 @@
       confirmPageMoveUnsaved: "You have unsaved changes. Move to another page?",
       newRecordLookupManualPh: "Type directly or pick with 🔍",
       newRecordLookupPickTitle: "Pick from candidates",
-      quickNewLookupSearchPh: "Search by key field...",
       quickNewLookupEmpty: "No records",
       quickNewLookupError: "Failed to load candidates",
-      quickNewLookupCount: (shown, total) => `Showing ${shown} of ${total} (type to narrow down)`,
-      quickNewLookupMore: "Load more",
+      quickNewLookupCount: (shown, total) => `Showing ${shown} of ${total} (type to narrow down, scroll to load more)`,
+      quickNewLookupMatch: "✓ Matches a candidate",
+      quickNewLookupNoMatch: "No matching candidate (saving will fail)",
       newRecordSaveNext: "Save & next",
       newRecordSavedNext: "Saved. Ready for the next record.",
       newRecordRequiredField: "This field is required",
@@ -13276,64 +13276,142 @@
 
   // ── Lookup Picker (shared by overlay modal and QuickNewRecordModal) ───────
 
-  // ルックアップ候補ピッカー。
-  // 候補はサーバーサイドで検索する（1回100件・関連アプリが100件を超えても
-  // キー項目のlike検索と「さらに読み込む」で全件に到達できる）。
-  function buildNewRecordLookupPicker(anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, keyInput, postFn, language) {
-    document.querySelectorAll('.pb-newrec__lookup-picker').forEach((el) => el.remove());
-    if (!relatedAppId) return;
+  // ルックアップ候補コンボボックス。
+  // - 初回に最大500件を1リクエストで取得。関連アプリが500件以下なら
+  //   「全件ローカルモード」になり、以後の絞り込みはAPI消費ゼロで即時。
+  // - 500件超は「サーバー検索モード」: キー項目のlike検索＋無限スクロールで
+  //   全件に到達できる（鮮度の問題があるためキャッシュはしない）。
+  // - 手打ち入力そのものが検索になり、完全一致の有無をインジケータで表示する。
+  function createNewRecordLookupPicker({ anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, keyInput, postFn, language }) {
     const t = (key, ...args) => resolveText(language, key, ...args);
+    const LOCAL_FULL_LIMIT = 500;
 
-    const picker = document.createElement('div');
-    picker.className = 'pb-newrec__lookup-picker';
-
-    const searchWrap = document.createElement('div');
-    searchWrap.className = 'pb-newrec__lookup-search';
-    const searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.className = 'pb-newrec__lookup-search-input';
-    searchInput.placeholder = t('quickNewLookupSearchPh');
-    searchWrap.appendChild(searchInput);
-
-    const countEl = document.createElement('div');
-    countEl.className = 'pb-newrec__lookup-count';
-
-    const list = document.createElement('div');
-    list.className = 'pb-newrec__lookup-list';
-
-    picker.appendChild(searchWrap);
-    picker.appendChild(countEl);
-    picker.appendChild(list);
-    anchorEl.appendChild(picker);
-
+    let picker = null;
+    let indicatorEl = null;
+    let countEl = null;
+    let listEl = null;
     let records = [];
     let totalCount = 0;
     let currentKeyword = '';
     let loading = false;
-    let searchTimer = null;
     let requestSeq = 0;
+    let fullLocal = false;
+    let allLocalRecords = null;
+    let outsideHandler = null;
+    let searchTimer = null;
 
     function getDisplayValue(record, fieldCode) {
-      const v = record[fieldCode];
+      const v = record?.[fieldCode];
       if (!v) return '';
       const val = v.value;
       if (Array.isArray(val)) return val.map((item) => (typeof item === 'object' ? item.value || '' : String(item))).join(', ');
       return String(val ?? '');
     }
 
+    function isOpen() {
+      return Boolean(picker && picker.isConnected);
+    }
+
+    function close() {
+      // 保留中のデバウンス検索もキャンセルする
+      // （Escで閉じた直後に検索が発火して再オープンするのを防ぐ）
+      if (searchTimer) {
+        clearTimeout(searchTimer);
+        searchTimer = null;
+      }
+      requestSeq += 1;
+      if (picker) picker.remove();
+      picker = null;
+      if (outsideHandler) {
+        document.removeEventListener('mousedown', outsideHandler, true);
+        outsideHandler = null;
+      }
+    }
+
+    function ensureOpen() {
+      if (isOpen()) return;
+      picker = document.createElement('div');
+      picker.className = 'pb-newrec__lookup-picker';
+      indicatorEl = document.createElement('div');
+      indicatorEl.className = 'pb-newrec__lookup-indicator';
+      countEl = document.createElement('div');
+      countEl.className = 'pb-newrec__lookup-count';
+      listEl = document.createElement('div');
+      listEl.className = 'pb-newrec__lookup-list';
+      // サーバー検索モードでは末尾までスクロールしたら自動で追加読み込み
+      listEl.addEventListener('scroll', () => {
+        if (fullLocal || loading) return;
+        if (records.length >= totalCount) return;
+        if (listEl.scrollTop + listEl.clientHeight >= listEl.scrollHeight - 60) {
+          void load({ keyword: currentKeyword, append: true });
+        }
+      });
+      picker.appendChild(indicatorEl);
+      picker.appendChild(countEl);
+      picker.appendChild(listEl);
+      // モーダルのEscハンドラから「ドロップダウンだけ閉じる」ために公開
+      picker.__pbClose = close;
+      anchorEl.appendChild(picker);
+      outsideHandler = (e) => {
+        if (picker && !picker.contains(e.target) && e.target !== keyInput && !anchorEl.contains(e.target)) {
+          close();
+        }
+      };
+      document.addEventListener('mousedown', outsideHandler, true);
+    }
+
     function setStatus(message) {
-      list.innerHTML = '';
+      if (!listEl) return;
+      listEl.innerHTML = '';
       const el = document.createElement('div');
       el.className = 'pb-newrec__lookup-status';
       el.textContent = message;
-      list.appendChild(el);
+      listEl.appendChild(el);
+    }
+
+    function applyPick(record) {
+      const mainVal = getDisplayValue(record, relatedKeyField);
+      keyInput.value = mainVal;
+      keyInput.dispatchEvent(new Event('change', { bubbles: true }));
+      fillMappings(record);
+      close();
+    }
+
+    function fillMappings(record) {
+      mappings.forEach((m) => {
+        const autoEntry = fieldInputMap.get(m.field);
+        if (autoEntry?.setValue) autoEntry.setValue(record ? getDisplayValue(record, m.relatedField) : '');
+      });
+    }
+
+    // 手打ち値と候補の完全一致を表示し、一致すればコピー先の表示も埋める
+    function updateIndicator() {
+      if (!indicatorEl) return;
+      const typed = String(keyInput.value || '').trim();
+      if (!typed) {
+        indicatorEl.textContent = '';
+        indicatorEl.className = 'pb-newrec__lookup-indicator';
+        return;
+      }
+      const source = fullLocal ? allLocalRecords : records;
+      const exact = (source || []).find((r) => getDisplayValue(r, relatedKeyField) === typed);
+      if (exact) {
+        indicatorEl.textContent = t('quickNewLookupMatch');
+        indicatorEl.className = 'pb-newrec__lookup-indicator pb-newrec__lookup-indicator--ok';
+        fillMappings(exact);
+      } else {
+        indicatorEl.textContent = t('quickNewLookupNoMatch');
+        indicatorEl.className = 'pb-newrec__lookup-indicator pb-newrec__lookup-indicator--warn';
+      }
     }
 
     function renderList() {
-      list.innerHTML = '';
+      if (!listEl) return;
+      listEl.innerHTML = '';
       countEl.textContent = totalCount > records.length
         ? t('quickNewLookupCount', records.length, totalCount)
         : '';
+      updateIndicator();
       if (!records.length) {
         setStatus(t('quickNewLookupEmpty'));
         return;
@@ -13341,10 +13419,9 @@
       records.forEach((record) => {
         const item = document.createElement('div');
         item.className = 'pb-newrec__lookup-item';
-        const mainVal = getDisplayValue(record, relatedKeyField);
         const main = document.createElement('div');
         main.className = 'pb-newrec__lookup-item-main';
-        main.textContent = mainVal;
+        main.textContent = getDisplayValue(record, relatedKeyField);
         item.appendChild(main);
         const subFields = pickerFields.filter((f) => f !== relatedKeyField);
         if (subFields.length) {
@@ -13355,79 +13432,82 @@
         }
         item.addEventListener('mousedown', (e) => {
           e.preventDefault();
-          keyInput.value = mainVal;
-          keyInput.dispatchEvent(new Event('change', { bubbles: true }));
-          mappings.forEach((m) => {
-            const autoEntry = fieldInputMap.get(m.field);
-            if (autoEntry?.setValue) autoEntry.setValue(getDisplayValue(record, m.relatedField));
-          });
-          picker.remove();
+          applyPick(record);
         });
-        list.appendChild(item);
+        listEl.appendChild(item);
       });
-      // 100件を超える場合はサーバーから追加読み込みできる
-      if (records.length < totalCount) {
-        const moreBtn = document.createElement('button');
-        moreBtn.type = 'button';
-        moreBtn.className = 'pb-newrec__lookup-more';
-        moreBtn.textContent = t('quickNewLookupMore');
-        moreBtn.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
-        moreBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          void fetchCandidates({ keyword: currentKeyword, append: true });
-        });
-        list.appendChild(moreBtn);
-      }
     }
 
-    async function fetchCandidates({ keyword = '', append = false } = {}) {
+    function filterLocal(keyword) {
+      const q = keyword.toLowerCase();
+      if (!q) return allLocalRecords.slice();
+      const checkFields = pickerFields.length ? pickerFields : [relatedKeyField];
+      return allLocalRecords.filter((record) =>
+        checkFields.some((f) => getDisplayValue(record, f).toLowerCase().includes(q)));
+    }
+
+    async function load({ keyword = '', append = false } = {}) {
+      ensureOpen();
+      // 全件ローカルモード: API消費ゼロで即時絞り込み
+      if (fullLocal) {
+        records = filterLocal(keyword);
+        totalCount = records.length;
+        currentKeyword = keyword;
+        renderList();
+        return;
+      }
       if (loading) return;
       loading = true;
       const seq = ++requestSeq;
-      if (!append) setStatus(resolveText(language, 'quickNewLoading'));
+      if (!append) setStatus(t('quickNewLoading'));
       try {
         const resp = await postFn('EXCEL_GET_LOOKUP_CANDIDATES', {
           relatedAppId,
           sort: '',
           keyword,
           keyField: relatedKeyField,
-          offset: append ? records.length : 0
+          offset: append ? records.length : 0,
+          limit: LOCAL_FULL_LIMIT
         });
-        if (seq !== requestSeq || !picker.isConnected) return;
+        if (seq !== requestSeq || !isOpen()) return;
         if (!resp?.ok) throw new Error(resp?.error || 'lookup fetch failed');
         const fetched = Array.isArray(resp?.result?.records) ? resp.result.records.map((r) => r.fields || r) : [];
         records = append ? records.concat(fetched) : fetched;
         totalCount = Number(resp?.result?.totalCount || fetched.length);
         currentKeyword = keyword;
+        // 検索なしの初回取得で全件が収まった → 以後はローカルモード
+        if (!keyword && !append && records.length >= totalCount) {
+          fullLocal = true;
+          allLocalRecords = records.slice();
+        }
         renderList();
       } catch (err) {
-        if (seq !== requestSeq || !picker.isConnected) return;
+        if (seq !== requestSeq || !isOpen()) return;
         setStatus(t('quickNewLookupError'));
       } finally {
         if (seq === requestSeq) loading = false;
       }
     }
 
-    // サーバーサイド検索（デバウンス300ms）。ローカルの部分一致では
-    // 先頭100件しか対象にならないため、キー項目のlike検索をAPIで行う
-    searchInput.addEventListener('input', () => {
-      if (searchTimer) clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => {
-        void fetchCandidates({ keyword: searchInput.value.trim() });
-      }, 300);
-    });
-
-    document.addEventListener('mousedown', function onOutside(e) {
-      if (!picker.contains(e.target) && e.target !== anchorEl) {
-        picker.remove();
-        document.removeEventListener('mousedown', onOutside, true);
+    return {
+      isOpen,
+      close,
+      // 🔍ボタン: 全候補ブラウズ（開いていれば閉じるトグル）
+      browse() {
+        if (isOpen() && !currentKeyword) { close(); return; }
+        void load({ keyword: '' });
+      },
+      // 手打ち: 入力値で検索して候補を表示（デバウンス内蔵。
+      // 全件ローカルモードは体感即時、サーバーモードはAPI節約のため300ms）
+      search(keyword) {
+        if (searchTimer) clearTimeout(searchTimer);
+        const delay = fullLocal ? 100 : 300;
+        searchTimer = setTimeout(() => {
+          searchTimer = null;
+          void load({ keyword: String(keyword || '').trim() });
+        }, delay);
       }
-    }, true);
-
-    void fetchCandidates().then(() => {
-      try { searchInput.focus(); } catch (_e) { /* noop */ }
-    });
+    };
   }
 
   // ── Quick New Record Modal ───────────────────────────────────────────────
@@ -13710,6 +13790,13 @@
           if (this._confirmEl) return;
           e.preventDefault();
           e.stopPropagation();
+          // ルックアップのドロップダウンが開いていれば、まずそれだけ閉じる
+          const openPicker = layer.querySelector('.pb-newrec__lookup-picker');
+          if (openPicker) {
+            if (typeof openPicker.__pbClose === 'function') openPicker.__pbClose();
+            else openPicker.remove();
+            return;
+          }
           void this.requestClose();
           return;
         }
@@ -13928,16 +14015,31 @@
             const relatedKeyField = String(lookupInfo.relatedKeyField || lookupInfo.keyField || '').trim();
             const pickerFields = Array.isArray(lookupInfo.lookupPickerFields) ? lookupInfo.lookupPickerFields : [];
             const mappings = Array.isArray(lookupInfo.fieldMappings) ? lookupInfo.fieldMappings : [];
-            // 手入力されたらコピー先の表示をクリア（保存時にkintoneが取得し直すため、
-            // ピッカーで入れた古い表示が残ると誤解を招く）
+            const lookupPicker = relatedAppId
+              ? createNewRecordLookupPicker({
+                anchorEl: wrap,
+                relatedAppId,
+                relatedKeyField,
+                pickerFields,
+                mappings,
+                fieldInputMap,
+                keyInput: input,
+                postFn: this.postFn,
+                language
+              })
+              : null;
+            // 手打ち = インクリメンタル検索（デバウンスはピッカー内蔵）。
+            // コピー先の表示は一旦クリアし、完全一致が見つかれば
+            // インジケータ側で再度埋まる
             input.addEventListener('input', () => {
               mappings.forEach((m) => {
                 const autoEntry = fieldInputMap.get(m.field);
                 if (autoEntry?.setValue) autoEntry.setValue('');
               });
+              if (lookupPicker) lookupPicker.search(input.value);
             });
             searchBtn.addEventListener('click', () => {
-              buildNewRecordLookupPicker(wrap, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, input, this.postFn, language);
+              if (lookupPicker) lookupPicker.browse();
             });
           } else if (type === 'MULTI_LINE_TEXT') {
             const ta = document.createElement('textarea');

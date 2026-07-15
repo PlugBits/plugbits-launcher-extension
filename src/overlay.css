@@ -3339,20 +3339,20 @@
   display: none;
 }
 
-.pb-newrec__lookup-more {
-  display: block;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-top: 1px solid #eef1f6;
-  background: #f8fafc;
-  color: #2563eb;
-  font-size: 12px;
+.pb-newrec__lookup-indicator {
+  padding: 6px 10px 0;
+  font-size: 11px;
   font-weight: 600;
-  cursor: pointer;
-  text-align: center;
 }
 
-.pb-newrec__lookup-more:hover {
-  background: #eff4ff;
+.pb-newrec__lookup-indicator:empty {
+  display: none;
+}
+
+.pb-newrec__lookup-indicator--ok {
+  color: #15803d;
+}
+
+.pb-newrec__lookup-indicator--warn {
+  color: #b45309;
 }

@@ -1641,6 +1641,8 @@ function markLookupAutoFields(properties, metas) {
         const keyField = String(payload?.keyField || '').trim();
         const offsetRaw = Number(payload?.offset);
         const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
+        const limitRaw = Number(payload?.limit);
+        const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 500) : 500;
         const buildQuery = (conditionOp) => {
           const parts = [];
           if (keyword && keyField) {
@@ -1648,7 +1650,7 @@ function markLookupAutoFields(properties, metas) {
             parts.push(`${keyField} ${conditionOp} "${escaped}"`);
           }
           if (sort) parts.push(`order by ${sort}`);
-          parts.push('limit 100');
+          parts.push(`limit ${limit}`);
           if (offset) parts.push(`offset ${offset}`);
           return parts.join(' ');
         };
