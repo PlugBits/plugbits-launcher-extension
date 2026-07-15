@@ -1422,10 +1422,16 @@
       confirmCloseAction: "閉じる",
       confirmPageMoveUnsaved: "未保存の変更があります。ページを移動しますか？",
       btnRecalc: "再計算",
-      titleRecalc: "表示中のレコードを再保存して、計算フィールドを最新の計算式で更新します",
-      recalcConfirm: (count) => `表示中の ${count} 件のレコードを再保存して、計算フィールドを最新の状態に更新します。\n\n・値は変更しませんが「保存」として扱われるため、更新日時・更新者が変わります\n・プロセス管理や通知の設定によっては、それらが動作する場合があります`,
+      titleRecalc: "レコードを再保存して、計算フィールドを最新の計算式で更新します",
+      recalcScopeMessage: "レコードを再保存して、計算フィールドを最新の状態に更新します。範囲を選択してください。\n\n・値は変更しませんが「保存」として扱われるため、更新日時・更新者が変わります\n・プロセス管理や通知の設定によっては、それらが動作する場合があります",
+      recalcScopePage: (count) => `表示中の ${count} 件`,
+      recalcScopeAll: "アプリ全体",
+      recalcFetchingIds: "対象レコードを確認しています…",
+      recalcConfirmAll: (count, requests) => `アプリ全体の ${count} 件を再保存します（API 約 ${requests} 回）。よろしいですか？\n\n※編集権限のないレコードを含む一部は更新できない場合があります`,
       recalcConfirmAction: "再計算する",
+      recalcProgress: (done, total) => `再計算中… ${done} / ${total} 件`,
       recalcDone: (count) => `${count} 件を再計算しました`,
+      recalcPartial: (okCount, ngCount) => `${okCount} 件を再計算しました（${ngCount} 件は更新できませんでした）`,
       recalcFailed: "再計算に失敗しました",
       recalcNoTargets: "再計算できるレコードがありません",
       reloading: "一覧を更新しています…",
@@ -1690,10 +1696,16 @@
       confirmCloseAction: "Close",
       confirmPageMoveUnsaved: "You have unsaved changes. Move to another page?",
       btnRecalc: "Recalculate",
-      titleRecalc: "Re-save the visible records so calculated fields reflect the latest formulas",
-      recalcConfirm: (count) => `Re-save the ${count} visible records to refresh their calculated fields.\n\n- No values are changed, but this counts as a save: updated time and updater will change\n- Process management or notifications may be triggered depending on the app settings`,
+      titleRecalc: "Re-save records so calculated fields reflect the latest formulas",
+      recalcScopeMessage: "Re-save records to refresh their calculated fields. Choose the scope.\n\n- No values are changed, but this counts as a save: updated time and updater will change\n- Process management or notifications may be triggered depending on the app settings",
+      recalcScopePage: (count) => `Visible ${count} records`,
+      recalcScopeAll: "Entire app",
+      recalcFetchingIds: "Collecting target records…",
+      recalcConfirmAll: (count, requests) => `Re-save all ${count} records in this app (about ${requests} API requests). Continue?\n\nNote: batches containing records you cannot edit may fail to update.`,
       recalcConfirmAction: "Recalculate",
+      recalcProgress: (done, total) => `Recalculating… ${done} / ${total}`,
       recalcDone: (count) => `Recalculated ${count} records`,
+      recalcPartial: (okCount, ngCount) => `Recalculated ${okCount} records (${ngCount} could not be updated)`,
       recalcFailed: "Failed to recalculate",
       recalcNoTargets: "No records available to recalculate",
       reloading: "Refreshing list…",
@@ -2086,7 +2098,7 @@
   function ensureOverlayControllerReady() {
     if (overlayController) return true;
     if (!isSupportedAppContextPage()) return false;
-    const overlayPostToPage = (type, payload) => postToPage(type, payload, { feature: 'overlay' });
+    const overlayPostToPage = (type, payload, meta = {}) => postToPage(type, payload, { feature: 'overlay', ...meta });
     overlayController = new ExcelOverlayController(overlayPostToPage);
     return true;
   }

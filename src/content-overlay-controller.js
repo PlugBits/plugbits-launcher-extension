@@ -1888,12 +1888,21 @@
         cancelBtn.type = 'button';
         cancelBtn.className = 'pb-overlay__upsell-btn';
         cancelBtn.textContent = options.cancelLabel || resolveText(this.language, 'confirmCancel');
+        // options.extraLabel: 第3の選択肢（結果は 'extra' で解決される）
+        let extraBtn = null;
+        if (options.extraLabel) {
+          extraBtn = document.createElement('button');
+          extraBtn.type = 'button';
+          extraBtn.className = 'pb-overlay__upsell-btn';
+          extraBtn.textContent = options.extraLabel;
+        }
         const okBtn = document.createElement('button');
         okBtn.type = 'button';
         okBtn.className = 'pb-overlay__upsell-btn pb-overlay__upsell-btn--primary'
           + (options.danger ? ' pb-overlay__confirm-btn--danger' : '');
         okBtn.textContent = options.confirmLabel || resolveText(this.language, 'confirmOk');
-        actions.append(cancelBtn, okBtn);
+        if (extraBtn) actions.append(cancelBtn, extraBtn, okBtn);
+        else actions.append(cancelBtn, okBtn);
 
         card.append(text, actions);
         layer.appendChild(card);
@@ -1911,14 +1920,19 @@
         layer.addEventListener('mousedown', (event) => {
           if (event.target === layer) finish(false);
         });
+        const focusables = extraBtn ? [cancelBtn, extraBtn, okBtn] : [cancelBtn, okBtn];
         layer.addEventListener('keydown', (event) => {
           if (event.key === 'Tab') {
             event.preventDefault();
             event.stopPropagation();
-            (document.activeElement === okBtn ? cancelBtn : okBtn).focus();
+            const index = focusables.indexOf(document.activeElement);
+            const step = event.shiftKey ? -1 : 1;
+            const next = focusables[(index + step + focusables.length) % focusables.length] || okBtn;
+            next.focus();
           }
         });
         cancelBtn.addEventListener('click', () => finish(false));
+        if (extraBtn) extraBtn.addEventListener('click', () => finish('extra'));
         okBtn.addEventListener('click', () => finish(true));
 
         this.root.appendChild(layer);
@@ -2756,49 +2770,129 @@
       }
     }
 
-    // 計算フィールドの再計算: 表示中レコードを値を変えずに再保存する。
+    // 計算フィールドの再計算: レコードを値を変えずに再保存する。
     // kintoneは保存時に計算フィールドを再計算するため、計算式を追加・変更した
-    // 後の既存レコードもこれで最新の値になる（1ページ=最大100件=PUT 1リクエスト）。
+    // 後の既存レコードもこれで最新の値になる（PUTは100件=1リクエスト）。
     // 更新日時・更新者が変わり、プロセス管理や通知が動く可能性があるため
-    // 実行前に必ず確認ダイアログを挟む。
+    // 実行前に必ず確認ダイアログを挟み、範囲（表示中 / アプリ全体）を選ばせる。
     async recalcCurrentPage() {
       if (this.saving || this.paging || !this.isOpen || !this.appId) return;
       if (!this.canMutateOverlay(true)) return;
       const proceed = await this.confirmPageMoveIfNeeded();
       if (!proceed) return;
-      const ids = Array.from(new Set(
+      const pageIds = Array.from(new Set(
         this.rows
           .map((row) => String(row?.id || '').trim())
           .filter((id) => id && !this.isNewRowId(id))
           .filter((id) => this.permissionService.canEditRecord(id))
       ));
-      if (!ids.length) {
+      if (!pageIds.length) {
         this.notify(resolveText(this.language, 'recalcNoTargets'));
         return;
       }
-      const ok = await this.overlayConfirm(resolveText(this.language, 'recalcConfirm', ids.length), {
-        confirmLabel: resolveText(this.language, 'recalcConfirmAction')
+      // 範囲選択: OK=表示中ページ / extra=アプリ全体
+      const scope = await this.overlayConfirm(resolveText(this.language, 'recalcScopeMessage'), {
+        confirmLabel: resolveText(this.language, 'recalcScopePage', pageIds.length),
+        extraLabel: resolveText(this.language, 'recalcScopeAll')
       });
-      if (!ok) return;
+      if (!scope) return;
       if (this.recalcButton) this.recalcButton.disabled = true;
-      this.showLoading(resolveText(this.language, 'loading'), { skeleton: true });
       try {
-        const response = await this.postFn('EXCEL_PUT_RECORDS', {
-          appId: this.appId,
-          records: ids.map((id) => ({ id, record: {} })),
-          __pbTrigger: 'recalc_click'
-        });
-        if (!response?.ok) throw new Error(response?.error || 'recalc failed');
+        if (scope === 'extra') {
+          await this.runRecalcForApp();
+        } else {
+          await this.runRecalcForIds(pageIds);
+        }
+      } finally {
+        this.updatePermissionUiState();
+      }
+    }
+
+    // アプリ全体の再計算: 全レコードIDをシーク法（$id昇順・500件/回）で収集し、
+    // 件数と概算API回数を確認してから 100件ずつバッチPUTする。
+    async runRecalcForApp() {
+      this.showLoading(resolveText(this.language, 'recalcFetchingIds'));
+      let allIds = [];
+      try {
+        allIds = await this.fetchAllRecordIdsForRecalc();
+      } catch (error) {
+        console.error('[kintone-excel-overlay] recalc id fetch failed', error);
+        this.hideLoading();
+        this.notify(resolveText(this.language, 'recalcFailed'));
+        return;
+      }
+      this.hideLoading();
+      if (!allIds.length) {
+        this.notify(resolveText(this.language, 'recalcNoTargets'));
+        return;
+      }
+      const requests = Math.ceil(allIds.length / 100);
+      const ok = await this.overlayConfirm(
+        resolveText(this.language, 'recalcConfirmAll', allIds.length, requests),
+        { confirmLabel: resolveText(this.language, 'recalcConfirmAction') }
+      );
+      if (!ok) return;
+      await this.runRecalcForIds(allIds);
+    }
+
+    async runRecalcForIds(ids) {
+      let done = 0;
+      let failedCount = 0;
+      try {
+        for (let i = 0; i < ids.length; i += 100) {
+          const chunk = ids.slice(i, i + 100);
+          this.showLoading(resolveText(this.language, 'recalcProgress', done, ids.length));
+          const response = await this.postFn('EXCEL_PUT_RECORDS', {
+            appId: this.appId,
+            records: chunk.map((id) => ({ id, record: {} })),
+            __pbTrigger: 'recalc_click'
+          }, { timeout: 30000 });
+          // 一括PUTはリクエスト単位で成否が決まる（権限のないレコードを含む等）。
+          // 失敗したバッチは件数として記録し、残りの処理は続行する。
+          if (response?.ok) done += chunk.length;
+          else failedCount += chunk.length;
+        }
         this.hideLoading();
         await this.reloadPage();
-        this.notify(resolveText(this.language, 'recalcDone', ids.length));
+        if (failedCount > 0 && done > 0) {
+          this.notify(resolveText(this.language, 'recalcPartial', done, failedCount));
+        } else if (failedCount > 0) {
+          this.notify(resolveText(this.language, 'recalcFailed'));
+        } else {
+          this.notify(resolveText(this.language, 'recalcDone', done));
+        }
       } catch (error) {
         console.error('[kintone-excel-overlay] recalc failed', error);
         this.hideLoading();
         this.notify(resolveText(this.language, 'recalcFailed'));
-      } finally {
-        this.updatePermissionUiState();
       }
+    }
+
+    // 全レコードの $id を収集する。offset上限(1万件)を避けるため
+    // 「$id > 前回の最大ID order by $id asc limit 500」のシーク法でページングする。
+    async fetchAllRecordIdsForRecalc() {
+      const ids = [];
+      let lastId = '';
+      for (;;) {
+        const condition = lastId ? `$id > ${lastId} ` : '';
+        const response = await this.postFn('EXCEL_GET_RECORDS', {
+          appId: this.appId,
+          fields: ['$id'],
+          query: `${condition}order by $id asc limit 500`,
+          __pbTrigger: 'recalc_fetch_ids'
+        }, { timeout: 30000 });
+        if (!response?.ok) throw new Error(response?.error || 'failed to fetch record ids');
+        const records = Array.isArray(response.records) ? response.records : [];
+        records.forEach((record) => {
+          const id = String(record?.$id?.value || '').trim();
+          if (id) ids.push(id);
+        });
+        if (records.length < 500) break;
+        lastId = ids[ids.length - 1];
+        // 安全弁: 異常な件数でも無限ループしない
+        if (ids.length >= 100000) break;
+      }
+      return ids;
     }
 
     async refreshListRowsAfterSave() {
