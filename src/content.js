@@ -13384,7 +13384,9 @@
       });
     }
 
-    // 手打ち値と候補の完全一致を表示し、一致すればコピー先の表示も埋める
+    // 手打ち値と候補の完全一致を表示し、一致すればコピー先の表示も埋める。
+    // 部分入力中（候補が下に見えている状態）は警告を出さず、
+    // 候補がゼロになった時だけ「一致なし」を警告する
     function updateIndicator() {
       if (!indicatorEl) return;
       const typed = String(keyInput.value || '').trim();
@@ -13399,9 +13401,12 @@
         indicatorEl.textContent = t('quickNewLookupMatch');
         indicatorEl.className = 'pb-newrec__lookup-indicator pb-newrec__lookup-indicator--ok';
         fillMappings(exact);
-      } else {
+      } else if (!records.length) {
         indicatorEl.textContent = t('quickNewLookupNoMatch');
         indicatorEl.className = 'pb-newrec__lookup-indicator pb-newrec__lookup-indicator--warn';
+      } else {
+        indicatorEl.textContent = '';
+        indicatorEl.className = 'pb-newrec__lookup-indicator';
       }
     }
 
