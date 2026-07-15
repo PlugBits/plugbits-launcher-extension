@@ -26,8 +26,6 @@
       this.redoButton = null;
       this.closeButton = null;
       this.addRowButton = null;
-      this.newRecordButton = null;
-      this.newRecordModal = null;
       this.titleElement = null;
       this.layoutToggleWrap = null;
       this.gridLayoutButton = null;
@@ -5537,362 +5535,6 @@
       return '';
     }
 
-    closeNewRecordModal() {
-      if (this.newRecordModal) {
-        this.newRecordModal.remove();
-        this.newRecordModal = null;
-      }
-    }
-
-    openNewRecordModal() {
-      if (!this.root || !this.isOverlayEditable() || !this.permissionService.canAddRow()) return;
-      this.closeNewRecordModal();
-
-      const NON_EDITABLE_TYPES = new Set([
-        'RECORD_NUMBER', 'CREATED_TIME', 'UPDATED_TIME', 'CREATOR', 'MODIFIER',
-        'STATUS', 'STATUS_ASSIGNEE', 'CALC', 'REFERENCE_TABLE', 'RICH_TEXT',
-        'SUBTABLE', 'FILE'
-      ]);
-      const allFieldsMap = new Map(this.fields.map((f) => [f.code, f]));
-      const isLookupKeyField = (f) => !f.lookupAuto && (String(f.type || '').toUpperCase() === 'LOOKUP' || (f.lookup && !f.lookupAuto));
-      const lookupAutoSet = new Set();
-      this.fields.forEach((f) => {
-        if (isLookupKeyField(f) && Array.isArray(f.lookup?.fieldMappings)) {
-          f.lookup.fieldMappings.forEach((m) => { if (m.field) lookupAutoSet.add(m.field); });
-        }
-      });
-      const formFields = [];
-      const addedCodes = new Set();
-      this.fields.forEach((f) => {
-        if (!f || !f.type) return;
-        const type = String(f.type).toUpperCase();
-        if (NON_EDITABLE_TYPES.has(type)) return;
-        if (lookupAutoSet.has(f.code)) return;
-        if (f.lookupAuto) return;
-        formFields.push(f);
-        addedCodes.add(f.code);
-        if (isLookupKeyField(f) && Array.isArray(f.lookup?.fieldMappings)) {
-          f.lookup.fieldMappings.forEach((m) => {
-            const autoField = allFieldsMap.get(m.field);
-            if (autoField && !addedCodes.has(m.field)) {
-              formFields.push({ ...autoField, _isLookupAuto: true, _lookupSourceCode: f.code });
-              addedCodes.add(m.field);
-            }
-          });
-        }
-      });
-
-      const layer = document.createElement('div');
-      layer.className = 'pb-newrec__layer';
-      layer.addEventListener('mousedown', (e) => {
-        if (e.target === layer) this.closeNewRecordModal();
-      });
-
-      const panel = document.createElement('div');
-      panel.className = 'pb-newrec__panel';
-      panel.addEventListener('click', (e) => e.stopPropagation());
-
-      const head = document.createElement('div');
-      head.className = 'pb-newrec__head';
-      const title = document.createElement('div');
-      title.className = 'pb-newrec__title';
-      title.textContent = resolveText(this.language, 'newRecordTitle');
-      const closeBtn = document.createElement('button');
-      closeBtn.type = 'button';
-      closeBtn.className = 'pb-newrec__close';
-      closeBtn.textContent = '×';
-      closeBtn.setAttribute('aria-label', resolveText(this.language, 'newRecordCancel'));
-      closeBtn.addEventListener('click', () => this.closeNewRecordModal());
-      head.appendChild(title);
-      head.appendChild(closeBtn);
-
-      const body = document.createElement('div');
-      body.className = 'pb-newrec__body';
-
-      const fieldInputMap = new Map();
-
-      formFields.forEach((field) => {
-        const row = document.createElement('div');
-        row.className = 'pb-newrec__field-row';
-
-        const labelEl = document.createElement('label');
-        labelEl.className = 'pb-newrec__label';
-        const labelText = document.createElement('span');
-        labelText.textContent = field.label || field.code;
-        if (field.required) {
-          const req = document.createElement('span');
-          req.className = 'pb-newrec__required';
-          req.textContent = ' *';
-          labelText.appendChild(req);
-        }
-        labelEl.appendChild(labelText);
-
-        const controlWrap = document.createElement('div');
-        controlWrap.className = 'pb-newrec__control';
-
-        const type = String(field.type || '').toUpperCase();
-        let getValue;
-        let setValue;
-
-        if (field._isLookupAuto) {
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'pb-newrec__input pb-newrec__input--lookup-auto';
-          input.readOnly = true;
-          input.placeholder = '—';
-          controlWrap.appendChild(input);
-          getValue = () => input.value;
-          setValue = (v) => { input.value = v; };
-          row.classList.add('pb-newrec__field-row--lookup-auto');
-        } else if (isLookupKeyField(field)) {
-          const wrap = document.createElement('div');
-          wrap.className = 'pb-newrec__lookup-wrap';
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'pb-newrec__input';
-          input.readOnly = true;
-          const searchBtn = document.createElement('button');
-          searchBtn.type = 'button';
-          searchBtn.className = 'pb-newrec__lookup-btn';
-          searchBtn.textContent = '🔍';
-          wrap.appendChild(input);
-          wrap.appendChild(searchBtn);
-          controlWrap.appendChild(wrap);
-          getValue = () => input.value;
-          setValue = (v) => { input.value = v; };
-          const lookupInfo = field.lookup || {};
-          const relatedAppId = String(
-            lookupInfo.relatedApp?.app || lookupInfo.relatedApp?.code || lookupInfo.relatedApp || ''
-          ).trim();
-          const relatedKeyField = String(lookupInfo.relatedKeyField || lookupInfo.keyField || '').trim();
-          const pickerFields = Array.isArray(lookupInfo.lookupPickerFields) ? lookupInfo.lookupPickerFields : [];
-          const mappings = Array.isArray(lookupInfo.fieldMappings) ? lookupInfo.fieldMappings : [];
-          searchBtn.addEventListener('click', () => {
-            buildNewRecordLookupPicker(wrap, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, input, this.postFn, this.language);
-          });
-        } else if (type === 'MULTI_LINE_TEXT') {
-          const ta = document.createElement('textarea');
-          ta.className = 'pb-newrec__textarea';
-          ta.rows = 3;
-          controlWrap.appendChild(ta);
-          getValue = () => ta.value;
-          setValue = (v) => { ta.value = String(v ?? ''); };
-        } else if (type === 'DROP_DOWN' || type === 'RADIO_BUTTON') {
-          const select = document.createElement('select');
-          select.className = 'pb-newrec__select';
-          const emptyOpt = document.createElement('option');
-          emptyOpt.value = '';
-          emptyOpt.textContent = '';
-          select.appendChild(emptyOpt);
-          (Array.isArray(field.choices) ? field.choices : []).forEach((c) => {
-            const opt = document.createElement('option');
-            opt.value = String(c || '');
-            opt.textContent = String(c || '');
-            select.appendChild(opt);
-          });
-          controlWrap.appendChild(select);
-          getValue = () => select.value;
-          setValue = (v) => {
-            const value = String(v ?? '');
-            select.value = value;
-          };
-        } else if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
-          const checkWrap = document.createElement('div');
-          checkWrap.className = 'pb-newrec__checkgroup';
-          const checkboxes = [];
-          (Array.isArray(field.choices) ? field.choices : []).forEach((c) => {
-            const item = document.createElement('label');
-            item.className = 'pb-newrec__check-item';
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.value = String(c || '');
-            checkboxes.push(cb);
-            item.appendChild(cb);
-            item.appendChild(document.createTextNode(String(c || '')));
-            checkWrap.appendChild(item);
-          });
-          controlWrap.appendChild(checkWrap);
-          getValue = () => checkboxes.filter((cb) => cb.checked).map((cb) => cb.value);
-          setValue = (v) => {
-            const selected = new Set((Array.isArray(v) ? v : [v]).map((item) => String(item ?? '')));
-            checkboxes.forEach((cb) => { cb.checked = selected.has(cb.value); });
-          };
-        } else if (type === 'DATE') {
-          const inputWrap = document.createElement('div');
-          inputWrap.className = 'pb-newrec__date-wrap';
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'pb-newrec__input';
-          input.placeholder = 't · +3 · end · end+1 · first · mon';
-          input.addEventListener('focus', () => { if (input.value) input.select(); });
-          input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === 'Tab') {
-              const smart = smartDateToYMD(input.value);
-              if (smart) { input.value = smart; input.select(); }
-              if (e.key === 'Enter') e.preventDefault();
-            }
-          });
-          const pickerLabel = document.createElement('label');
-          pickerLabel.className = 'pb-newrec__date-btn';
-          pickerLabel.textContent = '▾';
-          const nativePicker = document.createElement('input');
-          nativePicker.type = 'date';
-          nativePicker.className = 'pb-overlay__date-pick-native';
-          nativePicker.tabIndex = -1;
-          pickerLabel.appendChild(nativePicker);
-          pickerLabel.addEventListener('mousedown', (e) => { e.stopPropagation(); nativePicker.value = input.value || ''; });
-          nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
-          nativePicker.addEventListener('change', () => { if (nativePicker.value) input.value = nativePicker.value; });
-          inputWrap.appendChild(input);
-          inputWrap.appendChild(pickerLabel);
-          controlWrap.appendChild(inputWrap);
-          getValue = () => { const smart = smartDateToYMD(input.value); return smart || input.value || ''; };
-          setValue = (v) => { input.value = String(v ?? ''); };
-        } else if (type === 'DATETIME') {
-          const inputWrap = document.createElement('div');
-          inputWrap.className = 'pb-newrec__date-wrap';
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'pb-newrec__input';
-          input.placeholder = 'now · t · +1d · +2h · +30m';
-          input.addEventListener('focus', () => { if (input.value) input.select(); });
-          input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === 'Tab') {
-              const utc = smartDateTimeToUtc(input.value, this.kintoneTimezone);
-              if (utc) input.value = utcToLocalDisplay(utc, this.kintoneTimezone);
-              if (e.key === 'Enter') e.preventDefault();
-            }
-          });
-          const pickerLabel = document.createElement('label');
-          pickerLabel.className = 'pb-newrec__date-btn';
-          pickerLabel.textContent = '▾';
-          const nativePicker = document.createElement('input');
-          nativePicker.type = 'datetime-local';
-          nativePicker.className = 'pb-overlay__date-pick-native';
-          nativePicker.tabIndex = -1;
-          pickerLabel.appendChild(nativePicker);
-          pickerLabel.addEventListener('mousedown', (e) => { e.stopPropagation(); nativePicker.value = input.value ? input.value.replace(' ', 'T') : ''; });
-          nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
-          nativePicker.addEventListener('change', () => { if (nativePicker.value) input.value = nativePicker.value.replace('T', ' '); });
-          inputWrap.appendChild(input);
-          inputWrap.appendChild(pickerLabel);
-          controlWrap.appendChild(inputWrap);
-          getValue = () => { const utc = smartDateTimeToUtc(input.value, this.kintoneTimezone); return utc || input.value || ''; };
-          setValue = (v) => { input.value = String(v ?? ''); };
-        } else {
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'pb-newrec__input';
-          if (type === 'NUMBER') input.inputMode = 'decimal';
-          if (type === 'LINK') input.inputMode = 'url';
-          controlWrap.appendChild(input);
-          getValue = () => input.value;
-          setValue = (v) => { input.value = String(v ?? ''); };
-        }
-
-        if (!field._isLookupAuto && hasFieldDefaultValue(field) && typeof setValue === 'function') {
-          setValue(normalizeFieldDefaultValue(field, this.kintoneTimezone));
-        }
-        fieldInputMap.set(field.code, { field, getValue, setValue });
-        labelEl.htmlFor = '';
-        row.appendChild(labelEl);
-        row.appendChild(controlWrap);
-        body.appendChild(row);
-      });
-
-      const foot = document.createElement('div');
-      foot.className = 'pb-newrec__foot';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.type = 'button';
-      cancelBtn.className = 'pb-overlay__btn';
-      cancelBtn.textContent = resolveText(this.language, 'newRecordCancel');
-      cancelBtn.addEventListener('click', () => this.closeNewRecordModal());
-
-      const saveBtn = document.createElement('button');
-      saveBtn.type = 'button';
-      saveBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
-      saveBtn.textContent = resolveText(this.language, 'newRecordSave');
-      saveBtn.addEventListener('click', () => this.submitNewRecord(fieldInputMap, saveBtn, cancelBtn));
-
-      foot.appendChild(cancelBtn);
-      foot.appendChild(saveBtn);
-
-      panel.appendChild(head);
-      panel.appendChild(body);
-      panel.appendChild(foot);
-      layer.appendChild(panel);
-      this.root.appendChild(layer);
-      this.newRecordModal = layer;
-
-      // focus first editable input
-      requestAnimationFrame(() => {
-        const first = panel.querySelector('input:not([type="date"]), textarea, select');
-        if (first) first.focus();
-      });
-    }
-
-    async submitNewRecord(fieldInputMap, saveBtn, cancelBtn) {
-      if (!this.appId) return;
-      const record = {};
-      let hasRequiredMissing = false;
-
-      fieldInputMap.forEach(({ field, getValue }) => {
-        const raw = getValue();
-        const type = String(field.type || '').toUpperCase();
-        let value;
-        if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
-          value = Array.isArray(raw) ? raw : [];
-        } else if (type === 'USER_SELECT' || type === 'ORGANIZATION_SELECT' || type === 'GROUP_SELECT') {
-          value = String(raw ?? '').split(/[,、\s]+/)
-            .map((code) => code.trim())
-            .filter(Boolean)
-            .map((code) => ({ code }));
-        } else {
-          value = String(raw ?? '');
-          if (type === 'NUMBER') value = qnrNormalizeNumberText(value);
-        }
-        const isEmpty = Array.isArray(value) ? value.length === 0 : value === '';
-        if (field.required && isEmpty) hasRequiredMissing = true;
-        // 未入力はリクエストに含めず、kintone側の初期値適用に任せる
-        // （value:'' の明示送信は初期値を打ち消し、計算フィールドのエラー要因になる）
-        if (isEmpty) return;
-        record[field.code] = { value };
-      });
-
-      // サブテーブルは標準UIと同様に空行1行を含める（計算フィールド対策）
-      qnrAppendEmptySubtableRows(record, this.fieldsMeta);
-
-      if (hasRequiredMissing) {
-        this.notify(resolveText(this.language, 'newRecordRequiredMissing'));
-        return;
-      }
-
-      saveBtn.disabled = true;
-      cancelBtn.disabled = true;
-      saveBtn.textContent = resolveText(this.language, 'newRecordSaving');
-
-      try {
-        const response = await this.postFn('EXCEL_POST_RECORDS', {
-          appId: this.appId,
-          records: [record],
-          __pbTrigger: 'new_record_modal'
-        });
-        if (!response?.ok) {
-          throw new Error(response?.error || 'create failed');
-        }
-        this.closeNewRecordModal();
-        this.notify(resolveText(this.language, 'toastNewRecordSaved'));
-        await this.reloadPage();
-      } catch (err) {
-        console.error('[kintone-excel-overlay] new record create failed', err);
-        this.notify(resolveText(this.language, 'toastNewRecordFailed'));
-        saveBtn.disabled = false;
-        cancelBtn.disabled = false;
-        saveBtn.textContent = resolveText(this.language, 'newRecordSave');
-      }
-    }
-
     async openSubtableEditor(rowIndex, colIndex, anchorInput = null) {
       if (this.saving) return;
       if (!this.root) return;
@@ -7625,9 +7267,11 @@
       const trimmed = String(value ?? '').trim();
       if (type === 'NUMBER') {
         if (!trimmed) return { ok: true, value: '' };
-        const num = Number(trimmed);
+        const normalized = qnrNormalizeNumberText(trimmed);
+        if (!normalized) return { ok: true, value: '' };
+        const num = Number(normalized);
         if (Number.isNaN(num)) return { ok: false, error: 'NaN' };
-        return { ok: true, value: trimmed };
+        return { ok: true, value: normalized };
       }
       if (type === 'DATE') {
         if (!trimmed) return { ok: true, value: '' };
@@ -8861,6 +8505,39 @@
       });
     }
 
+    // 純関数: kintone API のフィールド単位エラー(errorDetails)を、
+    // 保存に使ったバッチのレコードID/フィールドコードに突き合わせる。
+    // errorDetails のキー例: "records[0].数量.value" -> { messages: ['最大値は100です。'] }
+    collectSaveErrorTargets(batch, errorDetails) {
+      const targets = [];
+      if (!Array.isArray(batch) || !errorDetails || typeof errorDetails !== 'object') return targets;
+      Object.keys(errorDetails).forEach((key) => {
+        const match = /records\[(\d+)\]\.([^.\[\]]+)/.exec(key);
+        if (!match) return;
+        const index = Number(match[1]);
+        if (!Number.isInteger(index) || index < 0 || index >= batch.length) return;
+        const entry = batch[index];
+        const recordId = String(entry?.id ?? entry?.tempId ?? '');
+        if (!recordId) return;
+        const fieldCode = match[2];
+        const detail = errorDetails[key];
+        const messages = Array.isArray(detail?.messages) ? detail.messages : [];
+        targets.push({ recordId, fieldCode, message: messages.join(' ') });
+      });
+      return targets;
+    }
+
+    // collectSaveErrorTargets() の結果を invalidCells に反映する。
+    // 実際の DOM(pb-overlay__cell--error クラス)への反映は
+    // 呼び出し側の updateVirtualRows(true) が既存ロジックで行う。
+    markSaveErrorCells(targets) {
+      if (!Array.isArray(targets)) return;
+      targets.forEach(({ recordId, fieldCode }) => {
+        if (!recordId || !fieldCode) return;
+        this.invalidCells.add(`${recordId}:${fieldCode}`);
+      });
+    }
+
     setSaving(flag) {
       const saving = Boolean(flag);
       this.saving = saving;
@@ -9069,7 +8746,13 @@
               }
             }
             const err = new Error(response?.error || 'save failed');
-            this.markBatchError(batch);
+            err.serverMessage = String(response?.error || '');
+            const errorTargets = this.collectSaveErrorTargets(batch, response?.errorDetails);
+            if (errorTargets.length) {
+              this.markSaveErrorCells(errorTargets);
+            } else {
+              this.markBatchError(batch);
+            }
             if (this.isConflictResponse(response)) {
               err.conflict = true;
             }
@@ -9084,8 +8767,15 @@
             __pbTrigger: 'save_click'
           });
           if (!response?.ok) {
-            this.markBatchError(batch);
-            throw new Error(response?.error || 'create failed');
+            const errorTargets = this.collectSaveErrorTargets(batch, response?.errorDetails);
+            if (errorTargets.length) {
+              this.markSaveErrorCells(errorTargets);
+            } else {
+              this.markBatchError(batch);
+            }
+            const err = new Error(response?.error || 'create failed');
+            err.serverMessage = String(response?.error || '');
+            throw err;
           }
           const createdIds = this.applyCreateResult(batch, response.result);
           createdIds.forEach((id) => {
@@ -9101,7 +8791,9 @@
             __pbTrigger: 'save_click'
           });
           if (!response?.ok) {
-            throw new Error(response?.error || 'delete failed');
+            const err = new Error(response?.error || 'delete failed');
+            err.serverMessage = String(response?.error || '');
+            throw err;
           }
           this.applyDeleteResult(batch);
           anySaved = true;
@@ -9129,7 +8821,9 @@
         }
       } catch (error) {
         const key = error?.conflict ? 'conflictFailed' : 'toastSaveFailed';
-        this.notify(resolveText(this.language, key));
+        const baseMessage = resolveText(this.language, key);
+        const serverMessage = key === 'toastSaveFailed' ? String(error?.serverMessage || '').trim() : '';
+        this.notify(serverMessage ? `${baseMessage}: ${serverMessage}` : baseMessage);
         console.error('[kintone-excel-overlay] save failed', error);
       } finally {
         this.setSaving(false);
@@ -9327,8 +9021,6 @@
       this.saveButtonSpinner = null;
       this.saveButtonLabel = null;
       this.addRowButton = null;
-      this.newRecordButton = null;
-      this.newRecordModal = null;
       this.undoButton = null;
       this.redoButton = null;
       this.layoutToggleWrap = null;
