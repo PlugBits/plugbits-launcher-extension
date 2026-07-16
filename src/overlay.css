@@ -1194,6 +1194,20 @@
   padding: 2px 4px 8px;
 }
 
+/* グリッドのルックアップキー候補ピッカー用アンカー（案A）。
+   セル直下に置く「幅付きの空箱」で、QNRのpb-newrec__lookup-pickerを
+   そのまま子要素として流用する。箱自体はクリックを拾わない
+   （anchor-elは見えないので、セル操作の邪魔をしないため） */
+.pb-overlay__lookup-anchor {
+  position: absolute;
+  z-index: 32;
+  pointer-events: none;
+}
+
+.pb-overlay__lookup-anchor .pb-newrec__lookup-picker {
+  pointer-events: auto;
+}
+
 .pb-overlay__choice-check {
   display: flex;
   align-items: center;

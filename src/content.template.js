@@ -1413,6 +1413,7 @@
       overlayProOnly: "Pro 版のみ",
       overlayStandardReadonly: "Standardでは閲覧のみ利用できます",
       lookupAutoReadonly: "LOOKUPにより自動入力されるため編集できません",
+      lookupKeyHint: "ルックアップのキーを直接入力できます（↓キーで候補を表示）。値は保存時にkintoneが照合します",
       toastSaveSuccess: "保存しました",
       toastSaveFailed: "保存に失敗しました",
       confirmClose: "未保存の変更があります。閉じますか？",
@@ -1446,6 +1447,19 @@
       recalcPartial: (okCount, ngCount) => `${okCount} 件を再計算しました（${ngCount} 件は更新できませんでした）`,
       recalcFailed: "再計算に失敗しました",
       recalcNoTargets: "再計算できるレコードがありません",
+      btnLookupRefresh: "ルックアップ再取得",
+      titleLookupRefresh: "ルックアップのキーを現在の値で再保存して、参照先からコピーされる値を最新化します",
+      lookupRefreshScopeMessage: "ルックアップのキーを現在の値のまま再保存して、参照先からコピーされる値（コピー先フィールド）を最新化します。範囲を選択してください。\n\n・「保存」として扱われるため、更新日時・更新者が変わります\n・参照先でキーが見つからない／重複するレコードはエラーになり、そのバッチは失敗として集計されます\n・キーが空のレコードは対象外です",
+      lookupRefreshScopePage: (count) => `表示中の ${count} 件`,
+      lookupRefreshScopeAll: "アプリ全体",
+      lookupRefreshFetchingIds: "対象レコードを収集中…",
+      lookupRefreshConfirmAll: (count, requests) => `アプリ全体の ${count} 件を再取得します（約 ${requests} リクエスト）。実行しますか？`,
+      lookupRefreshConfirmAction: "実行",
+      lookupRefreshProgress: (done, total) => `ルックアップ再取得中… ${done}/${total}`,
+      lookupRefreshDone: (count) => `${count} 件のルックアップを再取得しました`,
+      lookupRefreshPartial: (done, failed) => `${done} 件を再取得、${failed} 件は失敗しました（参照先での照合エラー等）`,
+      lookupRefreshFailed: "ルックアップ再取得に失敗しました",
+      lookupRefreshNoTargets: "再取得できるルックアップがありません",
       reloading: "一覧を更新しています…",
       conflictRetry: "最新のデータを反映して再保存します…",
       conflictNoChanges: "最新のデータと一致しました",
@@ -1699,6 +1713,7 @@
       overlayProOnly: "Pro plan only",
       overlayStandardReadonly: "Editing is disabled in Standard mode",
       lookupAutoReadonly: "This field is auto-populated by LOOKUP and cannot be edited",
+      lookupKeyHint: "Type the lookup key directly (press ↓ for suggestions). kintone validates the value on save.",
       toastSaveSuccess: "Changes saved",
       toastSaveFailed: "Failed to save changes",
       confirmClose: "You have unsaved changes. Close anyway?",
@@ -1732,6 +1747,19 @@
       recalcPartial: (okCount, ngCount) => `Recalculated ${okCount} records (${ngCount} could not be updated)`,
       recalcFailed: "Failed to recalculate",
       recalcNoTargets: "No records available to recalculate",
+      btnLookupRefresh: "Refresh lookups",
+      titleLookupRefresh: "Re-save lookup keys with their current values to refresh copied fields from the source app",
+      lookupRefreshScopeMessage: "Re-save lookup keys with their current values to refresh the fields copied from the source app. Choose the scope.\n\n- This counts as a save: updated time and updater will change\n- Records whose key is missing or ambiguous in the source app will error, and that batch is counted as failed\n- Records with an empty key are excluded",
+      lookupRefreshScopePage: (count) => `This page (${count})`,
+      lookupRefreshScopeAll: "Entire app",
+      lookupRefreshFetchingIds: "Collecting target records…",
+      lookupRefreshConfirmAll: (count, requests) => `Refresh lookups for all ${count} records in this app (about ${requests} requests). Continue?`,
+      lookupRefreshConfirmAction: "Run",
+      lookupRefreshProgress: (done, total) => `Refreshing lookups… ${done}/${total}`,
+      lookupRefreshDone: (count) => `Refreshed ${count} lookups`,
+      lookupRefreshPartial: (done, failed) => `Refreshed ${done} records (${failed} failed, e.g. source lookup mismatch)`,
+      lookupRefreshFailed: "Failed to refresh lookups",
+      lookupRefreshNoTargets: "No lookups available to refresh",
       reloading: "Refreshing list…",
       conflictRetry: "Data updated, retrying save…",
       conflictNoChanges: "Your edits now match the latest data",
@@ -2452,7 +2480,7 @@
   // - 500件超は「サーバー検索モード」: キー項目のlike検索＋無限スクロールで
   //   全件に到達できる（鮮度の問題があるためキャッシュはしない）。
   // - 手打ち入力そのものが検索になり、完全一致の有無をインジケータで表示する。
-  function createNewRecordLookupPicker({ anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings, fieldInputMap, keyInput, postFn, language }) {
+  function createNewRecordLookupPicker({ anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings = [], fieldInputMap = new Map(), keyInput, postFn, language }) {
     const t = (key, ...args) => resolveText(language, key, ...args);
     const LOCAL_FULL_LIMIT = 500;
 
@@ -2709,8 +2737,10 @@
     }
 
     // キーボード操作: ↑↓でハイライト移動、Enterで確定/離脱。
-    // Ctrl/Meta付きEnterはモーダル側の保存ショートカットに譲るため触らない
-    keyInput.addEventListener('keydown', (e) => {
+    // Ctrl/Meta付きEnterはモーダル側の保存ショートカットに譲るため触らない。
+    // 名前付き関数にしておく（グリッドは仮想化でinputを使い回すため、
+    // destroy()でこのリスナーだけ確実に外せるようにする必要がある）
+    function handleKeyInputKeydown(e) {
       if (e.key === 'ArrowDown') {
         if (!isOpen()) {
           e.preventDefault();
@@ -2743,7 +2773,8 @@
           close();
         }
       }
-    });
+    }
+    keyInput.addEventListener('keydown', handleKeyInputKeydown);
 
     return {
       isOpen,
@@ -2753,7 +2784,13 @@
         if (isOpen() && !currentKeyword) { close(); return; }
         void load({ keyword: '' });
       },
-      search
+      search,
+      // グリッド専用: keyInputのリスナーごと完全に片付ける。
+      // QNRモーダルはinputごとDOMを破棄するので使わず、close()のみで足りる
+      destroy() {
+        close();
+        keyInput.removeEventListener('keydown', handleKeyInputKeydown);
+      }
     };
   }
 

@@ -233,6 +233,26 @@
       return Boolean(field.lookup);
     }
 
+    // ルックアップの「キー項目」（ユーザーが値を入れる側）を判定する。
+    // コピー先(lookupAuto)や、relatedApp/relatedKeyFieldが揃わない不完全な
+    // メタ情報では null を返し、editable判定側でreadonlyに倒す。
+    // content-overlay-controller.js の getLookupKeyMeta と同じ判定基準
+    // （このモジュールは content.js と別スクリプトなのでロジックを複製している）
+    function resolveLookupKeyMeta(field) {
+      if (!field || field.lookupAuto) return null;
+      const lookup = field.lookup;
+      if (!lookup || typeof lookup !== 'object') return null;
+      const relatedAppRaw = lookup.relatedApp;
+      const relatedAppId = toTrimmedString(
+        relatedAppRaw && typeof relatedAppRaw === 'object'
+          ? (relatedAppRaw.app || relatedAppRaw.code || '')
+          : relatedAppRaw
+      );
+      const relatedKeyField = toTrimmedString(lookup.relatedKeyField || lookup.keyField);
+      if (!relatedAppId || !relatedKeyField) return null;
+      return { relatedAppId, relatedKeyField };
+    }
+
     function isFieldTypeEditable(field) {
       if (!field) return false;
       const type = toTrimmedString(field.type);
@@ -292,7 +312,9 @@
       if (!field) return { editable: false, reason: 'unknown_field' };
       if (isSystemField(field)) return { editable: false, reason: 'system_field' };
       if (toTrimmedString(field.type) === 'SUBTABLE') return { editable: false, reason: 'field_readonly' };
-      if (isLookupField(field) || field.lookupAuto) return { editable: false, reason: 'lookup_readonly' };
+      // コピー先（自動転記）は常に読み取り専用。キー項目のみ手入力・候補選択で編集可にする
+      if (field.lookupAuto) return { editable: false, reason: 'lookup_readonly' };
+      if (isLookupField(field) && !resolveLookupKeyMeta(field)) return { editable: false, reason: 'lookup_readonly' };
       if (!isFieldTypeEditable(field)) return { editable: false, reason: 'field_readonly' };
 
       const recordPerm = getRecordPermission(recordId);

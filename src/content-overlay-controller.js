@@ -167,6 +167,9 @@
       this.columnWidthsDraft = new Map();
       this.radioPicker = null;
       this.multiChoicePicker = null;
+      this.gridLookupPicker = null;
+      this.boundGridLookupPickerScrollHandler = () => { this.positionGridLookupAnchor(); };
+      this.boundGridLookupPickerResizeHandler = () => { this.positionGridLookupAnchor(); };
       this.multilineEditor = null;
       this.newRowSeq = 1;
       this.subtableEditor = null;
@@ -367,6 +370,17 @@
       recalcBtn.addEventListener('click', () => { void this.recalcCurrentPage(); });
       this.recalcButton = recalcBtn;
 
+      // ルックアップキーを現在値で再送し、コピー先フィールドを参照先アプリの
+      // 最新値に同期する（空更新の再計算とは異なり、ルックアップは値を
+      // 再送しないと再解決されないため専用ボタンにしている）
+      const lookupRefreshBtn = document.createElement('button');
+      lookupRefreshBtn.type = 'button';
+      lookupRefreshBtn.className = 'pb-overlay__btn';
+      lookupRefreshBtn.textContent = resolveText(this.language, 'btnLookupRefresh');
+      lookupRefreshBtn.title = resolveText(this.language, 'titleLookupRefresh');
+      lookupRefreshBtn.addEventListener('click', () => { void this.lookupRefreshCurrentPage(); });
+      this.lookupRefreshButton = lookupRefreshBtn;
+
       const layoutToggle = document.createElement('div');
       layoutToggle.className = 'pb-overlay__layout-toggle';
       const gridLayoutBtn = document.createElement('button');
@@ -523,6 +537,7 @@
       secondaryActions.className = 'pb-overlay__toolbar-secondary';
       secondaryActions.appendChild(columnsBtn);
       secondaryActions.appendChild(recalcBtn);
+      secondaryActions.appendChild(lookupRefreshBtn);
       secondaryActions.appendChild(dirty);
       secondaryActions.appendChild(addRowBtn);
       secondaryActions.appendChild(undoBtn);
@@ -2794,7 +2809,9 @@
         extraLabel: resolveText(this.language, 'recalcScopeAll')
       });
       if (!scope) return;
+      // ルックアップ再取得と同時に走らせない（両方ともレコードを再保存するため競合しうる）
       if (this.recalcButton) this.recalcButton.disabled = true;
+      if (this.lookupRefreshButton) this.lookupRefreshButton.disabled = true;
       try {
         if (scope === 'extra') {
           await this.runRecalcForApp();
@@ -2866,31 +2883,226 @@
       }
     }
 
-    // 全レコードの $id を収集する。offset上限(1万件)を避けるため
-    // 「$id > 前回の最大ID order by $id asc limit 500」のシーク法でページングする。
-    async fetchAllRecordIdsForRecalc() {
-      const ids = [];
+    // 全レコードを $id シーク法（500件/回）で収集する。offset上限(1万件)を
+    // 避けるため「$id > 前回の最大ID order by $id asc limit 500」でページングする。
+    // 再計算（$idのみ）とルックアップ再取得（$id + キー項目値）の両方で使う共通処理。
+    // fields には呼び出し側が必ず '$id' を含めること。
+    async fetchAllRecordsForBulkOp(fields, trigger) {
+      const records = [];
       let lastId = '';
       for (;;) {
         const condition = lastId ? `$id > ${lastId} ` : '';
         const response = await this.postFn('EXCEL_GET_RECORDS', {
           appId: this.appId,
-          fields: ['$id'],
+          fields,
           query: `${condition}order by $id asc limit 500`,
-          __pbTrigger: 'recalc_fetch_ids'
+          __pbTrigger: trigger
         }, { timeout: 30000 });
-        if (!response?.ok) throw new Error(response?.error || 'failed to fetch record ids');
-        const records = Array.isArray(response.records) ? response.records : [];
-        records.forEach((record) => {
-          const id = String(record?.$id?.value || '').trim();
-          if (id) ids.push(id);
-        });
-        if (records.length < 500) break;
-        lastId = ids[ids.length - 1];
+        if (!response?.ok) throw new Error(response?.error || 'failed to fetch records');
+        const batch = Array.isArray(response.records) ? response.records : [];
+        records.push(...batch);
+        if (batch.length < 500) break;
+        lastId = String(batch[batch.length - 1]?.$id?.value || '').trim();
+        if (!lastId) break;
         // 安全弁: 異常な件数でも無限ループしない
-        if (ids.length >= 100000) break;
+        if (records.length >= 100000) break;
       }
-      return ids;
+      return records;
+    }
+
+    async fetchAllRecordIdsForRecalc() {
+      const records = await this.fetchAllRecordsForBulkOp(['$id'], 'recalc_fetch_ids');
+      return records.map((record) => String(record?.$id?.value || '').trim()).filter(Boolean);
+    }
+
+    // ── ルックアップ一括再取得（案D） ──────────────────────────────────
+    // 背景: { id, record: {} } の空更新（recalc）は計算フィールドは再計算するが
+    // ルックアップは再取得しない。コピー先を最新化するには、キー項目を現在値の
+    // まま含めたPUTが必要（値が同じでもペイロードに含めればkintoneが再解決する）。
+
+    // アプリ内のルックアップ「キー項目」のフィールドコード一覧
+    // （サブテーブル内は fieldMap の対象外なので自然に除外される）
+    getLookupKeyFieldCodes() {
+      const codes = [];
+      this.fieldMap.forEach((field, code) => {
+        if (this.getLookupKeyMeta(field)) codes.push(code);
+      });
+      return codes;
+    }
+
+    hasLookupKeyFields() {
+      return this.getLookupKeyFieldCodes().length > 0;
+    }
+
+    // 純関数: keyCodes のうち現在値が入っているフィールドだけをPUT用ペイロードに詰める。
+    // records は [{ id, values: { code: value } }] 形（valuesは素の値。row.originalの形）。
+    // 1つもキーが埋まらなかったレコードは除外する
+    // （キーが空のルックアップは再取得の意味がなく、空値PUTはクリア扱いになる事故を防ぐ）
+    buildLookupRefreshTargets(records, keyCodes) {
+      const targets = [];
+      if (!Array.isArray(records) || !Array.isArray(keyCodes) || !keyCodes.length) return targets;
+      records.forEach((rec) => {
+        const id = String(rec?.id ?? '').trim();
+        if (!id) return;
+        const values = rec?.values && typeof rec.values === 'object' ? rec.values : {};
+        const record = {};
+        keyCodes.forEach((code) => {
+          const raw = values[code];
+          if (String(raw ?? '').trim() === '') return;
+          record[code] = { value: String(raw) };
+        });
+        if (!Object.keys(record).length) return;
+        targets.push({ id, record });
+      });
+      return targets;
+    }
+
+    // 純関数: 一括PUTのerrorDetailsから失敗したバッチ内インデックスを一意に集める。
+    // キー例: "records[3].商品.value" -> 3
+    parseFailedRecordIndices(errorDetails) {
+      const indices = new Set();
+      if (!errorDetails || typeof errorDetails !== 'object') return [];
+      Object.keys(errorDetails).forEach((key) => {
+        const match = /^records\[(\d+)\]/.exec(key);
+        if (!match) return;
+        const index = Number(match[1]);
+        if (Number.isInteger(index) && index >= 0) indices.add(index);
+      });
+      return Array.from(indices).sort((a, b) => a - b);
+    }
+
+    async lookupRefreshCurrentPage() {
+      if (this.saving || this.paging || !this.isOpen || !this.appId) return;
+      if (!this.canMutateOverlay(true)) return;
+      const proceed = await this.confirmPageMoveIfNeeded();
+      if (!proceed) return;
+      const keyCodes = this.getLookupKeyFieldCodes();
+      if (!keyCodes.length) {
+        this.notify(resolveText(this.language, 'lookupRefreshNoTargets'));
+        return;
+      }
+      const pageIds = Array.from(new Set(
+        this.rows
+          .map((row) => String(row?.id || '').trim())
+          .filter((id) => id && !this.isNewRowId(id))
+          .filter((id) => this.permissionService.canEditRecord(id))
+      ));
+      if (!pageIds.length) {
+        this.notify(resolveText(this.language, 'lookupRefreshNoTargets'));
+        return;
+      }
+      // 範囲選択: OK=表示中ページ / extra=アプリ全体
+      const scope = await this.overlayConfirm(resolveText(this.language, 'lookupRefreshScopeMessage'), {
+        confirmLabel: resolveText(this.language, 'lookupRefreshScopePage', pageIds.length),
+        extraLabel: resolveText(this.language, 'lookupRefreshScopeAll')
+      });
+      if (!scope) return;
+      // 再計算と同時に走らせない（両方ともレコードを再保存するため競合しうる）
+      if (this.recalcButton) this.recalcButton.disabled = true;
+      if (this.lookupRefreshButton) this.lookupRefreshButton.disabled = true;
+      try {
+        if (scope === 'extra') {
+          await this.runLookupRefreshForApp(keyCodes);
+        } else {
+          const records = pageIds
+            .map((id) => this.rowMap.get(id))
+            .filter(Boolean)
+            .map((row) => ({ id: String(row.id), values: row.original }));
+          const targets = this.buildLookupRefreshTargets(records, keyCodes);
+          if (!targets.length) {
+            this.notify(resolveText(this.language, 'lookupRefreshNoTargets'));
+            return;
+          }
+          await this.runLookupRefreshForTargets(targets);
+        }
+      } finally {
+        this.updatePermissionUiState();
+      }
+    }
+
+    // アプリ全体のルックアップ再取得: 全レコードのキー項目値をシーク法で収集し、
+    // 件数と概算API回数を確認してから100件ずつバッチPUTする。
+    async runLookupRefreshForApp(keyCodes) {
+      this.showLoading(resolveText(this.language, 'lookupRefreshFetchingIds'));
+      let rawRecords = [];
+      try {
+        rawRecords = await this.fetchAllRecordsForBulkOp(['$id', ...keyCodes], 'lookup_refresh_fetch_ids');
+      } catch (error) {
+        console.error('[kintone-excel-overlay] lookup refresh id fetch failed', error);
+        this.hideLoading();
+        this.notify(resolveText(this.language, 'lookupRefreshFailed'));
+        return;
+      }
+      this.hideLoading();
+      const records = rawRecords.map((record) => ({
+        id: String(record?.$id?.value || '').trim(),
+        values: Object.fromEntries(keyCodes.map((code) => [code, record?.[code]?.value ?? '']))
+      }));
+      const targets = this.buildLookupRefreshTargets(records, keyCodes);
+      if (!targets.length) {
+        this.notify(resolveText(this.language, 'lookupRefreshNoTargets'));
+        return;
+      }
+      const requests = Math.ceil(targets.length / 100);
+      const ok = await this.overlayConfirm(
+        resolveText(this.language, 'lookupRefreshConfirmAll', targets.length, requests),
+        { confirmLabel: resolveText(this.language, 'lookupRefreshConfirmAction') }
+      );
+      if (!ok) return;
+      await this.runLookupRefreshForTargets(targets);
+    }
+
+    async runLookupRefreshForTargets(targets) {
+      let done = 0;
+      let failedCount = 0;
+      try {
+        for (let i = 0; i < targets.length; i += 100) {
+          const chunk = targets.slice(i, i + 100);
+          this.showLoading(resolveText(this.language, 'lookupRefreshProgress', done, targets.length));
+          const response = await this.postFn('EXCEL_PUT_RECORDS', {
+            appId: this.appId,
+            records: chunk.map((target) => ({ id: target.id, record: target.record })),
+            __pbTrigger: 'lookup_refresh_click'
+          }, { timeout: 30000 });
+          if (response?.ok) {
+            done += chunk.length;
+            continue;
+          }
+          // 救済リトライ: 一部レコードだけが原因（参照先でのキー不一致・重複等）の場合、
+          // 問題レコードを除いた残りで1回だけ再送する。バッチ全体を無駄に失敗させない。
+          const failedIndices = this.parseFailedRecordIndices(response?.errorDetails);
+          if (failedIndices.length > 0 && failedIndices.length < chunk.length) {
+            const failedIndexSet = new Set(failedIndices);
+            const retryChunk = chunk.filter((_target, index) => !failedIndexSet.has(index));
+            const retryResponse = await this.postFn('EXCEL_PUT_RECORDS', {
+              appId: this.appId,
+              records: retryChunk.map((target) => ({ id: target.id, record: target.record })),
+              __pbTrigger: 'lookup_refresh_click'
+            }, { timeout: 30000 });
+            if (retryResponse?.ok) {
+              done += retryChunk.length;
+              failedCount += failedIndices.length;
+            } else {
+              failedCount += chunk.length;
+            }
+          } else {
+            failedCount += chunk.length;
+          }
+        }
+        this.hideLoading();
+        await this.reloadPage();
+        if (failedCount > 0 && done > 0) {
+          this.notify(resolveText(this.language, 'lookupRefreshPartial', done, failedCount));
+        } else if (failedCount > 0) {
+          this.notify(resolveText(this.language, 'lookupRefreshFailed'));
+        } else {
+          this.notify(resolveText(this.language, 'lookupRefreshDone', done));
+        }
+      } catch (error) {
+        console.error('[kintone-excel-overlay] lookup refresh failed', error);
+        this.hideLoading();
+        this.notify(resolveText(this.language, 'lookupRefreshFailed'));
+      }
     }
 
     async refreshListRowsAfterSave() {
@@ -3113,13 +3325,42 @@
       return !this.permissionService.isSystemField(field);
     }
 
+    // ルックアップの「キー項目」(ユーザーが値を入れる側)のメタ情報を解決する。
+    // - field.lookupAuto (コピー先) は常に null → 呼び出し側でreadonly扱いにする
+    // - relatedApp / relatedKeyField が揃わない不完全なメタ情報も null
+    //   (旧形式で relatedApp が {app} オブジェクトのケースも防御的に文字列化する)
+    getLookupKeyMeta(field) {
+      if (!field || field.lookupAuto) return null;
+      const lookup = field.lookup;
+      if (!lookup || typeof lookup !== 'object') return null;
+      const relatedAppRaw = lookup.relatedApp;
+      const relatedAppId = String(
+        relatedAppRaw && typeof relatedAppRaw === 'object'
+          ? (relatedAppRaw.app || relatedAppRaw.code || '')
+          : (relatedAppRaw ?? '')
+      ).trim();
+      const relatedKeyField = String(lookup.relatedKeyField || lookup.keyField || '').trim();
+      if (!relatedAppId || !relatedKeyField) return null;
+      return {
+        relatedAppId,
+        relatedKeyField,
+        pickerFields: Array.isArray(lookup.lookupPickerFields) ? lookup.lookupPickerFields : [],
+        mappings: Array.isArray(lookup.fieldMappings) ? lookup.fieldMappings : []
+      };
+    }
+
     getFieldPermissionInfo(recordId, field, options = {}) {
       if (!field || !field.code) return { editable: false, reason: 'unknown_field' };
       const localOnly = Boolean(options.localOnly);
       if (this.permissionService.isSystemField(field)) {
         return { editable: false, reason: 'system_field' };
       }
-      if (String(field.type || '').toUpperCase() === 'LOOKUP' || field.lookup || field.lookupAuto) {
+      // コピー先（自動転記）は常に読み取り専用。キー項目のみ手入力・候補選択で編集可
+      if (field.lookupAuto) {
+        return { editable: false, reason: 'lookup_readonly' };
+      }
+      const lookupKey = this.getLookupKeyMeta(field);
+      if ((String(field.type || '').toUpperCase() === 'LOOKUP' || field.lookup) && !lookupKey) {
         return { editable: false, reason: 'lookup_readonly' };
       }
       if (!this.permissionService.isFieldTypeEditable(field)) {
@@ -3391,6 +3632,15 @@
         this.recalcButton.disabled = this.saving || !canEdit;
         this.recalcButton.title = canEdit
           ? resolveText(this.language, 'titleRecalc')
+          : resolveText(this.language, 'toastViewOnlyBlocked');
+      }
+      if (this.lookupRefreshButton) {
+        // ルックアップのキー項目が1つもないアプリでは意味がないボタンなので隠す
+        this.lookupRefreshButton.style.display = this.hasLookupKeyFields() ? '' : 'none';
+        // 再保存を伴うため、編集（Pro）と同じ条件で有効化する
+        this.lookupRefreshButton.disabled = this.saving || !canEdit;
+        this.lookupRefreshButton.title = canEdit
+          ? resolveText(this.language, 'titleLookupRefresh')
           : resolveText(this.language, 'toastViewOnlyBlocked');
       }
       if (this.permissionWarningEl) {
@@ -4207,6 +4457,9 @@
       this.closeRadioPicker();
       this.closeMultiChoicePicker();
       this.closeMultilineEditor();
+      // 全面再構築でセルのinputが総入れ替えになるため、アンカー先を失う
+      // ルックアップ候補ピッカーも一緒に片付ける
+      this.destroyGridLookupPicker();
       this.inputsByRow.clear();
       if (this.columnHeaderScroll) {
         this.columnHeaderScroll.style.transform = '';
@@ -4457,6 +4710,9 @@
         this.restorePendingFocus();
         return;
       }
+      // 可視範囲のinputを丸ごと作り直すため、アンカー先を失うルックアップ
+      // 候補ピッカーも一緒に片付ける（同じ座標に別のinput要素が新設される）
+      this.destroyGridLookupPicker();
       this.virtualStart = start;
       this.virtualEnd = end;
       this.inputsByRow.clear();
@@ -4720,7 +4976,7 @@
       const isCalc = this.isCalcField(field);
       const isRichText = this.isRichTextField(field);
       const isFile = this.isFileField(field);
-      const isLookupKey = field?.type === 'SINGLE_LINE_TEXT' && Boolean(field?.lookup);
+      const isLookupKey = Boolean(this.getLookupKeyMeta(field));
       const fieldDeniedByAcl = permission.reason === 'field_readonly';
       this.setInputEditingVisual(input, editing);
       input.classList.toggle('pb-overlay__input--readonly', !editableVisual);
@@ -4729,6 +4985,9 @@
         input.title = resolveText(this.language, 'lookupAutoReadonly');
       } else if (!this.isSubtableField(field) && !editableVisual) {
         input.title = resolveText(this.language, fieldDeniedByAcl ? 'permNoFieldEdit' : 'permNoEdit');
+      } else if (!this.isSubtableField(field) && isLookupKey) {
+        // キー項目: 手入力も候補選択もできることをヒントで示す
+        input.title = resolveText(this.language, 'lookupKeyHint');
       } else if (!this.isSubtableField(field)) {
         input.removeAttribute('title');
       }
@@ -4849,7 +5108,7 @@
       const isCalc = this.isCalcField(field);
       const isRichText = this.isRichTextField(field);
       const isFile = this.isFileField(field);
-      const isLookupKey = field?.type === 'SINGLE_LINE_TEXT' && Boolean(field?.lookup);
+      const isLookupKey = Boolean(this.getLookupKeyMeta(field));
       const fieldDeniedByAcl = permission.reason === 'field_readonly';
       this.setInputEditingVisual(input, editing);
       input.classList.toggle('pb-overlay__input--readonly', !editableVisual);
@@ -4858,6 +5117,9 @@
         input.title = resolveText(this.language, 'lookupAutoReadonly');
       } else if (!this.isSubtableField(field) && !editableVisual) {
         input.title = resolveText(this.language, fieldDeniedByAcl ? 'permNoFieldEdit' : 'permNoEdit');
+      } else if (!this.isSubtableField(field) && isLookupKey) {
+        // キー項目: 手入力も候補選択もできることをヒントで示す
+        input.title = resolveText(this.language, 'lookupKeyHint');
       } else if (!this.isSubtableField(field)) {
         input.removeAttribute('title');
       }
@@ -5186,6 +5448,84 @@
           input.focus();
         } catch (_e) { /* noop */ }
       }
+    }
+
+    // ── グリッドのルックアップキー候補ピッカー（案A） ──────────────────
+    // QNR(クイック新規レコード)の createNewRecordLookupPicker をセル直下に
+    // 流用する。anchorEl には「セル直下に置いた position:absolute の空箱」を
+    // 渡すことで、ピッカー本体のDOM/スタイルはそのまま再利用できる。
+    openGridLookupPicker(rowIndex, colIndex, input, field) {
+      const meta = this.getLookupKeyMeta(field);
+      if (!meta || !this.root || !input) return;
+      this.destroyGridLookupPicker();
+      const wrapper = document.createElement('div');
+      wrapper.className = 'pb-overlay__lookup-anchor';
+      this.root.appendChild(wrapper);
+      const picker = createNewRecordLookupPicker({
+        anchorEl: wrapper,
+        relatedAppId: meta.relatedAppId,
+        relatedKeyField: meta.relatedKeyField,
+        pickerFields: meta.pickerFields,
+        // グリッドではコピー先(lookupAuto)を即時に埋めない。保存後の再取得で
+        // 更新される前提のため、混乱防止であえて空配列を渡す(fillMappingsが空振りするだけ)
+        mappings: [],
+        keyInput: input,
+        postFn: this.postFn,
+        language: this.language
+      });
+      const inputHandler = () => { picker.search(input.value); };
+      input.addEventListener('input', inputHandler);
+      if (this.bodyScroll) {
+        this.bodyScroll.addEventListener('scroll', this.boundGridLookupPickerScrollHandler, { passive: true });
+      }
+      window.addEventListener('resize', this.boundGridLookupPickerResizeHandler);
+      this.gridLookupPicker = { picker, wrapper, input, rowIndex, colIndex, inputHandler };
+      // 開いた時点では候補を出さない（タイピングか↓キーで開く。API節約）
+      this.positionGridLookupAnchor();
+    }
+
+    // アンカー(空箱)をセル input の直下・同幅に配置する（this.root座標系）。
+    // 右端は positionRadioPicker と同様に margin 12px でクランプする。
+    // input がグリッドの再描画で外れていたら片付ける（仮想化で使い回されるため）。
+    positionGridLookupAnchor() {
+      if (!this.gridLookupPicker || !this.root) return;
+      const { wrapper, input } = this.gridLookupPicker;
+      if (!input.isConnected) {
+        this.destroyGridLookupPicker();
+        return;
+      }
+      const rootRect = this.root.getBoundingClientRect();
+      const inputRect = input.getBoundingClientRect();
+      const margin = 12;
+      const width = Math.max(260, inputRect.width);
+      const maxLeft = Math.max(margin, rootRect.width - width - margin);
+      let left = inputRect.left - rootRect.left;
+      left = Math.max(margin, Math.min(left, maxLeft));
+      const top = inputRect.bottom - rootRect.top + 4;
+      wrapper.style.left = `${left}px`;
+      wrapper.style.top = `${top}px`;
+      wrapper.style.width = `${width}px`;
+    }
+
+    destroyGridLookupPicker() {
+      if (!this.gridLookupPicker) return;
+      const { picker, wrapper, input, inputHandler } = this.gridLookupPicker;
+      if (picker && typeof picker.destroy === 'function') {
+        picker.destroy();
+      } else if (picker) {
+        picker.close();
+      }
+      if (input && inputHandler) {
+        input.removeEventListener('input', inputHandler);
+      }
+      if (wrapper?.parentElement) {
+        wrapper.remove();
+      }
+      if (this.bodyScroll) {
+        this.bodyScroll.removeEventListener('scroll', this.boundGridLookupPickerScrollHandler);
+      }
+      window.removeEventListener('resize', this.boundGridLookupPickerResizeHandler);
+      this.gridLookupPicker = null;
     }
 
     openMultiChoicePickerForValues(field, input, currentValues, onApply) {
@@ -6926,6 +7266,9 @@
       this.armedCell = null;
       this.pendingEdit = null;
       const targetInput = input || this.getInput(r, c);
+      // 別セルの編集に切り替わるので、前のセルのルックアップ候補ピッカーは
+      // 常に先に片付ける（このあとの分岐すべてに共通の後始末）
+      this.destroyGridLookupPicker();
       if (this.isMultiLineField(field)) {
         this.closeRadioPicker();
         this.closeMultiChoicePicker();
@@ -6958,10 +7301,18 @@
             this.openRadioPicker(r, c, targetInput);
           }
         });
+        // ルックアップのキー項目: セル直下に候補ピッカーを用意する
+        // （ここに到達した時点で cellPermission.editable は確定でtrue）
+        if (this.getLookupKeyMeta(field)) {
+          this.openGridLookupPicker(r, c, targetInput, field);
+        }
       }
     }
 
     exitEditMode() {
+      // gridLookupPicker は editingCell と独立管理なので、保険として
+      // editingCell が既にnullでも(呼び出し順の事故があっても)ここで片付ける
+      this.destroyGridLookupPicker();
       if (!this.editingCell) return;
       const previousEditingCell = this.editingCell;
       const { rowIndex, colIndex } = previousEditingCell;
@@ -7667,6 +8018,23 @@
       if (!this.isOpen) return;
       const target = event.target;
       if (!this.root?.contains(target)) return;
+      // ルックアップ候補ピッカーが対象inputを持っている間は、このcaptureリスナーが
+      // 先に確定/移動キーを奪わないようにする（pickerのkeydownはinput自身にbubbleで
+      // 登録されており、captureはそれより必ず先に走るため、ここで通さないと届かない）
+      if (this.gridLookupPicker && event.target === this.gridLookupPicker.input) {
+        const pickerOpen = this.gridLookupPicker.picker.isOpen();
+        if (event.key === 'Escape' && pickerOpen) {
+          // 候補だけ閉じてセル編集は続行する（QNRモーダルと同じ流儀）
+          this.gridLookupPicker.picker.close();
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        if (event.key === 'ArrowDown') return; // 閉→開く / 開→移動（picker側が処理）
+        if (pickerOpen && event.key === 'ArrowUp') return; // 開いている間の移動
+        if (pickerOpen && event.key === 'Enter' && !event.ctrlKey && !event.metaKey) return; // 確定はpicker側
+        if (event.key === 'Tab' && pickerOpen) this.gridLookupPicker.picker.close(); // 閉じてから通常のTab
+      }
       if (this.saving) {
         const keyLower = String(event.key || '').toLowerCase();
         if ((event.ctrlKey || event.metaKey) && keyLower === 's') {
@@ -8104,6 +8472,21 @@
 
     handleOverlayGlobalArrowKeydown(event) {
       if (!this.isOpen) return;
+      // handleOverlayKeydown と同じガード。documentのcaptureはthis.rootのcaptureより
+      // さらに先に走るため、こちらでも同様に通しておかないとpicker側に届かない
+      if (this.gridLookupPicker && event.target === this.gridLookupPicker.input) {
+        const pickerOpen = this.gridLookupPicker.picker.isOpen();
+        if (event.key === 'Escape' && pickerOpen) {
+          this.gridLookupPicker.picker.close();
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        if (event.key === 'ArrowDown') return;
+        if (pickerOpen && event.key === 'ArrowUp') return;
+        if (pickerOpen && event.key === 'Enter' && !event.ctrlKey && !event.metaKey) return;
+        if (event.key === 'Tab' && pickerOpen) this.gridLookupPicker.picker.close();
+      }
       if (event.defaultPrevented) return;
       const input = event.target instanceof HTMLInputElement ? event.target : null;
       this.handleOverlayArrowNavigation(event, input);
@@ -8982,6 +9365,7 @@
       this.closeMultiChoicePicker();
       this.closeMultilineEditor();
       this.closeSubtableEditor();
+      this.destroyGridLookupPicker();
       if (this.requireReload) {
         this.requireReload = false;
         this.reloading = true;
