@@ -7969,6 +7969,82 @@
       return index >= 0 ? index : 0;
     }
 
+    // 新規行の初期値解決（純粋メソッド: this に依存しない。単体テスト対象）。
+    // kintoneのフィールド初期値(defaultValue/defaultNowValue)をraw形式に変換する。
+    // 戻り値: raw形式の初期値、または「初期値なし」を示す undefined。
+    resolveFieldDefaultValue(field, now, timezone) {
+      if (!field || !field.code) return undefined;
+      const type = String(field.type || '').toUpperCase();
+      // コピー先（自動転記）は自動転記処理に任せるため対象外
+      if (field.lookupAuto) return undefined;
+      // 対象外（常にundefined）のフィールド種別:
+      // SUBTABLE/FILE/RICH_TEXT/CALCはraw形式の初期値を単純に表現できない、
+      // USER_SELECT/ORGANIZATION_SELECT/GROUP_SELECTは初期値が「ログインユーザー」等の
+      // エンティティ表現でraw文字列にできない、システムフィールド系
+      // (RECORD_NUMBER/CREATED_TIME等。permission-service.js の SYSTEM_FIELD_TYPES と同じ判定基準)
+      // はサーバー側が必ず算出するため、いずれもクライアントから値を作らずPOST省略のままにする。
+      const excludedTypes = new Set([
+        'SUBTABLE', 'FILE', 'RICH_TEXT', 'CALC',
+        'USER_SELECT', 'ORGANIZATION_SELECT', 'GROUP_SELECT',
+        'RECORD_NUMBER', 'CREATED_TIME', 'UPDATED_TIME', 'CREATOR', 'MODIFIER',
+        'STATUS', 'STATUS_ASSIGNEE', 'REFERENCE_TABLE'
+      ]);
+      if (excludedTypes.has(type)) return undefined;
+
+      const nonEmptyDefaultValue = () => {
+        const dv = field.defaultValue;
+        if (dv === undefined || dv === null) return undefined;
+        const text = String(dv);
+        return text === '' ? undefined : text;
+      };
+      // 指定timezoneでの now を parts に整形する。不正なtimezoneでIntlが例外を
+      // 投げた場合はローカルタイムにフォールバックする。
+      const formatParts = (options) => {
+        let parts;
+        try {
+          parts = new Intl.DateTimeFormat('en-US', { ...options, timeZone: timezone }).formatToParts(now);
+        } catch (_e) {
+          parts = new Intl.DateTimeFormat('en-US', options).formatToParts(now);
+        }
+        return (type2) => parts.find((p) => p.type === type2)?.value || '';
+      };
+
+      if (type === 'DATE') {
+        if (field.defaultNowValue) {
+          const get = formatParts({ year: 'numeric', month: '2-digit', day: '2-digit' });
+          return `${get('year')}-${get('month')}-${get('day')}`;
+        }
+        return nonEmptyDefaultValue();
+      }
+      if (type === 'DATETIME') {
+        if (field.defaultNowValue) {
+          // kintoneのraw形式(UTC ISO・ミリ秒なし・Z終端)に合わせて秒精度に丸める
+          return `${now.toISOString().slice(0, 19)}Z`;
+        }
+        return nonEmptyDefaultValue();
+      }
+      if (type === 'TIME') {
+        if (field.defaultNowValue) {
+          // hourCycle:'h23' を明示し、深夜0時が一部実装で"24:00"になる問題を避ける
+          const get = formatParts({ hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+          return `${get('hour')}:${get('minute')}`;
+        }
+        return nonEmptyDefaultValue();
+      }
+      if (type === 'CHECK_BOX' || type === 'MULTI_SELECT') {
+        const dv = field.defaultValue;
+        if (!Array.isArray(dv) || !dv.length) return undefined;
+        return dv.map((item) => String(item ?? ''));
+      }
+      if (
+        type === 'SINGLE_LINE_TEXT' || type === 'MULTI_LINE_TEXT' || type === 'NUMBER' ||
+        type === 'LINK' || type === 'DROP_DOWN' || type === 'RADIO_BUTTON'
+      ) {
+        return nonEmptyDefaultValue();
+      }
+      return undefined;
+    }
+
     addNewRow() {
       if (!this.canMutateOverlay(true)) return;
       if (this.saving) return;
@@ -7977,8 +8053,18 @@
       const tempId = `NEW:${Date.now()}:${this.newRowSeq++}`;
       const values = {};
       const original = {};
+      const now = new Date();
       this.fields.forEach((field) => {
-        const base = this.isSubtableField(field) ? [] : '';
+        const def = this.resolveFieldDefaultValue(field, now, this.kintoneTimezone);
+        const base = def !== undefined ? def : (this.isSubtableField(field) ? [] : '');
+        // 初期値は values と original の両方に入れ、diff（未編集）扱いにする。
+        // - 未編集の初期値はPOSTで省略され、kintoneが同じ初期値をサーバー側で適用する
+        //   → 画面表示と保存結果が一致し、送信ペイロードも最小で済む
+        // - ユーザーが初期値を消した場合は original（=初期値）との差分になり、
+        //   空値が明示的に送信されてサーバー初期値を上書きできる
+        //   （プレフィルなしの場合は「消しても保存すると初期値が復活する」動きだった）
+        // - 初期値だけで何も編集していない新規行は diff が空のままPOSTされない、
+        //   という既存のセマンティクス（空行は保存されない）も維持される
         values[field.code] = this.cloneFieldValue(field, base);
         original[field.code] = this.cloneFieldValue(field, base);
       });
@@ -8831,6 +8917,12 @@
         if (this.pendingDeletes.has(recordId)) return;
         const record = this.buildRecordPayload(recordId);
         if (!record) return;
+        // kintone標準UIのレコード追加ではサブテーブルに必ず空行が1行できる。
+        // グリッド新規行はサブテーブル未編集だとPOSTから省略され0行になり、
+        // サブテーブル値を参照する計算フィールドがエラーになるため、
+        // Quick New と同じ qnrAppendEmptySubtableRows で空行を補う。
+        // this.fieldMap は Map で qnrAppendEmptySubtableRows は forEach しか使わないためそのまま渡せる。
+        qnrAppendEmptySubtableRows(record, this.fieldMap);
         entries.push({ tempId: recordId, record });
       });
       const batches = [];
