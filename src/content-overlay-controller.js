@@ -5655,7 +5655,23 @@
         language: this.language,
         // Tier0: 自アプリの表示済み行から集計した頻出値（APIを使わない）。
         // Quick Newには一覧データが無いため、そちらには渡さない
-        frequentProvider: () => this.getFrequentLookupValues(field.code)
+        frequentProvider: () => this.getFrequentLookupValues(field.code),
+        // ピッカーで値が確定した直後（change dispatch後、onInputChangedが
+        // diff化＋既存マークのクリアを終えた後）に呼ばれる。QNRモーダル側は
+        // onPickを渡さないため挙動は変わらない
+        onPick: (value, source) => {
+          const recordId = String(input.dataset.recordId || '');
+          const fieldCode = String(input.dataset.fieldCode || '');
+          if (!recordId || !fieldCode || !String(value ?? '').trim()) return;
+          if (source === 'record') {
+            // 参照先から取得した候補そのものなので照合不要で「一致」確定
+            this.setLookupCheckCell(recordId, fieldCode, 'ok');
+          } else {
+            // 頻出候補は自アプリでの使用実績にすぎず参照先の存在保証ではないため照合する
+            // （ベースキャッシュがあるのでほとんどの場合APIゼロ）
+            void this.verifyLookupCellValue(recordId, fieldCode, String(value).trim());
+          }
+        }
       });
       const inputHandler = () => { picker.search(input.value); };
       input.addEventListener('input', inputHandler);
@@ -6716,14 +6732,25 @@
       const cell = input.parentElement;
       if (!cell) return;
 
-      // 貼り付け照合の予告表示は「そのセルが編集された」時点で寿命切れ
-      // （手で直した値についてもう古い判定結果を出し続けるのは誤解を招くため）
-      if (this.lookupCheckCells.delete(key)) {
-        cell.classList.remove('pb-overlay__cell--lookup-ok', 'pb-overlay__cell--lookup-warn');
-      }
-
       const rawValue = input.value;
       const validation = this.validate(rawValue, field);
+      const row = this.rowMap.get(recordId);
+      // ルックアップ照合(貼り付け/頻出候補/手打ち確定)の予告表示は「そのセルの値が
+      // 実際に変わった」時点で寿命切れにする（手で直した値についてもう古い判定結果を
+      // 出し続けるのは誤解を招くため）。ここを「'input'/'change'イベントが発火したら
+      // 無条件にクリア」にしてしまうと誤爆する: moveEditingFocus(Enterで確定して次
+      // セルへ)はrAFで実フォーカス移動を1テンポ遅らせているため、前セルのブラウザ
+      // ネイティブchangeイベントが「値は変わっていないのに」later fireすることがあり、
+      // 手打ち確定の非同期照合(verifyLookupCellValue)が付けたばかりのマークを
+      // これが巻き込んで消してしまう。値が実際に変わった場合だけクリアすることで
+      // この誤爆を避ける
+      const previousValue = row ? row.values[fieldCode] : undefined;
+      const valueActuallyChanged = validation.ok
+        ? !this.valuesEqual(validation.value, previousValue)
+        : String(rawValue) !== String(previousValue ?? input.dataset.originalValue ?? '');
+      if (valueActuallyChanged && this.lookupCheckCells.delete(key)) {
+        cell.classList.remove('pb-overlay__cell--lookup-ok', 'pb-overlay__cell--lookup-warn');
+      }
 
       if (!validation.ok) {
         cell.classList.add('pb-overlay__cell--error');
@@ -6742,7 +6769,6 @@
       }
 
       const normalized = validation.value;
-      const row = this.rowMap.get(recordId);
       const originalValue = row ? row.original[fieldCode] : input.dataset.originalValue;
       if (row) {
         row.values[fieldCode] = normalized;
@@ -6986,19 +7012,50 @@
         const row = this.rowMap.get(target.recordId);
         const currentValue = row ? String(row.values[target.fieldCode] ?? '').trim() : '';
         if (currentValue !== target.value) return;
-        const key = `${target.recordId}:${target.fieldCode}`;
         const isOk = Boolean(result.get(target.value));
-        this.lookupCheckCells.set(key, isOk ? 'ok' : 'warn');
+        this.setLookupCheckCell(target.recordId, target.fieldCode, isOk ? 'ok' : 'warn');
         if (isOk) okCount += 1; else ngCount += 1;
-        const input = this.findInput(target.recordId, target.fieldCode);
-        if (input) this.applyCellVisualState(input, row, target.fieldCode);
       });
       if (!okCount && !ngCount) return; // 全セル編集済みで対象が残っていない = 通知不要
+      // 個別確定（ピッカー/頻出/手打ち）と違い、貼り付けは複数セルを一括処理するので
+      // ここだけサマリトーストを出す（うるさくならない粒度のため）
       if (ngCount === 0) {
         this.notify(resolveText(this.language, 'pasteLookupAllOk', okCount));
       } else {
         this.notify(resolveText(this.language, 'pasteLookupSummary', okCount, ngCount));
       }
+    }
+
+    // lookupCheckCellsへのマーク設定と、そのセルが現在描画されていれば
+    // 可視状態への反映をまとめる（貼り付け照合・個別確定照合の共通処理として使う）
+    setLookupCheckCell(recordId, fieldCode, state) {
+      const key = `${recordId}:${fieldCode}`;
+      this.lookupCheckCells.set(key, state);
+      const row = this.rowMap.get(recordId);
+      if (!row) return;
+      const input = this.findInput(recordId, fieldCode);
+      if (input) this.applyCellVisualState(input, row, fieldCode);
+    }
+
+    // 1セル分のルックアップ照合（トーストなし）。貼り付け以外の経路
+    // （頻出候補の選択・手打ち確定）から使う。個別確定でトーストを出すとうるさいため、
+    // マーク反映のみ行う（サマリトーストは複数セル一括の貼り付けだけの体験にする）
+    async verifyLookupCellValue(recordId, fieldCode, value) {
+      const field = this.fieldMap.get(fieldCode);
+      const meta = this.getLookupKeyMeta(field);
+      if (!meta) return;
+      const result = await verifyLookupValuesExist({
+        relatedAppId: meta.relatedAppId,
+        relatedKeyField: meta.relatedKeyField,
+        values: [value],
+        postFn: this.postFn
+      });
+      if (!result) return; // 照合失敗 → 誤警告防止で何もしない
+      // 照合が返るまでにセルが編集されていたら古い判定を付けない（貼り付けと同じガード）
+      const row = this.rowMap.get(recordId);
+      const currentValue = row ? String(row.values[fieldCode] ?? '').trim() : '';
+      if (currentValue !== value) return;
+      this.setLookupCheckCell(recordId, fieldCode, result.get(value) ? 'ok' : 'warn');
     }
 
     applyFormPastedMatrixAt(matrix, startCol) {
@@ -7562,6 +7619,11 @@
     }
 
     exitEditMode() {
+      // 手打ち確定のルックアップ照合フック用に、編集中セルの情報を
+      // destroyGridLookupPicker()より前に控えておく（editingCellがnullになって
+      // からでは取れないため。Enter確定/Esc/別セルクリックのどの経路でも
+      // ここを通るので一箇所で全経路をカバーできる）
+      const editingCellForLookupCheck = this.editingCell;
       // gridLookupPicker は editingCell と独立管理なので、保険として
       // editingCell が既にnullでも(呼び出し順の事故があっても)ここで片付ける
       this.destroyGridLookupPicker();
@@ -7578,6 +7640,28 @@
       this.editingCell = null;
       this.pendingEdit = null;
       this.setSelectionSingle(rowIndex, colIndex);
+      this.maybeVerifyHandTypedLookupCell(editingCellForLookupCheck);
+    }
+
+    // 手打ちでルックアップキー値を入力してセル編集を終えたときに参照先照合をかける
+    // （候補ピッカーの選択はonPickの中で既に処理済みなので対象外にしたい。
+    // その判定として「lookupCheckCellsに既にエントリがある」ならスキップする＝
+    // ピッカー選択onPickが直前に付けたマークをここで上書きしないためのガードを兼ねる）
+    maybeVerifyHandTypedLookupCell(editingCell) {
+      if (!editingCell) return;
+      const recordId = String(editingCell.recordId || '').trim();
+      const fieldCode = String(editingCell.fieldCode || '').trim();
+      if (!recordId || !fieldCode) return;
+      const field = this.fieldMap.get(fieldCode);
+      if (!this.getLookupKeyMeta(field)) return; // ルックアップキー列でなければ対象外
+      const row = this.rowMap.get(recordId);
+      const value = row ? String(row.values[fieldCode] ?? '').trim() : '';
+      if (!value) return; // 空(クリア)は照合対象外。既存のクリア処理に任せる
+      const diffEntry = this.diff.get(recordId);
+      if (!diffEntry || !diffEntry[fieldCode]) return; // originalのまま抜けたセルは照合不要
+      const key = `${recordId}:${fieldCode}`;
+      if (this.lookupCheckCells.has(key)) return; // 既にマーク済み(ピッカー選択直後など)は上書きしない
+      void this.verifyLookupCellValue(recordId, fieldCode, value);
     }
 
     createEditingState(rowIndex, colIndex, selectAll = false) {
@@ -8946,9 +9030,15 @@
         : null;
       const next = this.computeNextCoords(prevRow, prevCol, rowDelta, colDelta);
       if (!next) return;
+      // Enter/Tabで次のセルへ移動が確定した時点で、前のセルのルックアップ候補
+      // ピッカーを片付ける（exitEditModeと同じ後始末。この関数はexitEditModeを
+      // 経由しない独自の「編集を続けたまま次セルへ」ショートカットなので、手打ち
+      // 確定の照合フックもここで明示的に呼ぶ必要がある）
+      this.destroyGridLookupPicker();
       const prevInput = this.getInput(prevRow, prevCol) || active;
       this.setInputEditingVisual(prevInput, false);
       this.commitCellEditHistory(previousEditingCell);
+      this.maybeVerifyHandTypedLookupCell(previousEditingCell);
       this.editingCell = this.createEditingState(next.row, next.col, false);
       const nextInput = this.getInput(next.row, next.col);
       this.setInputEditingVisual(nextInput, true);

@@ -2631,7 +2631,7 @@
   //   グリッドで同じ列を何セルも編集してもAPIは初回の1回だけで済む
   // - frequentProvider が渡されていれば、参照先フェッチとは無関係に
   //   「このアプリで使用中」の頻出候補(Tier0・APIゼロ)を先頭に出す
-  function createNewRecordLookupPicker({ anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings = [], fieldInputMap = new Map(), keyInput, postFn, language, frequentProvider }) {
+  function createNewRecordLookupPicker({ anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings = [], fieldInputMap = new Map(), keyInput, postFn, language, frequentProvider, onPick }) {
     const t = (key, ...args) => resolveText(language, key, ...args);
     // ベース取得(キーワードなし)の上限件数はverifyLookupValuesExistと同じ定数を共有する
     const LOCAL_FULL_LIMIT = LOOKUP_BASE_FETCH_LIMIT;
@@ -2747,8 +2747,13 @@
     function applyPick(record) {
       const mainVal = getDisplayValue(record, relatedKeyField);
       keyInput.value = mainVal;
+      // change dispatch後、グリッドのonInputChangedがdiff化＋既存マーク(照合結果)を
+      // クリアする。onPickはその後に呼ぶことで確定した値に対して意味のあるマークになる
       keyInput.dispatchEvent(new Event('change', { bubbles: true }));
       fillMappings(record);
+      // 参照先から取得したレコードそのものを選んだので、照合しなくても存在確実。
+      // グリッド側(onPick)に「即・一致」として扱わせる
+      if (typeof onPick === 'function') onPick(mainVal, 'record');
       close();
     }
 
@@ -2758,6 +2763,9 @@
     function applyFrequentPick(value) {
       keyInput.value = value;
       keyInput.dispatchEvent(new Event('change', { bubbles: true }));
+      // 頻出候補は自アプリでの使用実績にすぎず参照先に今も存在するとは限らないため、
+      // グリッド側(onPick)で非同期に照合させる
+      if (typeof onPick === 'function') onPick(value, 'frequent');
       close();
     }
 

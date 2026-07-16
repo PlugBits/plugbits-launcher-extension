@@ -821,8 +821,10 @@
   background: #fff6d6;
 }
 
-/* 貼り付け直後のルックアップキー照合（予告表示。保存はブロックしない）。
-   --dirtyより後に定義して優先させる: 貼り付けたセルは必ず--dirtyでもあるため、
+/* ルックアップキー列の参照先照合結果（予告表示。保存はブロックしない）。
+   貼り付け／頻出候補選択／手打ち確定のいずれの経路でも付く（候補ピッカーの
+   参照先レコード選択は照合不要で直接--lookup-okが付く。verifyLookupCellValue等参照）。
+   --dirtyより後に定義して優先させる: 対象セルは大抵--dirtyでもあるため、
    情報量の多い照合結果（一致/不一致）の方を前面に出す。
    --errorより前に定義しておき、万一invalidCellsと重なった場合は保存をブロックする
    本物のエラー表示（--error）の方を優先させる */
@@ -831,9 +833,12 @@
   box-shadow: inset 3px 0 0 #16a34a;
 }
 
+/* 不一致は赤系にする（ただし保存はブロックしない予告表示であり、
+   保存をブロックする本物のエラー表示--errorとは別物。クラス名/状態名'warn'は
+   DOM/JS互換のため変更せず、見た目の色だけアンバーから赤へ変える） */
 .pb-overlay__cell--lookup-warn {
-  background: #fffbeb;
-  box-shadow: inset 3px 0 0 #d97706;
+  background: #fee2e2;
+  box-shadow: inset 3px 0 0 #dc2626;
 }
 
 .pb-overlay__cell--error {
@@ -2176,9 +2181,10 @@
     box-shadow: inset 3px 0 0 #4ade80;
   }
 
+  /* ライト側と同じ理由で赤系に変更（'warn'は保存ブロックしない予告表示。--errorとは別物） */
   #pb-excel-overlay .pb-overlay__cell--lookup-warn {
-    background: rgba(217, 119, 6, 0.18);
-    box-shadow: inset 3px 0 0 #fbbf24;
+    background: rgba(220, 38, 38, 0.2);
+    box-shadow: inset 3px 0 0 #f87171;
   }
 
   #pb-excel-overlay .pb-overlay__cell--error {
