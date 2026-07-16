@@ -3039,6 +3039,9 @@
 
 .pb-newrec__lookup-item--active {
   background: #eff6ff;
+  /* 背景色の差だけだと頻出セクションの地色と紛れて選択位置を見失うため、
+     左端のバーで明確に示す */
+  box-shadow: inset 3px 0 0 #2563eb;
 }
 
 .pb-newrec__lookup-item-main {
@@ -3069,6 +3072,14 @@
 .pb-newrec__lookup-item--frequent {
   /* 区別が要る程度に留める。通常候補と同じ操作感を保つのが狙い */
   background: #f8fafc;
+}
+
+/* ハイライトは頻出の地色より必ず優先する。このルールが無いと、後方で定義された
+   --frequent の背景が同じ詳細度の --active を上書きし、頻出候補を↑↓で選択しても
+   見た目が変わらず「どれが選ばれているのか分からない」状態になる */
+.pb-newrec__lookup-item--frequent.pb-newrec__lookup-item--active,
+.pb-newrec__lookup-item--frequent:hover {
+  background: #eff6ff;
 }
 
 /* ── Pro upsell modal ── */

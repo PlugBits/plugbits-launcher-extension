@@ -13790,8 +13790,11 @@
       picker.appendChild(indicatorEl);
       picker.appendChild(countEl);
       picker.appendChild(cacheLineEl);
-      picker.appendChild(frequentEl);
       picker.appendChild(listEl);
+      // 頻出セクションはスクロールリストの内側・先頭に置く。
+      // リストの外(上)に固定すると、頻出が多いときにピッカーの高さ(max-height)を
+      // 食い尽くして参照先リストが細い隙間に押し込まれ、ハイライトが見えなくなる
+      listEl.appendChild(frequentEl);
       // モーダルのEscハンドラから「ドロップダウンだけ閉じる」ために公開
       picker.__pbClose = close;
       anchorEl.appendChild(picker);
@@ -13806,6 +13809,8 @@
     function setStatus(message) {
       if (!listEl) return;
       listEl.innerHTML = '';
+      // 頻出セクション(リスト内先頭)はステータス表示中も残す
+      listEl.appendChild(frequentEl);
       const el = document.createElement('div');
       el.className = 'pb-newrec__lookup-status';
       el.textContent = message;
@@ -13978,6 +13983,8 @@
     function renderList() {
       if (!listEl) return;
       listEl.innerHTML = '';
+      // 頻出セクション(リスト内先頭)を通常候補より前に戻す
+      listEl.appendChild(frequentEl);
       activeIndex = -1;
       regularItemEls = [];
       countEl.textContent = totalCount > records.length
