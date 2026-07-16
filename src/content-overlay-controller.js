@@ -8618,6 +8618,12 @@
             try {
               targetInput.setSelectionRange(targetInput.value.length, targetInput.value.length);
             } catch (_e) { /* type=dateなど非対応入力 */ }
+            // enterEditModeが予約したrAFの全選択(applyCaretPlacement)がこの後に発火すると、
+            // いま入れた1文字目が選択され、2文字目のタイプで上書き消失してしまう
+            // （「1文字目が消える」バグ）。旧値の置換はここで value 代入により完了済みで
+            // 全選択の役目はもう無いので、rAFが実行時に参照するselectAllフラグを倒して
+            // キャレット末尾配置に切り替える（DATE/DATETIMEの強制selectAllも同様に無効化）
+            if (this.editingCell) this.editingCell.selectAll = false;
             targetInput.dispatchEvent(new Event('input', { bubbles: true }));
           }
           return;
