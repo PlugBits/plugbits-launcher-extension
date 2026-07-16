@@ -1414,6 +1414,11 @@
       overlayStandardReadonly: "Standardでは閲覧のみ利用できます",
       lookupAutoReadonly: "LOOKUPにより自動入力されるため編集できません",
       lookupKeyHint: "ルックアップのキーを直接入力できます（↓キーで候補を表示）。値は保存時にkintoneが照合します",
+      // 貼り付け直後のルックアップ照合（予告表示。保存はブロックしない）
+      pasteLookupAllOk: (count) => `ルックアップ照合: ${count} 件すべて参照先と一致しました`,
+      pasteLookupSummary: (ok, ng) => `ルックアップ照合: ${ok} 件一致、${ng} 件は参照先に見つかりません（保存時にエラーになる可能性）`,
+      lookupPasteOkHint: "参照先に一致する値を確認済み",
+      lookupPasteWarnHint: "参照先に一致する値が見つかりません。保存時にエラーになる可能性があります",
       toastSaveSuccess: "保存しました",
       toastSaveFailed: "保存に失敗しました",
       confirmClose: "未保存の変更があります。閉じますか？",
@@ -1723,6 +1728,11 @@
       overlayStandardReadonly: "Editing is disabled in Standard mode",
       lookupAutoReadonly: "This field is auto-populated by LOOKUP and cannot be edited",
       lookupKeyHint: "Type the lookup key directly (press ↓ for suggestions). kintone validates the value on save.",
+      // Lookup verification right after a paste (a preview only; it never blocks saving)
+      pasteLookupAllOk: (count) => `Lookup check: all ${count} value(s) matched the related app`,
+      pasteLookupSummary: (ok, ng) => `Lookup check: ${ok} matched, ${ng} not found in the related app (may fail on save)`,
+      lookupPasteOkHint: "Confirmed to match a value in the related app",
+      lookupPasteWarnHint: "No matching value found in the related app. Saving may fail.",
       toastSaveSuccess: "Changes saved",
       toastSaveFailed: "Failed to save changes",
       confirmClose: "You have unsaved changes. Close anyway?",
@@ -2524,6 +2534,93 @@
     }
   }
 
+  // 「ベース取得」= キーワードなしlimit500の1回フェッチ。ピッカーの全件ローカル化と
+  // 貼り付け照合(verifyLookupValuesExist)の両方が同じ考え方で使うため定数を共有する
+  const LOOKUP_BASE_FETCH_LIMIT = 500;
+
+  // レコードからフィールド表示値を取り出す（配列値はカンマ区切りに整形）。
+  // ピッカーの候補描画・完全一致判定・貼り付け照合のローカル一致判定で共通に使う
+  function getLookupDisplayValue(record, fieldCode) {
+    const v = record?.[fieldCode];
+    if (!v) return '';
+    const val = v.value;
+    if (Array.isArray(val)) return val.map((item) => (typeof item === 'object' ? item.value || '' : String(item))).join(', ');
+    return String(val ?? '');
+  }
+
+  // 貼り付けられたルックアップキー値が参照先に存在するかをまとめて照合する。
+  // グリッド貼り付け直後の「予告」表示用で、保存をブロックするものではない
+  // （最終判定は保存時のkintone照合）。そのため失敗時は誤警告を避けてnullを返し、
+  // 呼び出し側は何もマークしない。
+  // ベースデータの解決は createNewRecordLookupPicker の load() と同じ考え方:
+  //   a. lookupFullCache のfresh・完全なエントリがあればAPIゼロでローカル照合
+  //   b. 無ければキーワードなしフェッチ(limit 500)→キャッシュ保存→完全ならローカル照合
+  //   c. 500件超なら exactValues で50件ずつチャンクしてin句照合する
+  // 戻り値: Map<value, boolean>（照合できた場合。空values配列なら空Map） | null（失敗時）
+  async function verifyLookupValuesExist({ relatedAppId, relatedKeyField, values, postFn }) {
+    const uniqueValues = Array.from(new Set(
+      (Array.isArray(values) ? values : [])
+        .map((v) => String(v ?? '').trim())
+        .filter(Boolean)
+    ));
+    if (!uniqueValues.length) return new Map();
+    const cacheKey = `${relatedAppId}:${relatedKeyField}`;
+    try {
+      let baseRecords = null; // 完全に収まったベースデータ(ローカル照合できる状態)のときだけ入る
+      const cached = lookupCacheGet(lookupFullCache, cacheKey, Date.now());
+      if (cached && cached.records.length >= cached.totalCount) {
+        baseRecords = cached.records;
+      } else {
+        const resp = await postFn('EXCEL_GET_LOOKUP_CANDIDATES', {
+          relatedAppId,
+          sort: '',
+          keyword: '',
+          keyField: relatedKeyField,
+          offset: 0,
+          limit: LOOKUP_BASE_FETCH_LIMIT
+        });
+        if (!resp?.ok) throw new Error(resp?.error || 'lookup fetch failed');
+        const fetched = Array.isArray(resp?.result?.records) ? resp.result.records.map((r) => r.fields || r) : [];
+        const total = Number(resp?.result?.totalCount || fetched.length);
+        // キーワードなしフェッチは(不完全でも)ピッカー側のTier1キャッシュとしても使い回せるので保存する
+        lookupFullCache.set(cacheKey, { records: fetched, totalCount: total, fetchedAt: Date.now() });
+        if (fetched.length >= total) baseRecords = fetched;
+      }
+      if (baseRecords) {
+        const localValues = new Set(baseRecords.map((r) => getLookupDisplayValue(r, relatedKeyField)));
+        const result = new Map();
+        uniqueValues.forEach((v) => result.set(v, localValues.has(v)));
+        return result;
+      }
+      // 500件超: exactValues(in句)で50件ずつチャンク照合する。
+      // 返ってこなかった値はfalseのまま(=不一致)で確定させる
+      const result = new Map();
+      uniqueValues.forEach((v) => result.set(v, false));
+      const EXACT_CHUNK_SIZE = 50;
+      for (let i = 0; i < uniqueValues.length; i += EXACT_CHUNK_SIZE) {
+        const chunk = uniqueValues.slice(i, i + EXACT_CHUNK_SIZE);
+        const resp = await postFn('EXCEL_GET_LOOKUP_CANDIDATES', {
+          relatedAppId,
+          sort: '',
+          keyField: relatedKeyField,
+          exactValues: chunk,
+          offset: 0,
+          limit: LOOKUP_BASE_FETCH_LIMIT
+        });
+        if (!resp?.ok) throw new Error(resp?.error || 'lookup fetch failed');
+        const fetched = Array.isArray(resp?.result?.records) ? resp.result.records.map((r) => r.fields || r) : [];
+        fetched.forEach((r) => {
+          const v = getLookupDisplayValue(r, relatedKeyField);
+          if (result.has(v)) result.set(v, true);
+        });
+      }
+      return result;
+    } catch (_err) {
+      // 照合フェッチ失敗時は「何もマークしない」規約のためnull(誤警告防止)
+      return null;
+    }
+  }
+
   // ルックアップ候補コンボボックス。
   // - 初回に最大500件を1リクエストで取得。関連アプリが500件以下なら
   //   「全件ローカルモード」になり、以後の絞り込みはAPI消費ゼロで即時。
@@ -2536,7 +2633,8 @@
   //   「このアプリで使用中」の頻出候補(Tier0・APIゼロ)を先頭に出す
   function createNewRecordLookupPicker({ anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings = [], fieldInputMap = new Map(), keyInput, postFn, language, frequentProvider }) {
     const t = (key, ...args) => resolveText(language, key, ...args);
-    const LOCAL_FULL_LIMIT = 500;
+    // ベース取得(キーワードなし)の上限件数はverifyLookupValuesExistと同じ定数を共有する
+    const LOCAL_FULL_LIMIT = LOOKUP_BASE_FETCH_LIMIT;
     const cacheKey = `${relatedAppId}:${relatedKeyField}`;
 
     let picker = null;
@@ -2561,13 +2659,9 @@
     let regularItemEls = [];
     let cacheServedAt = null; // 今表示中の内容がキャッシュ提供ならそのfetchedAt、直接フェッチならnull
 
-    function getDisplayValue(record, fieldCode) {
-      const v = record?.[fieldCode];
-      if (!v) return '';
-      const val = v.value;
-      if (Array.isArray(val)) return val.map((item) => (typeof item === 'object' ? item.value || '' : String(item))).join(', ');
-      return String(val ?? '');
-    }
+    // 表示値の整形はモジュールスコープの getLookupDisplayValue に共通化済み
+    // （verifyLookupValuesExist のローカル一致判定と同じ基準にするため）
+    const getDisplayValue = getLookupDisplayValue;
 
     function isOpen() {
       return Boolean(picker && picker.isConnected);
@@ -2862,6 +2956,64 @@
       loading = false;
     }
 
+    // タイプ先行(ピッカーを一度も開かずにセルへいきなり入力)でキーワード検索の
+    // キャッシュがミスした場合に、いきなりキーワード付きサーバー検索へ行かず
+    // まず「ベース取得」(キーワードなしlimit 500)を1回だけ試す。参照先が500件
+    // 以下ならここで全件ローカル化でき、以後1文字ずつ増える入力のたびに
+    // サーバーへ検索を飛ばす（「商」「商品」「商品0」…とプレフィックスごとに
+    // 1リクエスト消費する）のを防げる。呼び出し前提: loading===false
+    // （load()側で既に `if (loading) return;` を通過済みであること）。
+    // 戻り値:
+    //   'fullLocal' … 全件が収まりfullLocal化できた(以後はfilterLocalでAPIゼロ)
+    //   'partial'   … 500件超で全件は取れなかった。呼び出し側は従来の
+    //                 キーワード付きフェッチへフォールスルーする
+    //                 （このベース1回分はlookupFullCacheに残るのでbrowseや
+    //                 次回オープンで無駄にならない）
+    //   'stale'     … フェッチ中にseqが進んだ/ピッカーが閉じた。呼び出し側は
+    //                 何も描画せずreturnする
+    //   'error'     … フェッチ失敗。呼び出し側はエラー表示してreturnする
+    async function ensureBaseDataset() {
+      const now = Date.now();
+      const cached = lookupCacheGet(lookupFullCache, cacheKey, now);
+      if (cached && cached.records.length >= cached.totalCount) {
+        invalidatePendingFetch();
+        fullLocal = true;
+        allLocalRecords = cached.records.slice();
+        cacheServedAt = cached.fetchedAt;
+        return 'fullLocal';
+      }
+      loading = true;
+      const seq = ++requestSeq;
+      try {
+        const resp = await postFn('EXCEL_GET_LOOKUP_CANDIDATES', {
+          relatedAppId,
+          sort: '',
+          keyword: '',
+          keyField: relatedKeyField,
+          offset: 0,
+          limit: LOCAL_FULL_LIMIT
+        });
+        if (seq !== requestSeq || !isOpen()) return 'stale';
+        if (!resp?.ok) throw new Error(resp?.error || 'lookup fetch failed');
+        const fetched = Array.isArray(resp?.result?.records) ? resp.result.records.map((r) => r.fields || r) : [];
+        const total = Number(resp?.result?.totalCount || fetched.length);
+        // 不完全でも(browseや次回オープンで使い回せるよう)Tier1キャッシュには入れておく
+        lookupFullCache.set(cacheKey, { records: fetched, totalCount: total, fetchedAt: Date.now() });
+        if (fetched.length >= total) {
+          fullLocal = true;
+          allLocalRecords = fetched.slice();
+          cacheServedAt = null;
+          return 'fullLocal';
+        }
+        return 'partial';
+      } catch (err) {
+        if (seq !== requestSeq || !isOpen()) return 'stale';
+        return 'error';
+      } finally {
+        if (seq === requestSeq) loading = false;
+      }
+    }
+
     async function load({ keyword = '', append = false } = {}) {
       ensureOpen();
       // Tier0: 参照先の取得状況とは無関係に、開いた瞬間・キーワード変化のたびに
@@ -2899,6 +3051,25 @@
         }
       }
       if (loading) return;
+      // キーワード検索でキャッシュミスした場合、ベース取得(実装1)を先に試す。
+      // append(無限スクロール)は対象外(既存どおり素通しでキーワード付きフェッチする)
+      if (!append && keyword) {
+        const baseResult = await ensureBaseDataset();
+        if (baseResult === 'stale') return;
+        if (baseResult === 'error') {
+          setStatus(t('quickNewLookupError'));
+          return;
+        }
+        if (baseResult === 'fullLocal') {
+          records = filterLocal(keyword);
+          totalCount = records.length;
+          currentKeyword = keyword;
+          renderList();
+          return;
+        }
+        // 'partial'（500件超で全件は取れなかった）→ 従来どおりキーワード付き
+        // フェッチへ進む。ensureBaseDataset内でloading/requestSeqは後始末済み
+      }
       loading = true;
       const seq = ++requestSeq;
       if (!append) setStatus(t('quickNewLoading'));

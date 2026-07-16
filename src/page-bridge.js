@@ -915,6 +915,32 @@ function markLookupAutoFields(properties, metas) {
     'LOOKUP'
   ]);
 
+  // kintoneクエリの文字列リテラル(ダブルクォート囲み)に値を埋め込む前のエスケープ。
+  // バックスラッシュを先にエスケープしてからダブルクォートをエスケープする順序が
+  // 重要（逆順だとエスケープ用のバックスラッシュ自体が二重エスケープされてしまう）
+  function escapeKintoneQueryLiteral(value) {
+    return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  // EXCEL_GET_LOOKUP_CANDIDATES用のクエリ文字列組み立て。
+  // - exactValues指定時: `keyField in ("v1","v2",...)` の完全一致in句
+  //   （貼り付け照合 verifyLookupValuesExist の500件超チャンクから使う）
+  // - 未指定時: 従来どおり keyword+conditionOp(like/=) のフィルタ
+  //   （likeが使えないキー項目は呼び出し側が conditionOp='=' で再試行する）
+  function buildLookupCandidatesQuery({ keyword, keyField, exactValues, conditionOp, sort, limit, offset }) {
+    const parts = [];
+    if (Array.isArray(exactValues) && exactValues.length) {
+      const inList = exactValues.map((v) => `"${escapeKintoneQueryLiteral(v)}"`).join(',');
+      parts.push(`${keyField} in (${inList})`);
+    } else if (keyword && keyField) {
+      parts.push(`${keyField} ${conditionOp} "${escapeKintoneQueryLiteral(keyword)}"`);
+    }
+    if (sort) parts.push(`order by ${sort}`);
+    parts.push(`limit ${limit}`);
+    if (offset) parts.push(`offset ${offset}`);
+    return parts.join(' ');
+  }
+
   function extractQueryFromViews(viewsObj, viewIdOrName) {
     const entries = Object.entries(viewsObj || {});
     const byId = entries.find(([, v]) => String(v.id) === String(viewIdOrName));
@@ -1639,41 +1665,45 @@ function markLookupAutoFields(properties, metas) {
         const sort = String(payload?.sort || '').trim();
         const keyword = String(payload?.keyword || '').trim();
         const keyField = String(payload?.keyField || '').trim();
+        // 貼り付け照合(verifyLookupValuesExist)からのin句照合パラメータ。
+        // keyFieldが無いとin句を組み立てられないので、その場合は無視して従来経路に落とす
+        const exactValuesRaw = Array.isArray(payload?.exactValues) ? payload.exactValues : null;
+        const exactValues = exactValuesRaw && keyField
+          ? exactValuesRaw.map((v) => String(v ?? '').trim()).filter(Boolean)
+          : null;
         const offsetRaw = Number(payload?.offset);
         const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
         const limitRaw = Number(payload?.limit);
         const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 500) : 500;
-        const buildQuery = (conditionOp) => {
-          const parts = [];
-          if (keyword && keyField) {
-            const escaped = keyword.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-            parts.push(`${keyField} ${conditionOp} "${escaped}"`);
-          }
-          if (sort) parts.push(`order by ${sort}`);
-          parts.push(`limit ${limit}`);
-          if (offset) parts.push(`offset ${offset}`);
-          return parts.join(' ');
-        };
         const apiMeta = {
           feature: 'lookup_candidates',
           source: 'new_record',
           logGroup: 'overlay'
         };
         let resp;
-        try {
+        if (exactValues && exactValues.length) {
+          // in句の完全一致はlike非対応フィールドの心配が無いので1回で済む
           resp = await callKintoneApi('/k/v1/records', 'GET', {
             app: relatedAppId,
-            query: buildQuery('like'),
+            query: buildLookupCandidatesQuery({ keyField, exactValues, sort, limit, offset }),
             totalCount: true
           }, apiMeta);
-        } catch (error) {
-          // like非対応のキー項目（数値・日付など）は完全一致で再試行
-          if (!(keyword && keyField)) throw error;
-          resp = await callKintoneApi('/k/v1/records', 'GET', {
-            app: relatedAppId,
-            query: buildQuery('='),
-            totalCount: true
-          }, apiMeta);
+        } else {
+          try {
+            resp = await callKintoneApi('/k/v1/records', 'GET', {
+              app: relatedAppId,
+              query: buildLookupCandidatesQuery({ keyword, keyField, conditionOp: 'like', sort, limit, offset }),
+              totalCount: true
+            }, apiMeta);
+          } catch (error) {
+            // like非対応のキー項目（数値・日付など）は完全一致で再試行
+            if (!(keyword && keyField)) throw error;
+            resp = await callKintoneApi('/k/v1/records', 'GET', {
+              app: relatedAppId,
+              query: buildLookupCandidatesQuery({ keyword, keyField, conditionOp: '=', sort, limit, offset }),
+              totalCount: true
+            }, apiMeta);
+          }
         }
         window.postMessage({
           __kfav__: true,

@@ -821,6 +821,21 @@
   background: #fff6d6;
 }
 
+/* 貼り付け直後のルックアップキー照合（予告表示。保存はブロックしない）。
+   --dirtyより後に定義して優先させる: 貼り付けたセルは必ず--dirtyでもあるため、
+   情報量の多い照合結果（一致/不一致）の方を前面に出す。
+   --errorより前に定義しておき、万一invalidCellsと重なった場合は保存をブロックする
+   本物のエラー表示（--error）の方を優先させる */
+.pb-overlay__cell--lookup-ok {
+  background: #f0fdf4;
+  box-shadow: inset 3px 0 0 #16a34a;
+}
+
+.pb-overlay__cell--lookup-warn {
+  background: #fffbeb;
+  box-shadow: inset 3px 0 0 #d97706;
+}
+
 .pb-overlay__cell--error {
   background: #fde8e8;
 }
@@ -2153,6 +2168,17 @@
 
   #pb-excel-overlay .pb-overlay__cell--dirty {
     background: rgba(245, 158, 11, 0.16);
+  }
+
+  /* --dirtyより後・--errorより前（ライト側と同じ優先順位の理由） */
+  #pb-excel-overlay .pb-overlay__cell--lookup-ok {
+    background: rgba(22, 163, 74, 0.16);
+    box-shadow: inset 3px 0 0 #4ade80;
+  }
+
+  #pb-excel-overlay .pb-overlay__cell--lookup-warn {
+    background: rgba(217, 119, 6, 0.18);
+    box-shadow: inset 3px 0 0 #fbbf24;
   }
 
   #pb-excel-overlay .pb-overlay__cell--error {

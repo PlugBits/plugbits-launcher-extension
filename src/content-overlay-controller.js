@@ -115,6 +115,10 @@
       this.maxHistory = 100;
       this.diff = new Map();
       this.invalidCells = new Set();
+      // 貼り付け直後のルックアップキー照合結果（'ok' | 'warn'、key `${recordId}:${fieldCode}`）。
+      // invalidCellsとは別管理＝保存をブロックしない「予告」表示。寿命は短く、
+      // セル編集・保存成功・ページ再読込・ルックアップ再取得のいずれかでクリアされる
+      this.lookupCheckCells = new Map();
       this.revisionMap = new Map();
       this.isComposing = false;
       this.saving = false;
@@ -2838,6 +2842,9 @@
       const records = Array.isArray(recordsRes.records) ? recordsRes.records : [];
       this.rows = records.map((record) => this.transformRecord(record));
       console.log('[overlay] records loaded', records.length);
+      // ページ再読込・ルックアップ再取得後のreloadPage等はここを必ず通るため、
+      // 貼り付け照合の予告表示(古いDOM状態に紐づく一時マーク)をまとめてクリアする
+      this.lookupCheckCells.clear();
       this.accumulateLookupFrequency(this.rows);
       this.rebuildRowMaps();
       this.recomputeFilteredRowIds();
@@ -5229,6 +5236,12 @@
           delete cell.dataset.errorReason;
         }
       }
+      // 貼り付け直後のルックアップ照合結果（一時的な予告表示。保存はブロックしない
+      // のでinvalidCellsとは独立に扱う）。エラー表示(--error)より優先度は低く、
+      // 両方付くことは無い想定だが、万一重なってもCSS側で--errorを前面にする
+      const lookupCheckState = this.lookupCheckCells.get(key);
+      cell.classList.toggle('pb-overlay__cell--lookup-ok', lookupCheckState === 'ok');
+      cell.classList.toggle('pb-overlay__cell--lookup-warn', lookupCheckState === 'warn');
       const rowIndex = Number(input.dataset.rowIndex || '-1');
       const colIndex = Number(input.dataset.colIndex || '-1');
       if (this.isCellSelected(rowIndex, colIndex)) {
@@ -5273,6 +5286,12 @@
         input.title = resolveText(this.language, 'lookupAutoReadonly');
       } else if (!this.isSubtableField(field) && !editableVisual) {
         input.title = resolveText(this.language, fieldDeniedByAcl ? 'permNoFieldEdit' : 'permNoEdit');
+      } else if (!this.isSubtableField(field) && lookupCheckState === 'ok') {
+        // 貼り付け照合(一致)。lookupKeyHintより優先して「確認済み」を伝える
+        input.title = resolveText(this.language, 'lookupPasteOkHint');
+      } else if (!this.isSubtableField(field) && lookupCheckState === 'warn') {
+        // 貼り付け照合(不一致)。同上、こちらは保存時エラーの可能性を予告する
+        input.title = resolveText(this.language, 'lookupPasteWarnHint');
       } else if (!this.isSubtableField(field) && isLookupKey) {
         // キー項目: 手入力も候補選択もできることをヒントで示す
         input.title = resolveText(this.language, 'lookupKeyHint');
@@ -6697,6 +6716,12 @@
       const cell = input.parentElement;
       if (!cell) return;
 
+      // 貼り付け照合の予告表示は「そのセルが編集された」時点で寿命切れ
+      // （手で直した値についてもう古い判定結果を出し続けるのは誤解を招くため）
+      if (this.lookupCheckCells.delete(key)) {
+        cell.classList.remove('pb-overlay__cell--lookup-ok', 'pb-overlay__cell--lookup-warn');
+      }
+
       const rawValue = input.value;
       const validation = this.validate(rawValue, field);
 
@@ -6895,6 +6920,9 @@
           payload: { changes: pasteChanges }
         });
       }
+      // ルックアップキー列への貼り付けを検知したら参照先と照合する（後追いの非同期。
+      // 貼り付け自体はここまでで同期的に完了済みなので操作をブロックしない）
+      this.triggerLookupPasteVerification(applicableTargets);
       const endRow = Math.min(rowCount - 1, startRow + attemptedRows - 1);
       const endCol = Math.min(colCount - 1, startCol + attemptedCols - 1);
       this.selection = {
@@ -6911,6 +6939,65 @@
       if (this.hasActiveFilters()) {
         this.needsFilterReapply = false;
         this.applyFilters();
+      }
+    }
+
+    // 貼り付けられたセルのうち、ルックアップキー列(getLookupKeyMetaが非null)かつ
+    // 値が非空のものだけを参照先(relatedAppId+relatedKeyField)ごとにまとめ、
+    // verifyLookupValuesExistへ回す。グリッドのapplyPastedMatrixAt専用
+    // （applyFormPastedMatrixAt＝詳細フォームレイアウトの貼り付けとQNRモーダルは対象外）
+    triggerLookupPasteVerification(applicableTargets) {
+      const groups = new Map(); // `${relatedAppId}:${relatedKeyField}` -> { relatedAppId, relatedKeyField, targets }
+      applicableTargets.forEach((target) => {
+        const value = String(target.value ?? '').trim();
+        if (!value) return; // 空文字への貼り付け(クリア)は正当な操作なので照合対象外
+        const field = this.fields[target.colIndex];
+        const meta = this.getLookupKeyMeta(field);
+        if (!meta) return;
+        const groupKey = `${meta.relatedAppId}:${meta.relatedKeyField}`;
+        let group = groups.get(groupKey);
+        if (!group) {
+          group = { relatedAppId: meta.relatedAppId, relatedKeyField: meta.relatedKeyField, targets: [] };
+          groups.set(groupKey, group);
+        }
+        group.targets.push({ recordId: target.recordId, fieldCode: target.fieldCode, value });
+      });
+      // 参照先ごとに1回ずつ非同期で照合する。awaitせずvoidで撃ちっぱなしにする
+      // （貼り付け操作自体は既に完了している。結果は後追いでセルに反映する）
+      groups.forEach((group) => { void this.runLookupPasteVerification(group); });
+    }
+
+    // 参照先1件分の照合を実行し、結果をlookupCheckCellsへ反映してトースト通知する。
+    // verifyLookupValuesExistがnull(照合フェッチ失敗)を返した場合は誤警告防止のため
+    // 何もマークしない
+    async runLookupPasteVerification(group) {
+      const result = await verifyLookupValuesExist({
+        relatedAppId: group.relatedAppId,
+        relatedKeyField: group.relatedKeyField,
+        values: group.targets.map((t) => t.value),
+        postFn: this.postFn
+      });
+      if (!result) return;
+      let okCount = 0;
+      let ngCount = 0;
+      group.targets.forEach((target) => {
+        // 照合が返るまでの間にセルが編集されていたら上書きしない
+        // （onInputChangedのクリアより後にここで古い判定を付け直してしまうのを防ぐ）
+        const row = this.rowMap.get(target.recordId);
+        const currentValue = row ? String(row.values[target.fieldCode] ?? '').trim() : '';
+        if (currentValue !== target.value) return;
+        const key = `${target.recordId}:${target.fieldCode}`;
+        const isOk = Boolean(result.get(target.value));
+        this.lookupCheckCells.set(key, isOk ? 'ok' : 'warn');
+        if (isOk) okCount += 1; else ngCount += 1;
+        const input = this.findInput(target.recordId, target.fieldCode);
+        if (input) this.applyCellVisualState(input, row, target.fieldCode);
+      });
+      if (!okCount && !ngCount) return; // 全セル編集済みで対象が残っていない = 通知不要
+      if (ngCount === 0) {
+        this.notify(resolveText(this.language, 'pasteLookupAllOk', okCount));
+      } else {
+        this.notify(resolveText(this.language, 'pasteLookupSummary', okCount, ngCount));
       }
     }
 
@@ -9448,6 +9535,10 @@
           anySaved = true;
         }
         if (anySaved) {
+          // 保存成功＝貼り付け照合の「予告」は役目を終えた(最終判定はkintone側で
+          // 済んでいる)ので全クリアする。refetch系より前に消しておけば、続く
+          // refreshRowFromRemote等のapplyCellVisualStateで即座に反映される
+          this.lookupCheckCells.clear();
           if (this.isListMode()) {
             try {
               await this.refreshListRowsAfterSave();
