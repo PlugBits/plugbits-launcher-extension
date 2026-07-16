@@ -1517,6 +1517,10 @@
       statusPendingDeletes: "削除予定",
       statusNewRows: "新規行",
       btnColumns: "列順",
+      // 「ツール ▾」トグルボタン。低頻度の管理系操作（列表示/再計算/
+      // ルックアップ再取得）をここに集約する
+      btnToolMenu: "ツール ▾",
+      titleToolMenu: "列表示・再計算・ルックアップ再取得",
       layoutPresetLabel: "レイアウト",
       layoutPresetSave: "保存",
       layoutPresetDuplicate: "複製",
@@ -1822,6 +1826,10 @@
       statusPendingDeletes: "Pending delete",
       statusNewRows: "New rows",
       btnColumns: "Columns",
+      // "Tools ▾" toggle button. Groups low-frequency admin actions
+      // (columns, recalculate, refresh lookups) under one menu
+      btnToolMenu: "Tools ▾",
+      titleToolMenu: "Columns, recalculate, refresh lookups",
       layoutPresetLabel: "Layout",
       layoutPresetSave: "Save",
       layoutPresetDuplicate: "Duplicate",
@@ -3004,6 +3012,9 @@
       browse() {
         if (isOpen() && !currentKeyword) { close(); return; }
         void load({ keyword: '' });
+        // 🔍ボタンから開いた直後でも↑↓/Enterがすぐ効くように、
+        // キーボード操作の受け口である入力欄へフォーカスを移す
+        try { keyInput.focus(); } catch (_e) { /* noop */ }
       },
       search,
       // グリッド専用: keyInputのリスナーごと完全に片付ける。

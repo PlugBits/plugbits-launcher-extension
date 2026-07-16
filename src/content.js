@@ -1521,6 +1521,10 @@
       statusPendingDeletes: "削除予定",
       statusNewRows: "新規行",
       btnColumns: "列順",
+      // 「ツール ▾」トグルボタン。低頻度の管理系操作（列表示/再計算/
+      // ルックアップ再取得）をここに集約する
+      btnToolMenu: "ツール ▾",
+      titleToolMenu: "列表示・再計算・ルックアップ再取得",
       layoutPresetLabel: "レイアウト",
       layoutPresetSave: "保存",
       layoutPresetDuplicate: "複製",
@@ -1826,6 +1830,10 @@
       statusPendingDeletes: "Pending delete",
       statusNewRows: "New rows",
       btnColumns: "Columns",
+      // "Tools ▾" toggle button. Groups low-frequency admin actions
+      // (columns, recalculate, refresh lookups) under one menu
+      btnToolMenu: "Tools ▾",
+      titleToolMenu: "Columns, recalculate, refresh lookups",
       layoutPresetLabel: "Layout",
       layoutPresetSave: "Save",
       layoutPresetDuplicate: "Duplicate",
@@ -2198,6 +2206,12 @@
       this.layoutPresetDuplicateButton = null;
       this.layoutPresetRenameButton = null;
       this.layoutPresetDeleteButton = null;
+      // 列表示・再計算・ルックアップ再取得（低頻度の管理系）をまとめる
+      // 「ツール ▾」メニュー。開閉の作法はレイアウトプリセットメニューに揃える
+      this.toolMenuWrap = null;
+      this.toolMenuButton = null;
+      this.toolMenu = null;
+      this.toolMenuOpen = false;
       this.prevPageButton = null;
       this.nextPageButton = null;
       this.pageLabelElement = null;
@@ -2272,6 +2286,8 @@
       this.handleGlobalArrowKeyCapture = this.handleOverlayGlobalArrowKeydown.bind(this);
       this.handleLayoutPresetMenuOutsidePointerDown = this.handleLayoutPresetMenuOutsidePointerDown.bind(this);
       this.handleLayoutPresetMenuKeyDown = this.handleLayoutPresetMenuKeyDown.bind(this);
+      this.handleToolMenuOutsidePointerDown = this.handleToolMenuOutsidePointerDown.bind(this);
+      this.handleToolMenuKeyDown = this.handleToolMenuKeyDown.bind(this);
       this.handleCompositionStart = () => { this.isComposing = true; };
       this.handleCompositionEnd = () => { this.isComposing = false; };
       this.requireReload = false;
@@ -2513,21 +2529,33 @@
         pager.style.display = 'none';
       }
 
+      // 列表示・再計算・ルックアップ再取得は低頻度の管理系操作のため
+      // 「ツール ▾」メニューにまとめる（下のtoolMenu構築部を参照）。
+      // ボタン要素自体はこれまでどおり this.columnButton 等が指すので、
+      // disabled/title/表示切替を行う既存コードは変更不要
       const columnsBtn = document.createElement('button');
       columnsBtn.type = 'button';
-      columnsBtn.className = 'pb-overlay__btn';
+      columnsBtn.className = 'pb-overlay__preset-menu-item pb-overlay__tool-menu-item';
+      columnsBtn.setAttribute('role', 'menuitem');
       columnsBtn.textContent = resolveText(this.language, 'btnColumns');
       columnsBtn.disabled = true;
-      columnsBtn.addEventListener('click', () => { this.openColumnManager(); });
+      columnsBtn.addEventListener('click', () => {
+        this.closeToolMenu();
+        this.openColumnManager();
+      });
       this.columnButton = columnsBtn;
 
       // 計算フィールドの再計算（表示中レコードの空更新＝再保存。100件で1リクエスト）
       const recalcBtn = document.createElement('button');
       recalcBtn.type = 'button';
-      recalcBtn.className = 'pb-overlay__btn';
+      recalcBtn.className = 'pb-overlay__preset-menu-item pb-overlay__tool-menu-item';
+      recalcBtn.setAttribute('role', 'menuitem');
       recalcBtn.textContent = resolveText(this.language, 'btnRecalc');
       recalcBtn.title = resolveText(this.language, 'titleRecalc');
-      recalcBtn.addEventListener('click', () => { void this.recalcCurrentPage(); });
+      recalcBtn.addEventListener('click', () => {
+        this.closeToolMenu();
+        void this.recalcCurrentPage();
+      });
       this.recalcButton = recalcBtn;
 
       // ルックアップキーを現在値で再送し、コピー先フィールドを参照先アプリの
@@ -2535,11 +2563,43 @@
       // 再送しないと再解決されないため専用ボタンにしている）
       const lookupRefreshBtn = document.createElement('button');
       lookupRefreshBtn.type = 'button';
-      lookupRefreshBtn.className = 'pb-overlay__btn';
+      lookupRefreshBtn.className = 'pb-overlay__preset-menu-item pb-overlay__tool-menu-item';
+      lookupRefreshBtn.setAttribute('role', 'menuitem');
       lookupRefreshBtn.textContent = resolveText(this.language, 'btnLookupRefresh');
       lookupRefreshBtn.title = resolveText(this.language, 'titleLookupRefresh');
-      lookupRefreshBtn.addEventListener('click', () => { void this.lookupRefreshCurrentPage(); });
+      lookupRefreshBtn.addEventListener('click', () => {
+        this.closeToolMenu();
+        void this.lookupRefreshCurrentPage();
+      });
       this.lookupRefreshButton = lookupRefreshBtn;
+
+      // ツールメニュー本体: トグルボタン＋メニューは既存のレイアウト
+      // プリセットメニュー（toggleLayoutPresetMenu等）と同じ開閉作法にする
+      const toolMenuWrap = document.createElement('div');
+      toolMenuWrap.className = 'pb-overlay__tool-menu-wrap';
+      const toolMenuToggleBtn = document.createElement('button');
+      toolMenuToggleBtn.type = 'button';
+      toolMenuToggleBtn.className = 'pb-overlay__btn pb-overlay__tool-menu-toggle';
+      toolMenuToggleBtn.textContent = resolveText(this.language, 'btnToolMenu');
+      toolMenuToggleBtn.title = resolveText(this.language, 'titleToolMenu');
+      toolMenuToggleBtn.setAttribute('aria-haspopup', 'menu');
+      toolMenuToggleBtn.setAttribute('aria-expanded', 'false');
+      toolMenuToggleBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleToolMenu();
+      });
+      const toolMenu = document.createElement('div');
+      toolMenu.className = 'pb-overlay__tool-menu';
+      toolMenu.setAttribute('role', 'menu');
+      toolMenu.appendChild(columnsBtn);
+      toolMenu.appendChild(recalcBtn);
+      toolMenu.appendChild(lookupRefreshBtn);
+      toolMenuWrap.appendChild(toolMenuToggleBtn);
+      toolMenuWrap.appendChild(toolMenu);
+      this.toolMenuWrap = toolMenuWrap;
+      this.toolMenuButton = toolMenuToggleBtn;
+      this.toolMenu = toolMenu;
 
       const layoutToggle = document.createElement('div');
       layoutToggle.className = 'pb-overlay__layout-toggle';
@@ -2693,15 +2753,23 @@
       primaryActions.appendChild(presetWrap);
       primaryActions.appendChild(layoutToggle);
 
+      // グループ区切り: [ツール▾] | [行追加/元に戻す/やり直す] | [変更バッジ/保存/閉じる]
+      const toolGroupSep = document.createElement('span');
+      toolGroupSep.className = 'pb-overlay__toolbar-sep';
+      toolGroupSep.setAttribute('aria-hidden', 'true');
+      const editGroupSep = document.createElement('span');
+      editGroupSep.className = 'pb-overlay__toolbar-sep';
+      editGroupSep.setAttribute('aria-hidden', 'true');
+
       const secondaryActions = document.createElement('div');
       secondaryActions.className = 'pb-overlay__toolbar-secondary';
-      secondaryActions.appendChild(columnsBtn);
-      secondaryActions.appendChild(recalcBtn);
-      secondaryActions.appendChild(lookupRefreshBtn);
-      secondaryActions.appendChild(dirty);
+      secondaryActions.appendChild(toolMenuWrap);
+      secondaryActions.appendChild(toolGroupSep);
       secondaryActions.appendChild(addRowBtn);
       secondaryActions.appendChild(undoBtn);
       secondaryActions.appendChild(redoBtn);
+      secondaryActions.appendChild(editGroupSep);
+      secondaryActions.appendChild(dirty);
       secondaryActions.appendChild(saveBtn);
       secondaryActions.appendChild(closeBtn);
 
@@ -2851,6 +2919,7 @@
         window.removeEventListener('beforeunload', this.handleBeforeUnload);
       }
       this.closeLayoutPresetMenu();
+      this.closeToolMenu();
     }
 
     getCurrentViewId() {
@@ -3449,6 +3518,46 @@
       event.stopPropagation();
       this.closeLayoutPresetMenu();
       this.layoutPresetMenuButton?.focus();
+    }
+
+    // 「ツール ▾」メニュー（列表示/再計算/ルックアップ再取得）の開閉。
+    // レイアウトプリセットメニューと同じ作法（外側クリック/Escで閉じる）に揃える
+    toggleToolMenu(forceOpen) {
+      const next = typeof forceOpen === 'boolean' ? forceOpen : !this.toolMenuOpen;
+      if (next === this.toolMenuOpen) return;
+      this.toolMenuOpen = next;
+      if (this.toolMenuWrap) {
+        this.toolMenuWrap.classList.toggle('is-open', this.toolMenuOpen);
+      }
+      if (this.toolMenuButton) {
+        this.toolMenuButton.setAttribute('aria-expanded', this.toolMenuOpen ? 'true' : 'false');
+      }
+      if (this.toolMenuOpen) {
+        document.addEventListener('mousedown', this.handleToolMenuOutsidePointerDown, true);
+        document.addEventListener('keydown', this.handleToolMenuKeyDown, true);
+      } else {
+        document.removeEventListener('mousedown', this.handleToolMenuOutsidePointerDown, true);
+        document.removeEventListener('keydown', this.handleToolMenuKeyDown, true);
+      }
+    }
+
+    closeToolMenu() {
+      this.toggleToolMenu(false);
+    }
+
+    handleToolMenuOutsidePointerDown(event) {
+      if (!this.toolMenuOpen || !this.toolMenuWrap) return;
+      if (this.toolMenuWrap.contains(event.target)) return;
+      this.closeToolMenu();
+    }
+
+    handleToolMenuKeyDown(event) {
+      if (!this.toolMenuOpen) return;
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.closeToolMenu();
+      this.toolMenuButton?.focus();
     }
 
     updateLayoutPresetToolbarUi() {
@@ -11263,6 +11372,7 @@
         this.layoutPresetDeleteButton.disabled = saving || !this.overlayLayoutState || this.overlayLayoutState.presets.length <= 1;
       }
       if (saving) this.closeLayoutPresetMenu();
+      if (saving) this.closeToolMenu();
       if (this.gridLayoutButton) {
         this.gridLayoutButton.disabled = saving;
       }
@@ -11734,6 +11844,10 @@
       this.layoutPresetDuplicateButton = null;
       this.layoutPresetRenameButton = null;
       this.layoutPresetDeleteButton = null;
+      this.toolMenuWrap = null;
+      this.toolMenuButton = null;
+      this.toolMenu = null;
+      this.toolMenuOpen = false;
       this.prevPageButton = null;
       this.nextPageButton = null;
       this.pageLabelElement = null;
@@ -14066,6 +14180,9 @@
       browse() {
         if (isOpen() && !currentKeyword) { close(); return; }
         void load({ keyword: '' });
+        // 🔍ボタンから開いた直後でも↑↓/Enterがすぐ効くように、
+        // キーボード操作の受け口である入力欄へフォーカスを移す
+        try { keyInput.focus(); } catch (_e) { /* noop */ }
       },
       search,
       // グリッド専用: keyInputのリスナーごと完全に片付ける。
