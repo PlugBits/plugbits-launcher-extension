@@ -2990,6 +2990,24 @@
   margin-top: 2px;
 }
 
+/* ── ルックアップ頻出候補（Tier0） ── */
+.pb-newrec__lookup-frequent:not(:empty) {
+  /* 通常候補と視覚的に区切る（中身が無いときは非表示なので枠線も要らない） */
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.pb-newrec__lookup-section {
+  padding: 6px 12px 2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.pb-newrec__lookup-item--frequent {
+  /* 区別が要る程度に留める。通常候補と同じ操作感を保つのが狙い */
+  background: #f8fafc;
+}
+
 /* ── Pro upsell modal ── */
 .pb-overlay__mode-badge--clickable {
   cursor: pointer;
@@ -3380,4 +3398,30 @@
 
 .pb-newrec__lookup-indicator--warn {
   color: #b45309;
+}
+
+/* ── タブキャッシュ（Tier1）取得時刻＋再読込 ── */
+.pb-newrec__lookup-cacheline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 4px;
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+
+.pb-newrec__lookup-reload {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 10.5px;
+  color: #2563eb;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.pb-newrec__lookup-reload:hover {
+  color: #1d4ed8;
 }

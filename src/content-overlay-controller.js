@@ -170,6 +170,11 @@
       this.gridLookupPicker = null;
       this.boundGridLookupPickerScrollHandler = () => { this.positionGridLookupAnchor(); };
       this.boundGridLookupPickerResizeHandler = () => { this.positionGridLookupAnchor(); };
+      // ルックアップ頻出候補（Tier0）の集計ストア。
+      // フィールドコード -> Map<recordId, value>。recordIdをキーにすることで
+      // 同じページの再読込や複数ページ閲覧をまたいでも二重カウントしない
+      this.lookupFrequentStore = new Map();
+      this._lookupFrequentAppId = ''; // このappIdが変わったらlookupFrequentStoreをリセットする
       this.multilineEditor = null;
       this.newRowSeq = 1;
       this.subtableEditor = null;
@@ -2732,6 +2737,7 @@
       const records = Array.isArray(recordsRes.records) ? recordsRes.records : [];
       this.rows = records.map((record) => this.transformRecord(record));
       console.log('[overlay] records loaded', records.length);
+      this.accumulateLookupFrequency(this.rows);
       this.rebuildRowMaps();
       this.recomputeFilteredRowIds();
       await this.loadEffectiveRecordAcl();
@@ -2932,6 +2938,55 @@
 
     hasLookupKeyFields() {
       return this.getLookupKeyFieldCodes().length > 0;
+    }
+
+    // ── ルックアップ頻出候補（Tier0） ──────────────────────────────────
+    // グリッドで開くルックアップ候補ピッカーの最上段に「このアプリで使用中」の
+    // 値を出すための集計。参照先には一切問い合わせない（自アプリの表示済みデータの
+    // 集計だけなのでAPI消費ゼロ）。
+
+    // 表示中の行から、ルックアップキー項目ごとに使用中の値を集計してストアへ積む。
+    // アプリが切り替わっていればまず集計をリセットする（前アプリの値が紛れ込むのを防ぐ）
+    accumulateLookupFrequency(rows) {
+      const appId = String(this.appId || '');
+      if (appId !== this._lookupFrequentAppId) {
+        this.lookupFrequentStore = new Map();
+        this._lookupFrequentAppId = appId;
+      }
+      const codes = this.getLookupKeyFieldCodes();
+      if (!codes.length || !Array.isArray(rows) || !rows.length) return;
+      codes.forEach((code) => {
+        if (!this.lookupFrequentStore.has(code)) this.lookupFrequentStore.set(code, new Map());
+        const store = this.lookupFrequentStore.get(code);
+        rows.forEach((row) => {
+          const id = String(row?.id ?? '').trim();
+          if (!id) return;
+          const value = String(row?.original?.[code] ?? '').trim();
+          // 空値は「使用中」の実績として無意味なので除外する
+          if (!value) return;
+          // recordIdをキーにした上書きなので、同じレコードを何度読んでも二重カウントしない
+          store.set(id, value);
+        });
+      });
+    }
+
+    // 純関数: Map<recordId, value> -> [{value, count}] へ変換する（頻度計算部分だけを
+    // テスト容易性のために切り出す）。count降順→value昇順でソート。上限は表示側(picker)で切る
+    lookupFrequencyFromMap(valueMap) {
+      const counts = new Map();
+      valueMap.forEach((value) => {
+        counts.set(value, (counts.get(value) || 0) + 1);
+      });
+      return Array.from(counts.entries())
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => (b.count - a.count) || (a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
+    }
+
+    // ピッカーfactoryへ渡すプロバイダ本体
+    getFrequentLookupValues(fieldCode) {
+      const store = this.lookupFrequentStore.get(fieldCode);
+      if (!store) return [];
+      return this.lookupFrequencyFromMap(store);
     }
 
     // 純関数: keyCodes のうち現在値が入っているフィールドだけをPUT用ペイロードに詰める。
@@ -5471,7 +5526,10 @@
         mappings: [],
         keyInput: input,
         postFn: this.postFn,
-        language: this.language
+        language: this.language,
+        // Tier0: 自アプリの表示済み行から集計した頻出値（APIを使わない）。
+        // Quick Newには一覧データが無いため、そちらには渡さない
+        frequentProvider: () => this.getFrequentLookupValues(field.code)
       });
       const inputHandler = () => { picker.search(input.value); };
       input.addEventListener('input', inputHandler);

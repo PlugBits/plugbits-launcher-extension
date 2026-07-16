@@ -1429,6 +1429,11 @@
       quickNewLookupCount: (shown, total) => `全 ${total} 件中 ${shown} 件を表示（入力で絞り込み・スクロールで追加読み込み）`,
       quickNewLookupMatch: "✓ 候補と一致しています",
       quickNewLookupNoMatch: "一致する候補が見つかりません（このままでは保存できません）",
+      lookupFrequentHeader: "このアプリで使用中",
+      lookupFrequentCount: (count) => `${count} 回使用`,
+      lookupCacheAgeJustNow: "たった今取得",
+      lookupCacheAge: (minutes) => `${minutes} 分前に取得`,
+      lookupCacheReload: "再読込",
       newRecordSaveNext: "保存して次へ",
       newRecordSavedNext: "保存しました。続けて入力できます",
       newRecordRequiredField: "必須項目です",
@@ -1729,6 +1734,11 @@
       quickNewLookupCount: (shown, total) => `Showing ${shown} of ${total} (type to narrow down, scroll to load more)`,
       quickNewLookupMatch: "✓ Matches a candidate",
       quickNewLookupNoMatch: "No matching candidate (saving will fail)",
+      lookupFrequentHeader: "Used in this app",
+      lookupFrequentCount: (count) => `Used ${count} times`,
+      lookupCacheAgeJustNow: "Fetched just now",
+      lookupCacheAge: (minutes) => `Fetched ${minutes} min ago`,
+      lookupCacheReload: "Reload",
       newRecordSaveNext: "Save & next",
       newRecordSavedNext: "Saved. Ready for the next record.",
       newRecordRequiredField: "This field is required",
@@ -2474,19 +2484,58 @@
 
   // ── Lookup Picker (shared by overlay modal and QuickNewRecordModal) ───────
 
+  // ルックアップ候補のタブ内キャッシュ（Tier1）。
+  // 参照先マスタは自アプリの保存では変化しないため、鮮度はTTLと手動再読込で担保する
+  // （候補はあくまで入力補助で、真実は保存時のkintone照合。古くてもデータは壊れない）。
+  // グリッドはセル編集のたびにピッカーのインスタンスを作り直す（factory呼び出し自体は
+  // 使い捨て）ため、キャッシュはfactoryの外・モジュールスコープに置いて使い回す。
+  const LOOKUP_CACHE_TTL_MS = 10 * 60 * 1000;
+  const LOOKUP_KEYWORD_CACHE_MAX = 50; // キーワード結果LRUの上限
+  const lookupFullCache = new Map();    // `${relatedAppId}:${relatedKeyField}` -> { records, totalCount, fetchedAt }
+  const lookupKeywordCache = new Map(); // `${relatedAppId}:${relatedKeyField}:${keyword}` -> 同上（挿入順=LRU）
+
+  // エントリがあり有効期限内なら返す。期限切れは削除してnull（呼び出し側が再フェッチする）
+  function lookupCacheGet(map, key, now) {
+    const entry = map.get(key);
+    if (!entry) return null;
+    if (now - entry.fetchedAt >= LOOKUP_CACHE_TTL_MS) {
+      map.delete(key);
+      return null;
+    }
+    return entry;
+  }
+
+  // 既存キーは delete→set で挿入順を最新化し(「最近使った」扱いにする)、
+  // 上限を超えたら最古(Mapのイテレーション先頭)から追い出す
+  function lookupCacheSet(map, key, entry, maxSize) {
+    if (map.has(key)) map.delete(key);
+    map.set(key, entry);
+    while (map.size > maxSize) {
+      const oldestKey = map.keys().next().value;
+      map.delete(oldestKey);
+    }
+  }
+
   // ルックアップ候補コンボボックス。
   // - 初回に最大500件を1リクエストで取得。関連アプリが500件以下なら
   //   「全件ローカルモード」になり、以後の絞り込みはAPI消費ゼロで即時。
   // - 500件超は「サーバー検索モード」: キー項目のlike検索＋無限スクロールで
-  //   全件に到達できる（鮮度の問題があるためキャッシュはしない）。
+  //   全件に到達できる。
   // - 手打ち入力そのものが検索になり、完全一致の有無をインジケータで表示する。
-  function createNewRecordLookupPicker({ anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings = [], fieldInputMap = new Map(), keyInput, postFn, language }) {
+  // - キーワードなし/appendなしの結果はタブ内キャッシュ(Tier1)を優先する。
+  //   グリッドで同じ列を何セルも編集してもAPIは初回の1回だけで済む
+  // - frequentProvider が渡されていれば、参照先フェッチとは無関係に
+  //   「このアプリで使用中」の頻出候補(Tier0・APIゼロ)を先頭に出す
+  function createNewRecordLookupPicker({ anchorEl, relatedAppId, relatedKeyField, pickerFields, mappings = [], fieldInputMap = new Map(), keyInput, postFn, language, frequentProvider }) {
     const t = (key, ...args) => resolveText(language, key, ...args);
     const LOCAL_FULL_LIMIT = 500;
+    const cacheKey = `${relatedAppId}:${relatedKeyField}`;
 
     let picker = null;
     let indicatorEl = null;
     let countEl = null;
+    let cacheLineEl = null;
+    let frequentEl = null;
     let listEl = null;
     let records = [];
     let totalCount = 0;
@@ -2498,7 +2547,11 @@
     let outsideHandler = null;
     let searchTimer = null;
     let activeIndex = -1;
-    let itemEls = [];
+    let itemEls = [];        // 頻出＋通常を通し番号で並べたキーボードナビ用の配列
+    let frequentItemEls = [];
+    let frequentItemValues = [];
+    let regularItemEls = [];
+    let cacheServedAt = null; // 今表示中の内容がキャッシュ提供ならそのfetchedAt、直接フェッチならnull
 
     function getDisplayValue(record, fieldCode) {
       const v = record?.[fieldCode];
@@ -2536,6 +2589,10 @@
       indicatorEl.className = 'pb-newrec__lookup-indicator';
       countEl = document.createElement('div');
       countEl.className = 'pb-newrec__lookup-count';
+      cacheLineEl = document.createElement('div');
+      cacheLineEl.className = 'pb-newrec__lookup-cacheline';
+      frequentEl = document.createElement('div');
+      frequentEl.className = 'pb-newrec__lookup-frequent';
       listEl = document.createElement('div');
       listEl.className = 'pb-newrec__lookup-list';
       // サーバー検索モードでは末尾までスクロールしたら自動で追加読み込み
@@ -2548,6 +2605,8 @@
       });
       picker.appendChild(indicatorEl);
       picker.appendChild(countEl);
+      picker.appendChild(cacheLineEl);
+      picker.appendChild(frequentEl);
       picker.appendChild(listEl);
       // モーダルのEscハンドラから「ドロップダウンだけ閉じる」ために公開
       picker.__pbClose = close;
@@ -2567,6 +2626,15 @@
       el.className = 'pb-newrec__lookup-status';
       el.textContent = message;
       listEl.appendChild(el);
+      // 通常候補が消えるので、キーボードナビ用配列からも外しておく
+      // （参照が残ったままだと頻出セクションとの通し番号がズレる）
+      regularItemEls = [];
+      rebuildItemEls();
+    }
+
+    // 頻出＋通常候補を「見えている順」に結合し直す。どちらかを再描画するたびに呼ぶ
+    function rebuildItemEls() {
+      itemEls = frequentItemEls.concat(regularItemEls);
     }
 
     function applyPick(record) {
@@ -2574,6 +2642,15 @@
       keyInput.value = mainVal;
       keyInput.dispatchEvent(new Event('change', { bubbles: true }));
       fillMappings(record);
+      close();
+    }
+
+    // 頻出候補（Tier0）の確定。参照先のrecordを持たないのでfillMappingsは呼べない
+    // （呼んでも呼び出し側は常にグリッド=mappings:[]なので元々空振りだが、
+    // 「recordが無いのに埋めようとする」という誤解を招く呼び方は避ける）
+    function applyFrequentPick(value) {
+      keyInput.value = value;
+      keyInput.dispatchEvent(new Event('change', { bubbles: true }));
       close();
     }
 
@@ -2630,25 +2707,103 @@
       }
     }
 
+    // 頻出セクションと通常候補をひとつながりの通し番号として移動する
     function moveActive(delta) {
-      if (!records.length) return;
+      if (!itemEls.length) return;
       let idx = activeIndex + delta;
       if (idx < 0) idx = 0;
-      if (idx > records.length - 1) idx = records.length - 1;
+      if (idx > itemEls.length - 1) idx = itemEls.length - 1;
       setActiveIndex(idx);
+    }
+
+    // キャッシュ提供時のみ「◯分前に取得＋再読込」を出す（直接フェッチした結果は
+    // 「今取得したばかり」なので表示不要）
+    function renderCacheLine() {
+      if (!cacheLineEl) return;
+      cacheLineEl.innerHTML = '';
+      if (cacheServedAt === null) {
+        cacheLineEl.style.display = 'none';
+        return;
+      }
+      cacheLineEl.style.display = '';
+      const ageMinutes = Math.floor((Date.now() - cacheServedAt) / 60000);
+      const ageText = document.createElement('span');
+      ageText.textContent = ageMinutes < 1 ? t('lookupCacheAgeJustNow') : t('lookupCacheAge', ageMinutes);
+      cacheLineEl.appendChild(ageText);
+      const reloadBtn = document.createElement('button');
+      reloadBtn.type = 'button';
+      reloadBtn.className = 'pb-newrec__lookup-reload';
+      reloadBtn.textContent = t('lookupCacheReload');
+      reloadBtn.addEventListener('mousedown', (e) => {
+        // mousedownでkeyInputのフォーカスが外れてoutsideHandlerに閉じられないよう防ぐ
+        // （既存の候補アイテムのクリックと同じ作法）
+        e.preventDefault();
+        e.stopPropagation();
+        void reloadFromServer();
+      });
+      cacheLineEl.appendChild(reloadBtn);
+    }
+
+    // 頻出セクション（Tier0）。参照先の取得状況とは無関係に、渡された関数から
+    // 同期的に描画する（フェッチ中でも即座に見える必要があるため）
+    function renderFrequentSection(keyword) {
+      if (!frequentEl) return;
+      frequentEl.innerHTML = '';
+      frequentItemEls = [];
+      frequentItemValues = [];
+      if (!frequentProvider) {
+        frequentEl.style.display = 'none';
+        rebuildItemEls();
+        return;
+      }
+      const q = String(keyword || '').toLowerCase();
+      const all = frequentProvider() || [];
+      const filtered = (q ? all.filter((it) => String(it.value).toLowerCase().includes(q)) : all).slice(0, 8);
+      if (!filtered.length) {
+        frequentEl.style.display = 'none';
+        rebuildItemEls();
+        return;
+      }
+      frequentEl.style.display = '';
+      const header = document.createElement('div');
+      header.className = 'pb-newrec__lookup-section';
+      header.textContent = t('lookupFrequentHeader');
+      frequentEl.appendChild(header);
+      filtered.forEach((entry) => {
+        const item = document.createElement('div');
+        item.className = 'pb-newrec__lookup-item pb-newrec__lookup-item--frequent';
+        const main = document.createElement('div');
+        main.className = 'pb-newrec__lookup-item-main';
+        main.textContent = entry.value;
+        item.appendChild(main);
+        const sub = document.createElement('div');
+        sub.className = 'pb-newrec__lookup-item-sub';
+        sub.textContent = t('lookupFrequentCount', entry.count);
+        item.appendChild(sub);
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          applyFrequentPick(entry.value);
+        });
+        frequentItemEls.push(item);
+        frequentItemValues.push(entry.value);
+        frequentEl.appendChild(item);
+      });
+      rebuildItemEls();
     }
 
     function renderList() {
       if (!listEl) return;
       listEl.innerHTML = '';
       activeIndex = -1;
-      itemEls = [];
+      regularItemEls = [];
       countEl.textContent = totalCount > records.length
         ? t('quickNewLookupCount', records.length, totalCount)
         : '';
+      renderCacheLine();
       updateIndicator();
       if (!records.length) {
         setStatus(t('quickNewLookupEmpty'));
+        rebuildItemEls();
         return;
       }
       records.forEach((record, idx) => {
@@ -2669,9 +2824,10 @@
           e.preventDefault();
           applyPick(record);
         });
-        itemEls[idx] = item;
+        regularItemEls[idx] = item;
         listEl.appendChild(item);
       });
+      rebuildItemEls();
     }
 
     function filterLocal(keyword) {
@@ -2682,15 +2838,50 @@
         checkFields.some((f) => getDisplayValue(record, f).toLowerCase().includes(q)));
     }
 
+    // 実行中の非同期フェッチ(あれば)を無効化する。フルローカル/キャッシュ命中など
+    // 同期的に結果を確定できる分岐が割り込むときに呼ぶ。無効化された側のfinallyは
+    // seq不一致で自然にスキップされるので、loadingもここで一緒に倒しておく
+    // （放置すると次回以降ずっと if (loading) return; に塞がれてしまう）
+    function invalidatePendingFetch() {
+      requestSeq += 1;
+      loading = false;
+    }
+
     async function load({ keyword = '', append = false } = {}) {
       ensureOpen();
+      // Tier0: 参照先の取得状況とは無関係に、開いた瞬間・キーワード変化のたびに
+      // 同期的に描画する（フェッチ中でも即座に見せるため）
+      renderFrequentSection(keyword);
       // 全件ローカルモード: API消費ゼロで即時絞り込み
       if (fullLocal) {
+        invalidatePendingFetch();
         records = filterLocal(keyword);
         totalCount = records.length;
         currentKeyword = keyword;
         renderList();
         return;
+      }
+      // Tier1: キーワードなし/appendなしの結果はタブキャッシュを先に見る。
+      // append(無限スクロール追加読み込み)はオフセット付き部分結果になり
+      // 管理が複雑になるだけで益が薄いため対象外(常に素通しでフェッチする)
+      if (!append) {
+        const now = Date.now();
+        const cached = keyword
+          ? lookupCacheGet(lookupKeywordCache, `${cacheKey}:${keyword}`, now)
+          : lookupCacheGet(lookupFullCache, cacheKey, now);
+        if (cached) {
+          invalidatePendingFetch();
+          records = cached.records;
+          totalCount = cached.totalCount;
+          currentKeyword = keyword;
+          cacheServedAt = cached.fetchedAt;
+          if (!keyword && records.length >= totalCount) {
+            fullLocal = true;
+            allLocalRecords = records.slice();
+          }
+          renderList();
+          return;
+        }
       }
       if (loading) return;
       loading = true;
@@ -2711,6 +2902,16 @@
         records = append ? records.concat(fetched) : fetched;
         totalCount = Number(resp?.result?.totalCount || fetched.length);
         currentKeyword = keyword;
+        if (!append) {
+          // 直接フェッチした結果はキャッシュ提供ではないので取得時刻行は出さない
+          cacheServedAt = null;
+          const entry = { records, totalCount, fetchedAt: Date.now() };
+          if (keyword) {
+            lookupCacheSet(lookupKeywordCache, `${cacheKey}:${keyword}`, entry, LOOKUP_KEYWORD_CACHE_MAX);
+          } else {
+            lookupFullCache.set(cacheKey, entry);
+          }
+        }
         // 検索なしの初回取得で全件が収まった → 以後はローカルモード
         if (!keyword && !append && records.length >= totalCount) {
           fullLocal = true;
@@ -2723,6 +2924,19 @@
       } finally {
         if (seq === requestSeq) loading = false;
       }
+    }
+
+    // 「再読込」: 該当キャッシュだけ破棄してload()をやり直す。フルローカル状態も
+    // 一緒に捨てる(古いキャッシュ前提で組んだローカルスナップショットごと作り直すため)
+    async function reloadFromServer() {
+      if (currentKeyword) {
+        lookupKeywordCache.delete(`${cacheKey}:${currentKeyword}`);
+      } else {
+        lookupFullCache.delete(cacheKey);
+      }
+      fullLocal = false;
+      allLocalRecords = null;
+      await load({ keyword: currentKeyword });
     }
 
     // 手打ち: 入力値で検索して候補を表示（デバウンス内蔵。
@@ -2764,8 +2978,15 @@
         if (e.isComposing || e.keyCode === 229) return;
         e.preventDefault();
         e.stopPropagation();
-        const picked = activeIndex >= 0 && activeIndex < records.length
-          ? records[activeIndex]
+        // ハイライトが頻出セクション内か通常候補内かで確定処理を分ける
+        // （通し番号はfrequentItemEls→regularItemElsの順で並んでいる）
+        if (activeIndex >= 0 && activeIndex < frequentItemEls.length) {
+          applyFrequentPick(frequentItemValues[activeIndex]);
+          return;
+        }
+        const regularIndex = activeIndex - frequentItemEls.length;
+        const picked = regularIndex >= 0 && regularIndex < records.length
+          ? records[regularIndex]
           : findExactMatch(String(keyInput.value || '').trim());
         if (picked) {
           applyPick(picked);
