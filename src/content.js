@@ -1607,6 +1607,8 @@
       cpCmdCopyQuery: "クエリ条件をコピー",
       cpCmdCopyFieldCodes: "フィールドコード一覧をコピー",
       cpCmdCopyFormDefinition: "フォーム定義をJSONで取得",
+      cpCmdOpenExtSettings: "PlugBits拡張機能の設定を開く",
+      cpFieldListAppIdLabel: "アプリID",
       cpCmdShowHelp: "ショートカットキー一覧を表示",
       cpCmdRefreshCatalog: "アプリ一覧キャッシュを更新",
       cpAclApp: "アプリのアクセス権",
@@ -1921,6 +1923,8 @@
       cpCmdCopyQuery: "Copy query condition",
       cpCmdCopyFieldCodes: "Copy field codes",
       cpCmdCopyFormDefinition: "Copy form definition as JSON",
+      cpCmdOpenExtSettings: "Open PlugBits extension settings",
+      cpFieldListAppIdLabel: "App ID",
       cpCmdShowHelp: "Show keyboard shortcuts",
       cpCmdRefreshCatalog: "Refresh app catalog cache",
       cpAclApp: "App permissions",
@@ -13129,6 +13133,22 @@
         await palette.copyFormDefinition(ctx);
       }
     },
+    // ─ Extension ─
+    {
+      id: 'open-extension-settings',
+      labelKey: 'cpCmdOpenExtSettings',
+      icon: '⚙',
+      category: 'help',
+      badge: 'ext',
+      keywords: ['settings', 'options', 'extension', '設定', 'せってい', '拡張機能', 'オプション', 'plugbits'],
+      action() {
+        // content scriptからは chrome.runtime.openOptionsPage を直接呼べないため、
+        // service worker の既存ハンドラ(PB_OPEN_OPTIONS_PAGE。Pro導線と共用)経由で開く
+        try {
+          void chrome.runtime.sendMessage({ type: 'PB_OPEN_OPTIONS_PAGE' });
+        } catch (_) { /* 拡張のリロード直後など runtime が無効な場合は黙って何もしない */ }
+      }
+    },
     // ─ Help ─
     {
       id: 'show-shortcut-help',
@@ -13220,7 +13240,11 @@
           return;
         }
         const fields = Array.isArray(res.result?.fields) ? res.result.fields : [];
-        const text = fields.map((f) => `${f.code}\t${f.label || ''}\t${f.type || ''}`).join('\n');
+        // 先頭にアプリIDを付ける（フィールド一覧とアプリIDはAPI開発等でセットで
+        // 使われるため）。本文と同じタブ区切りにしておくと、スプレッドシートへ
+        // 貼り付けたときもアプリIDが1行目のセルとして素直に収まる
+        const header = `${cpText('cpFieldListAppIdLabel')}\t${String(ctx.appId ?? '')}`;
+        const text = [header, ...fields.map((f) => `${f.code}\t${f.label || ''}\t${f.type || ''}`)].join('\n');
         await cpCopyText(text, cpText('cpToastCopiedFields', fields.length));
       } catch (_) {
         cpShowToast(cpText('cpToastFieldsFailed'), false);
