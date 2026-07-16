@@ -5381,6 +5381,12 @@
     handleInputBlur(event, input) {
       if (this.navigating) return;
       if (!this.editingCell) return;
+      // blurしたinputが現在編集中のセルのものである場合だけ編集を終了する。
+      // これが無いと、セルAにフォーカスがある状態でセルBをダブルクリックしたとき、
+      // enterEditMode(B) の直後に届くAのblurがBの編集セッションを巻き込んで
+      // 即終了させてしまう（inputが仮想化で入れ替わりnullの場合は従来どおり終了に倒す）
+      const editingInput = this.getInput(this.editingCell.rowIndex, this.editingCell.colIndex);
+      if (editingInput && editingInput !== input) return;
       if (this.radioPicker && this.radioPicker.input === input) {
         const next = event.relatedTarget;
         if (next && this.radioPicker.panel?.contains(next)) {
