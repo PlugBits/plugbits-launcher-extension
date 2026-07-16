@@ -2960,37 +2960,43 @@
 
     // キーボード操作: ↑↓でハイライト移動、Enterで確定/離脱。
     // Ctrl/Meta付きEnterはモーダル側の保存ショートカットに譲るため触らない。
+    // 「このピッカーが消費したか」を戻り値で返す（消費しなかったキーは
+    // 呼び出し側＝グリッドの通常キー操作にフォールスルーさせるため）。
     // 名前付き関数にしておく（グリッドは仮想化でinputを使い回すため、
     // destroy()でこのリスナーだけ確実に外せるようにする必要がある）
     function handleKeyInputKeydown(e) {
+      // IME操作中（変換候補ウィンドウ表示中）の↑↓/EnterはIMEの候補選択なので
+      // ピッカーは一切触らない（Enterは従来からガード済み。矢印も同様に扱う）
+      const imeActive = e.isComposing || e.keyCode === 229;
       if (e.key === 'ArrowDown') {
+        if (imeActive) return false;
         if (!isOpen()) {
           e.preventDefault();
           search(keyInput.value);
-          return;
+          return true;
         }
         e.preventDefault();
         moveActive(1);
-        return;
+        return true;
       }
       if (e.key === 'ArrowUp') {
-        if (!isOpen()) return;
+        if (!isOpen() || imeActive) return false;
         e.preventDefault();
         moveActive(-1);
-        return;
+        return true;
       }
       if (e.key === 'Enter') {
-        if (e.ctrlKey || e.metaKey) return;
-        if (!isOpen()) return;
+        if (e.ctrlKey || e.metaKey) return false;
+        if (!isOpen()) return false;
         // IME変換確定のEnterでドロップダウンを閉じてしまわないようにする
-        if (e.isComposing || e.keyCode === 229) return;
+        if (imeActive) return false;
         e.preventDefault();
         e.stopPropagation();
         // ハイライトが頻出セクション内か通常候補内かで確定処理を分ける
         // （通し番号はfrequentItemEls→regularItemElsの順で並んでいる）
         if (activeIndex >= 0 && activeIndex < frequentItemEls.length) {
           applyFrequentPick(frequentItemValues[activeIndex]);
-          return;
+          return true;
         }
         const regularIndex = activeIndex - frequentItemEls.length;
         const picked = regularIndex >= 0 && regularIndex < records.length
@@ -3001,7 +3007,9 @@
         } else {
           close();
         }
+        return true;
       }
+      return false;
     }
     keyInput.addEventListener('keydown', handleKeyInputKeydown);
 
@@ -3017,6 +3025,12 @@
         try { keyInput.focus(); } catch (_e) { /* noop */ }
       },
       search,
+      // グリッド専用: capture段階からピッカーのキー処理を直接呼ぶための入口。
+      // keyInputのバブルリスナーに任せると、kintoneページ側のスクリプトが
+      // document〜input間のcaptureで矢印キーを止めた場合に候補操作が死ぬ
+      // （セル移動はdocument captureで先に動くため、候補だけ非対称に壊れる）。
+      // 戻り値は「このピッカーが消費したか」
+      handleKeydown: handleKeyInputKeydown,
       // グリッド専用: keyInputのリスナーごと完全に片付ける。
       // QNRモーダルはinputごとDOMを破棄するので使わず、close()のみで足りる
       destroy() {

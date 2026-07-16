@@ -10435,20 +10435,7 @@
       // ルックアップ候補ピッカーが対象inputを持っている間は、このcaptureリスナーが
       // 先に確定/移動キーを奪わないようにする（pickerのkeydownはinput自身にbubbleで
       // 登録されており、captureはそれより必ず先に走るため、ここで通さないと届かない）
-      if (this.gridLookupPicker && event.target === this.gridLookupPicker.input) {
-        const pickerOpen = this.gridLookupPicker.picker.isOpen();
-        if (event.key === 'Escape' && pickerOpen) {
-          // 候補だけ閉じてセル編集は続行する（QNRモーダルと同じ流儀）
-          this.gridLookupPicker.picker.close();
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        if (event.key === 'ArrowDown') return; // 閉→開く / 開→移動（picker側が処理）
-        if (pickerOpen && event.key === 'ArrowUp') return; // 開いている間の移動
-        if (pickerOpen && event.key === 'Enter' && !event.ctrlKey && !event.metaKey) return; // 確定はpicker側
-        if (event.key === 'Tab' && pickerOpen) this.gridLookupPicker.picker.close(); // 閉じてから通常のTab
-      }
+      if (this.handleGridLookupPickerCapture(event)) return;
       if (this.saving) {
         const keyLower = String(event.key || '').toLowerCase();
         if ((event.ctrlKey || event.metaKey) && keyLower === 's') {
@@ -10888,22 +10875,43 @@
       if (!this.isOpen) return;
       // handleOverlayKeydown と同じガード。documentのcaptureはthis.rootのcaptureより
       // さらに先に走るため、こちらでも同様に通しておかないとpicker側に届かない
-      if (this.gridLookupPicker && event.target === this.gridLookupPicker.input) {
-        const pickerOpen = this.gridLookupPicker.picker.isOpen();
-        if (event.key === 'Escape' && pickerOpen) {
-          this.gridLookupPicker.picker.close();
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        if (event.key === 'ArrowDown') return;
-        if (pickerOpen && event.key === 'ArrowUp') return;
-        if (pickerOpen && event.key === 'Enter' && !event.ctrlKey && !event.metaKey) return;
-        if (event.key === 'Tab' && pickerOpen) this.gridLookupPicker.picker.close();
-      }
+      if (this.handleGridLookupPickerCapture(event)) return;
       if (event.defaultPrevented) return;
       const input = event.target instanceof HTMLInputElement ? event.target : null;
       this.handleOverlayArrowNavigation(event, input);
+    }
+
+    // グリッド編集中のルックアップ候補ピッカーへのキー配送（capture段階）。
+    // 以前はcaptureで「何もせず素通し」してinputのバブルリスナー（picker内蔵）に
+    // 任せていたが、kintoneページや同居プラグインのスクリプトが document〜input 間の
+    // captureで矢印キーを止める環境では候補操作だけが死ぬ（セルの矢印移動は
+    // document captureで先に処理されるため無事、という非対称な壊れ方をする）。
+    // そのため、最初に走る自前のcaptureハンドラからピッカーの処理を直接呼ぶ。
+    // 戻り値: このイベントをここで処理し終えたか
+    handleGridLookupPickerCapture(event) {
+      if (!this.gridLookupPicker || event.target !== this.gridLookupPicker.input) return false;
+      const picker = this.gridLookupPicker.picker;
+      const pickerOpen = picker.isOpen();
+      if (event.key === 'Escape' && pickerOpen) {
+        // 候補だけ閉じてセル編集は続行する（QNRモーダルと同じ流儀）
+        picker.close();
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
+      }
+      if (event.key === 'Tab' && pickerOpen) {
+        picker.close(); // 閉じてから通常のTab移動に任せる
+        return false;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter') {
+        if (typeof picker.handleKeydown === 'function' && picker.handleKeydown(event)) {
+          // ピッカーが消費した。下位のcaptureやinputのバブルリスナーまで流すと
+          // 二重処理（ハイライトが2つ進む等）になるためここで止める
+          event.stopPropagation();
+          return true;
+        }
+      }
+      return false;
     }
 
     handleOverlayArrowNavigation(event, input = null) {
@@ -14128,37 +14136,43 @@
 
     // キーボード操作: ↑↓でハイライト移動、Enterで確定/離脱。
     // Ctrl/Meta付きEnterはモーダル側の保存ショートカットに譲るため触らない。
+    // 「このピッカーが消費したか」を戻り値で返す（消費しなかったキーは
+    // 呼び出し側＝グリッドの通常キー操作にフォールスルーさせるため）。
     // 名前付き関数にしておく（グリッドは仮想化でinputを使い回すため、
     // destroy()でこのリスナーだけ確実に外せるようにする必要がある）
     function handleKeyInputKeydown(e) {
+      // IME操作中（変換候補ウィンドウ表示中）の↑↓/EnterはIMEの候補選択なので
+      // ピッカーは一切触らない（Enterは従来からガード済み。矢印も同様に扱う）
+      const imeActive = e.isComposing || e.keyCode === 229;
       if (e.key === 'ArrowDown') {
+        if (imeActive) return false;
         if (!isOpen()) {
           e.preventDefault();
           search(keyInput.value);
-          return;
+          return true;
         }
         e.preventDefault();
         moveActive(1);
-        return;
+        return true;
       }
       if (e.key === 'ArrowUp') {
-        if (!isOpen()) return;
+        if (!isOpen() || imeActive) return false;
         e.preventDefault();
         moveActive(-1);
-        return;
+        return true;
       }
       if (e.key === 'Enter') {
-        if (e.ctrlKey || e.metaKey) return;
-        if (!isOpen()) return;
+        if (e.ctrlKey || e.metaKey) return false;
+        if (!isOpen()) return false;
         // IME変換確定のEnterでドロップダウンを閉じてしまわないようにする
-        if (e.isComposing || e.keyCode === 229) return;
+        if (imeActive) return false;
         e.preventDefault();
         e.stopPropagation();
         // ハイライトが頻出セクション内か通常候補内かで確定処理を分ける
         // （通し番号はfrequentItemEls→regularItemElsの順で並んでいる）
         if (activeIndex >= 0 && activeIndex < frequentItemEls.length) {
           applyFrequentPick(frequentItemValues[activeIndex]);
-          return;
+          return true;
         }
         const regularIndex = activeIndex - frequentItemEls.length;
         const picked = regularIndex >= 0 && regularIndex < records.length
@@ -14169,7 +14183,9 @@
         } else {
           close();
         }
+        return true;
       }
+      return false;
     }
     keyInput.addEventListener('keydown', handleKeyInputKeydown);
 
@@ -14185,6 +14201,12 @@
         try { keyInput.focus(); } catch (_e) { /* noop */ }
       },
       search,
+      // グリッド専用: capture段階からピッカーのキー処理を直接呼ぶための入口。
+      // keyInputのバブルリスナーに任せると、kintoneページ側のスクリプトが
+      // document〜input間のcaptureで矢印キーを止めた場合に候補操作が死ぬ
+      // （セル移動はdocument captureで先に動くため、候補だけ非対称に壊れる）。
+      // 戻り値は「このピッカーが消費したか」
+      handleKeydown: handleKeyInputKeydown,
       // グリッド専用: keyInputのリスナーごと完全に片付ける。
       // QNRモーダルはinputごとDOMを破棄するので使わず、close()のみで足りる
       destroy() {
