@@ -103,15 +103,19 @@ Pro は 14日間の無料トライアルに対応。
 ## 3. 「このバージョンの新機能」段落（詳細説明の冒頭に置く用）
 
 ```
-【v2.1 の新機能】
-◦ Excel Overlay: ルックアップ列の直接編集に対応（候補ピッカー・手入力・貼り付け）
-◦ 入力値を参照先と自動照合し、一致は緑・不一致は赤で保存前に表示
+【このバージョンの新機能】※ 公開中の v1.x からのアップデート内容（v2.0/v2.1 統合）
+◦ デザインを全面刷新（ダークモード対応・視認性の高い新アイコン・英語 UI）
+◦ Excel Overlay: ルックアップ列の直接編集に対応（候補ピッカー・手入力・貼り付け）。
+　入力値を参照先と自動照合し、一致は緑・不一致は赤で保存前に表示
 ◦ ルックアップ一括再取得・計算フィールドの再計算ボタン（表示中ページ／アプリ全体）
 ◦ 行追加時に kintone のフィールド初期値を自動セット
-◦ ルックアップ候補の API 消費を大幅削減（タブ内キャッシュ＋「このアプリで使用中」の頻出候補）
-◦ コマンドパレット: 拡張機能設定へのジャンプ、フィールド一覧コピーにアプリ ID を付記
-◦ Excel Overlay のツールバーを整理（ツールメニュー化）
-◦ 文字入力開始時に 1 文字目が消えることがある不具合など、多数の修正
+◦ Excel Overlay: 入力即置換・Delete で範囲クリア・未保存ガード・ツールメニューなど操作性向上
+◦ クイック新規レコード（Shift+Alt+N）とクイックランチャードック
+◦ コマンドパレットのチートシート（? キー）・拡張機能設定ジャンプ・フィールド一覧コピー
+◦ WatchList しきい値通知: 件数が設定値を超えたらデスクトップ通知（任意・実行時許可）
+◦ Pro の 14日間無料トライアル（メールだけで開始・クレカ不要）
+◦ ルックアップ候補のタブ内キャッシュ等、API 消費を最小化する改善
+◦ 多数の不具合修正と安定性向上
 ```
 
 ---
@@ -225,9 +229,11 @@ This extension has a single purpose: making kintone (a business app platform) fa
 
 ## 6. 審査への影響と提出手順メモ
 
-1. **新しい権限の追加なし（必須・オプションとも）** — v2.1.0 は権限セットが v2.0.0 と
-   完全に同一のため、既存ユーザーへの再有効化警告は発生しません。
+1. **必須権限の追加なし** — 公開中の v1.x と比べて追加した権限は `notifications` のみで、
+   これは optional_permissions（しきい値通知を設定したときだけ実行時要求）のため、
+   既存ユーザーの拡張が無効化される「再有効化警告」は発生しません。
    ホスト権限も従来どおりオプションのままです。
+   ※ v2.0.0 は未申請のため、本申請（v2.1.0）が v1.x からの初回アップデートになります。
 2. **審査前に Cloudflare Worker を先にデプロイ**（`cd workers && npx wrangler deploy`）。
    トライアル API（api.plugbits.app/trial）が動いていないと、審査員がトライアル導線を
    試した場合にエラーになります。Brevo の送信元ドメイン認証も確認。
@@ -235,14 +241,18 @@ This extension has a single purpose: making kintone (a business app platform) fa
 4. 審査員向けメモ（Review notes）例:
 
 ```
-This update (v2.1.0) adds lookup-column editing to the Excel Overlay (a Pro feature):
-users can pick from suggestions fetched from the related kintone app, type manually,
-or paste values. The extension pre-validates values against the related app and shows
-a green/red indicator before saving.
-- NO new permissions are added in this version (neither required nor optional);
-  the permission set is identical to v2.0.0.
+This update (v2.1.0, first update since the currently published v1.x) adds:
+- An optional desktop-notification feature: "notifications" is added as an OPTIONAL
+  permission, requested at runtime only when the user sets a record-count threshold
+  in the options page. No new REQUIRED permissions are added.
+- A 14-day Pro trial: the user's email address is sent to our licensing API
+  (https://api.plugbits.app) solely for license issuance and verification.
+- Lookup-column editing in the Excel Overlay (a Pro feature): users can pick from
+  suggestions fetched from the related kintone app, type manually, or paste values;
+  the extension pre-validates values against the related app and shows a green/red
+  indicator before saving.
 - All kintone data continues to be processed locally in the browser. The only external
-  communication remains license/trial activation to https://api.plugbits.app.
+  communication is license/trial activation to https://api.plugbits.app.
 - All features require the user to grant optional host permission for their own
   kintone domain first. Test account for kintone is available on request.
 ```
