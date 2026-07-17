@@ -1,4 +1,4 @@
-# Chrome Web Store 掲載文言 v2.1.0（アップデート申請用）
+# Chrome Web Store 掲載文言 v3.0.0（アップデート申請用）
 
 ダッシュボードの各フィールドにそのまま貼り付けられる形式です。
 Chrome Web Store の説明欄はプレーンテキスト表示のため、記号（■・◦）で整形しています。
@@ -11,7 +11,7 @@ Chrome Web Store の説明欄はプレーンテキスト表示のため、記号
 |---|---|
 | 名前 | PlugBits Launcher for kintone |
 | カテゴリ | 仕事効率化 (Productivity) |
-| バージョン | 2.1.0 |
+| バージョン | 3.0.0 |
 
 ### 簡単な説明（132文字以内 / ja）
 
@@ -103,7 +103,7 @@ Pro は 14日間の無料トライアルに対応。
 ## 3. 「このバージョンの新機能」段落（詳細説明の冒頭に置く用）
 
 ```
-【このバージョンの新機能】※ 公開中の v1.x からのアップデート内容（v2.0/v2.1 統合）
+【v3.0 の新機能】
 ◦ デザインを全面刷新（ダークモード対応・視認性の高い新アイコン・英語 UI）
 ◦ Excel Overlay: ルックアップ列の直接編集に対応（候補ピッカー・手入力・貼り付け）。
 　入力値を参照先と自動照合し、一致は緑・不一致は赤で保存前に表示
@@ -229,11 +229,12 @@ This extension has a single purpose: making kintone (a business app platform) fa
 
 ## 6. 審査への影響と提出手順メモ
 
-1. **必須権限の追加なし** — 公開中の v1.x と比べて追加した権限は `notifications` のみで、
+1. **必須権限の追加なし** — 公開中の v2.0.0 と比べて追加した権限は `notifications` のみで、
    これは optional_permissions（しきい値通知を設定したときだけ実行時要求）のため、
    既存ユーザーの拡張が無効化される「再有効化警告」は発生しません。
    ホスト権限も従来どおりオプションのままです。
-   ※ v2.0.0 は未申請のため、本申請（v2.1.0）が v1.x からの初回アップデートになります。
+   ※ 公開中の 2.0.0 は旧世代のビルドで、本申請（v3.0.0）は開発版 v2.0/v2.1 相当の
+   変更を統合したメジャーアップデートです。
 2. **審査前に Cloudflare Worker を先にデプロイ**（`cd workers && npx wrangler deploy`）。
    トライアル API（api.plugbits.app/trial）が動いていないと、審査員がトライアル導線を
    試した場合にエラーになります。Brevo の送信元ドメイン認証も確認。
@@ -241,7 +242,7 @@ This extension has a single purpose: making kintone (a business app platform) fa
 4. 審査員向けメモ（Review notes）例:
 
 ```
-This update (v2.1.0, first update since the currently published v1.x) adds:
+This major update (v3.0.0, first update since the currently published 2.0.0) adds:
 - An optional desktop-notification feature: "notifications" is added as an OPTIONAL
   permission, requested at runtime only when the user sets a record-count threshold
   in the options page. No new REQUIRED permissions are added.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PlugBits Launcher for kintone",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "kintoneのよく使うアプリやビューへ素早くアクセス。件数表示、並び替え、ピン、バッジ、サイドパネル、スプレッドシートビューの閲覧に対応。",
   "action": {
     "default_title": "PlugBits Launcher for kintone",
