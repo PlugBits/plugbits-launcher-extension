@@ -76,6 +76,56 @@ export async function run({ check }) {
   check(`query-split: process-view repro composes valid query (got: ${info?.query})`,
     info?.query === '作業者 in (LOGINUSER()) order by レコード番号 desc');
 
+  // ── ビュー特定フォールバックの回帰（実アプリで確認したデータをそのまま使用） ──
+  // アプリトップ(/k/94/): URLに?view=なし・getViewName()はundefined・
+  // ページクエリは表示中ビュー(Records, index=0, 条件なし)を正確に反映。
+  // ビュー一覧APIのキー順先頭は「（作業者が自分）」(index=1, 作業者 in (LOGINUSER()))。
+  // 旧実装はキー順先頭に誤フォールバックし、作業者絞り込みが混入していた。
+  const REAL_VIEWS = {
+    '（作業者が自分）': { id: '6386068', index: '1', filterCond: '作業者 in (LOGINUSER())', sort: 'レコード番号 desc', columns: [] },
+    Records: { id: '6385273', index: '0', filterCond: '', sort: 'レコード番号 desc', columns: [] }
+  };
+  const appTopStub = {
+    splitOverlayQueryParts,
+    combineOverlayQuery,
+    hasOverlayOrderClause,
+    isAllRecordsViewName,
+    isAllRecordsViewId,
+    extractViewFieldOrder,
+    getCurrentViewName: () => '',
+    createAllRecordsViewInfo: (q) => ({ query: String(q || '').trim(), fieldOrder: [], viewId: '', viewName: 'all_records' })
+  };
+  appTopStub.pickViewFromViews = pickViewFromViews.bind(appTopStub);
+
+  // ケースA: 表示中ビュー(index最小=Records)とページクエリが整合 → Recordsを採用
+  const appTop = resolveViewInfoFromMetadata.call(appTopStub, REAL_VIEWS,
+    { currentQuery: 'order by レコード番号 desc limit 60 offset 0', viewId: '' });
+  check(`view-fallback: app top does NOT inherit assignee filter (got: ${appTop?.query})`,
+    !String(appTop?.query || '').includes('LOGINUSER'));
+  check('view-fallback: app top picks the min-index view (Records)',
+    appTop?.viewId === '6385273');
+
+  // ケースB: ページクエリの条件部が index最小ビューのfilterCondと不一致
+  // （kintoneが別ビューを表示している等）→ 推測を捨ててページクエリをそのまま使う
+  const mismatch = resolveViewInfoFromMetadata.call(appTopStub, REAL_VIEWS,
+    { currentQuery: '作業者 in (LOGINUSER()) order by レコード番号 desc', viewId: '' });
+  check(`view-fallback: mismatch falls back to page query as-is (got: ${mismatch?.query})`,
+    mismatch?.query === '作業者 in (LOGINUSER()) order by レコード番号 desc' && mismatch?.viewName === 'all_records');
+
+  // ケースC: ?view=ID で（作業者が自分）を明示表示 → 従来どおりID特定で絞り込み維持
+  const byId = resolveViewInfoFromMetadata.call(appTopStub, REAL_VIEWS,
+    { currentQuery: '作業者 in (LOGINUSER()) order by レコード番号 desc limit 60 offset 0', viewId: '6386068' });
+  check(`view-fallback: explicit ?view=ID keeps assignee filter without duplication (got: ${byId?.query})`,
+    byId?.query === '作業者 in (LOGINUSER()) order by レコード番号 desc limit 60 offset 0');
+
+  // combineOverlayQuery: 同一条件は二重に and しない
+  eq('combine: identical conditions are not duplicated',
+    combineOverlayQuery('作業者 in (LOGINUSER())', '作業者 in (LOGINUSER())'),
+    '作業者 in (LOGINUSER())');
+  eq('combine: different conditions are ANDed',
+    combineOverlayQuery('A = "1"', 'B = "2"'),
+    'A = "1" and (B = "2")');
+
   // ── page-bridge側: splitQueryParts（同じ修正の同一挙動） ──
   const bridgeSplitSrc = extractFunctionSource(pageBridgeJs, /\n {2}function splitQueryParts\(query\)\s\{/);
   // eslint-disable-next-line no-eval

@@ -2984,6 +2984,10 @@
     combineOverlayQuery(base, extra) {
       const A = String(base || '').trim();
       const B = String(extra || '').trim();
+      // 同一条件の重複結合を避ける（ビューのfilterCondとページクエリの条件部は
+      // 表示中ビューが正しく特定できていれば同じ文字列になるため、
+      // 「X and (X)」という冗長なクエリを組み立てない）
+      if (A && B && A.replace(/\s+/g, ' ') === B.replace(/\s+/g, ' ')) return A;
       if (A && B) return `${A} and (${B})`;
       return A || B || '';
     }
@@ -3064,8 +3068,24 @@
         }
       }
       if (!selectedView && entries.length) {
-        selectedView = entries[0][1];
-        selectedViewName = entries[0][0];
+        // ID・名前のどちらでも特定できないケース（アプリトップ = URLに?view=が無く、
+        // ページ側の getViewName() も undefined を返す）。kintoneのアプリトップは
+        // 「index最小のビュー」を表示するため、それを推測候補にする。
+        // 旧実装は entries[0]（キー順の先頭）を採用しており、プロセス管理アプリでは
+        // 組み込みの「（作業者が自分）」が先頭に来るため、その絞り込みが誤って
+        // 合成され自分のレコードしか表示されなかった（実アプリで確認済み:
+        // 「（作業者が自分）」はキー順先頭だが index='1'、実際の表示は index='0' のビュー）。
+        // guessed=true を返し、採用可否の最終判断（ページクエリとの整合確認）は
+        // 呼び出し側に委ねる
+        let best = null;
+        entries.forEach(([name, v]) => {
+          const idx = Number(v?.index);
+          const idxValue = Number.isFinite(idx) ? idx : Number.MAX_SAFE_INTEGER;
+          if (!best || idxValue < best.idxValue) best = { name, view: v, idxValue };
+        });
+        if (best) {
+          return { selectedView: best.view, selectedViewName: best.name, guessed: true };
+        }
       }
       return { selectedView, selectedViewName };
     }
@@ -3084,6 +3104,17 @@
       const selectedViewName = picked.selectedViewName || '';
       const baseFilter = String(selectedView?.filterCond || '').trim();
       const split = this.splitOverlayQueryParts(currentQuery);
+      if (picked.guessed) {
+        // 推測候補（index最小ビュー）は、ページが実際に使っているクエリの条件部と
+        // 候補の filterCond が一致する場合だけ採用する。ページクエリは表示中ビューの
+        // 条件＋並び順を正確に含む（kintone.app.getQuery()。実アプリで確認済み）ため、
+        // これが真実であり、不一致＝推測が外れている。その場合は誤った絞り込みを
+        // 合成せず、ページクエリをそのまま使う（列順はフォーム順にフォールバック）
+        const normalizeCond = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+        if (normalizeCond(baseFilter) !== normalizeCond(split.filter)) {
+          return this.createAllRecordsViewInfo(currentQuery);
+        }
+      }
       const mergedFilter = this.combineOverlayQuery(baseFilter, split.filter);
       const parts = [];
       if (mergedFilter) parts.push(mergedFilter);
