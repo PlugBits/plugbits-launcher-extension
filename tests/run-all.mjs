@@ -39,7 +39,8 @@ const SUITES = [
   ['lookup-cache-unit', './lookup-cache-unit.test.mjs'],
   ['newrow-defaults-unit', './newrow-defaults-unit.test.mjs'],
   ['paste-verify-unit', './paste-verify-unit.test.mjs'],
-  ['overlay-quality-unit', './overlay-quality-unit.test.mjs']
+  ['overlay-quality-unit', './overlay-quality-unit.test.mjs'],
+  ['query-split-unit', './query-split-unit.test.mjs']
 ];
 
 const filter = process.argv[2];

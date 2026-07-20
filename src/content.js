@@ -2960,18 +2960,17 @@
 
     splitOverlayQueryParts(query) {
       const original = String(query || '');
-      const lower = original.toLowerCase();
-      const markers = [];
-      const orderIndex = lower.indexOf(' order by ');
-      if (orderIndex >= 0) markers.push(orderIndex);
-      const limitIndex = lower.indexOf(' limit ');
-      if (limitIndex >= 0) markers.push(limitIndex);
-      const offsetIndex = lower.indexOf(' offset ');
-      if (offsetIndex >= 0) markers.push(offsetIndex);
-      if (!markers.length) {
+      // order by / limit / offset の最初の出現位置で「絞り込み条件」と「それ以降」に
+      // 分ける。絞り込み条件が空でクエリが order by から始まるビュー（プロセス管理
+      // アプリの組み込みビュー等）があるため、「文字列先頭 or 空白の直後」を対象に
+      // すること。旧実装は ' order by ' と前置空白を要求していたため、先頭の
+      // order by を絞り込み条件として扱ってしまい、ビューの filterCond と結合する
+      // 側で「... and (order by ...)」という不正クエリを生んでいた
+      const match = /(^|\s)(order\s+by|limit|offset)\s/i.exec(original);
+      if (!match) {
         return { filter: original.trim(), trailing: '' };
       }
-      const first = Math.min(...markers);
+      const first = match.index + match[1].length;
       return {
         filter: original.slice(0, first).trim(),
         trailing: original.slice(first).trim()

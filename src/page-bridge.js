@@ -963,18 +963,16 @@ function markLookupAutoFields(properties, metas) {
 
   function splitQueryParts(query) {
     const original = String(query || '');
-    const lower = original.toLowerCase();
-    const markers = [];
-    const orderIndex = lower.indexOf(' order by ');
-    if (orderIndex >= 0) markers.push(orderIndex);
-    const limitIndex = lower.indexOf(' limit ');
-    if (limitIndex >= 0) markers.push(limitIndex);
-    const offsetIndex = lower.indexOf(' offset ');
-    if (offsetIndex >= 0) markers.push(offsetIndex);
-    if (!markers.length) {
+    // 「文字列先頭 or 空白の直後」の order by / limit / offset を境界にする。
+    // 前置空白を要求する旧実装だと、絞り込み条件が空で order by から始まるクエリ
+    // （プロセス管理アプリの組み込みビュー等）を条件として扱ってしまい、
+    // combineQuery側で「... and (order by ...)」という不正クエリになる
+    // （content-overlay-controller.js の splitOverlayQueryParts と同じ修正）
+    const match = /(^|\s)(order\s+by|limit|offset)\s/i.exec(original);
+    if (!match) {
       return { filter: original.trim(), trailing: '' };
     }
-    const first = Math.min(...markers);
+    const first = match.index + match[1].length;
     const filter = original.slice(0, first).trim();
     const trailing = original.slice(first).trim();
     return { filter, trailing };
