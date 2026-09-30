@@ -6,6 +6,10 @@
  *   GET  /verify        – ライセンスキー認証（KVキャッシュ → Stripe確認）
  *   POST /trial         – 14日トライアルキー発行（メール単位・即時有効）
  *   GET  /trial/verify  – トライアルのメール確認（48時間以内・後追い検証）
+ *
+ * 2026-09-29 買い切り(¥1,980)に切り替え: Payment Link は mode=payment(サブスクリプション無し)。
+ * checkout.session.completed の mode=payment でライセンスを発行(kind:'lifetime'・expiry 空)、
+ * charge.refunded(全額)でそのライセンスを status:'refunded' にする。サブスクの分岐は旧契約用に残す。
  */
 
 const CORS_HEADERS = {
@@ -95,6 +99,14 @@ async function addKeyToSubscriptionIndex(env, subscriptionId, licenseKey) {
   if (!Array.isArray(keys)) keys = [];
   if (!keys.includes(licenseKey)) keys.push(licenseKey);
   await env.LICENSES.put(SUB_INDEX_PREFIX + subscriptionId, JSON.stringify(keys));
+}
+
+// ── payment_intent → licenseKey 逆引き(買い切り) ─────────────────────────────
+// 返金(charge.refunded)でライセンスを探すため、と、webhook の再送で二重発行しないための索引。
+const PI_INDEX_PREFIX = 'pi_';
+
+async function getKeyForPaymentIntent(env, paymentIntentId) {
+  return (await env.LICENSES.get(PI_INDEX_PREFIX + paymentIntentId)) || '';
 }
 
 async function updateRecordsForSubscription(env, subscriptionId, patch) {
@@ -323,7 +335,7 @@ async function sendTrialEmail(env, { email, licenseKey, verifyToken, origin, rec
         </p>
         <hr/>
         <p style="font-size:12px;color:#6b7280;">
-          トライアル終了後も継続する場合は <a href="https://plugbits.app/pro">plugbits.app/pro</a> からアップグレードできます（¥980/月・いつでも解約可）。
+          トライアル終了後も継続する場合は <a href="https://plugbits.app/pro">plugbits.app/pro</a> からアップグレードできます（¥1,980 の買い切り・一度の支払いでずっと使えます）。
         </p>
       `
     })
@@ -332,7 +344,7 @@ async function sendTrialEmail(env, { email, licenseKey, verifyToken, origin, rec
 
 // ── Brevo メール送信 ────────────────────────────────────────────────────────
 
-async function sendLicenseEmail(env, { email, licenseKey }) {
+async function sendLicenseEmail(env, { email, licenseKey, lifetime = false }) {
   if (!env.BREVO_API_KEY) return; // 未設定時はスキップ
   await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
@@ -356,8 +368,9 @@ async function sendLicenseEmail(env, { email, licenseKey }) {
         <p>設定画面: Chrome 拡張アイコン → 設定 → Pro ライセンス</p>
         <hr/>
         <p style="font-size:12px;color:#6b7280;">
-          サブスクリプションの管理・解約・領収書は
-          <a href="https://billing.stripe.com/p/login/plugbits">Stripe Customer Portal</a> から行えます。
+          ${lifetime
+            ? '買い切りのライセンスです。一度のお支払いで、ずっとお使いいただけます。領収書は Stripe からのメールでお送りしています。'
+            : 'サブスクリプションの管理・解約・領収書は <a href="https://billing.stripe.com/p/login/plugbits">Stripe Customer Portal</a> から行えます。'}
         </p>
       `
     })
@@ -395,7 +408,46 @@ async function handleWebhook(request, env) {
   const type = event.type;
   const obj = event.data?.object;
 
+  if (type === 'checkout.session.completed' && obj?.mode === 'payment') {
+    // 買い切り: サブスクリプションは無い。支払い済みのときだけ発行する
+    const paymentIntentId = obj?.payment_intent;
+    const email = obj?.customer_email || obj?.customer_details?.email || '';
+    if (!paymentIntentId) return json({ ok: true, skipped: 'missing_ids' });
+    if (obj?.payment_status !== 'paid') return json({ ok: true, skipped: 'not_paid' });
+    // webhook の再送(同じ支払い)では二重に発行しない
+    if (await getKeyForPaymentIntent(env, paymentIntentId)) return json({ ok: true, skipped: 'already_issued' });
+
+    const licenseKey = generateLicenseKey();
+    const record = {
+      email,
+      status: 'active',
+      kind: 'lifetime',
+      stripe_customer_id: obj?.customer || '',
+      stripe_payment_intent: paymentIntentId,
+      purchased_at: new Date((event.created || Date.now() / 1000) * 1000).toISOString(),
+      expiry: ''
+    };
+    await kvSet(env, licenseKey, record);
+    await env.LICENSES.put(PI_INDEX_PREFIX + paymentIntentId, licenseKey);
+    await sendLicenseEmail(env, { email, licenseKey, lifetime: true });
+    return json({ ok: true, action: 'key_issued', kind: 'lifetime' });
+  }
+
+  if (type === 'charge.refunded') {
+    // 買い切りの返金: 全額返金ならライセンスを無効に(一部返金は何もしない)
+    const paymentIntentId = obj?.payment_intent;
+    if (!paymentIntentId) return json({ ok: true, skipped: 'missing_ids' });
+    if (!obj?.refunded) return json({ ok: true, skipped: 'partial_refund' });
+    const licenseKey = await getKeyForPaymentIntent(env, paymentIntentId);
+    if (!licenseKey) return json({ ok: true, skipped: 'license_not_found' });
+    const record = await kvGet(env, licenseKey);
+    if (!record) return json({ ok: true, skipped: 'license_not_found' });
+    await kvSet(env, licenseKey, { ...record, status: 'refunded', refunded_at: new Date().toISOString() });
+    return json({ ok: true, action: 'license_refunded' });
+  }
+
   if (type === 'checkout.session.completed') {
+    // 旧: 月額サブスク(mode=subscription)。既存契約のために残す
     const customerId = obj?.customer;
     const subscriptionId = obj?.subscription;
     const email = obj?.customer_email || obj?.customer_details?.email || '';
@@ -479,10 +531,12 @@ async function handleVerify(request, env) {
       }
       return json({ ok: status === 'active', ...cached, status, reason: status === 'active' ? undefined : status, portal_url: '' });
     }
+    // 返金済み(refunded)・解約(canceled)などは ok:false(拡張は status==='active' だけを Pro とみなす)
+    const status = cached.status || 'active';
     const portalUrl = cached.stripe_customer_id
       ? await createPortalSession(env, cached.stripe_customer_id)
       : '';
-    return json({ ok: true, ...cached, portal_url: portalUrl });
+    return json({ ok: status === 'active', ...cached, status, reason: status === 'active' ? undefined : status, portal_url: portalUrl });
   }
 
   // 2. KV miss → Stripe から直接サブスクを調べる術がないため not_found
@@ -506,10 +560,10 @@ async function sendTrialLifecycleEmail(env, { email, type, expiry }) {
     <p style="text-align:center;margin:24px 0;">
       <a href="https://plugbits.app/pro"
          style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:bold;">
-        Pro にアップグレード（¥980/月）
+        Pro にアップグレード（¥1,980 買い切り）
       </a>
     </p>
-    <p style="font-size:12px;color:#6b7280;">いつでも解約できます。ライセンスは個人のものなので、転職先でもそのまま使えます。</p>`;
+    <p style="font-size:12px;color:#6b7280;">一度のお支払いで、ずっと使えます。ライセンスは個人のものなので、転職先でもそのまま使えます。</p>`;
   const contents = {
     ending_soon: {
       subject: 'PlugBits Launcher Pro トライアル終了まであと3日です',
