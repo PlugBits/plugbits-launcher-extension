@@ -411,11 +411,11 @@ const I18N_MESSAGES = {
     pro_verify_btn: '認証する',
     pro_info_email: 'メールアドレス',
     pro_info_expiry: '次回更新日',
-    pro_upgrade_btn: 'Pro にアップグレード（¥980 / 月）',
-    pro_price_line: '¥980 / 月',
-    pro_portal_btn: 'サブスク管理・領収書',
+    pro_upgrade_btn: 'Pro にアップグレード（¥1,980・買い切り）',
+    pro_price_line: '¥1,980（買い切り）',
+    pro_portal_btn: '領収書',
     pro_clear_btn: 'ライセンス解除',
-    pro_portal_hint: '解約・プラン変更・領収書の発行は「サブスク管理」から行えます。',
+    pro_portal_hint: '領収書の発行は「領収書」から行えます。',
   },
   en: {
     settings_title: 'PlugBits Launcher Settings',
@@ -731,11 +731,11 @@ const I18N_MESSAGES = {
     pro_verify_btn: 'Verify',
     pro_info_email: 'Email',
     pro_info_expiry: 'Next renewal',
-    pro_upgrade_btn: 'Upgrade to Pro (¥980 / month)',
-    pro_price_line: '¥980 / month',
-    pro_portal_btn: 'Manage subscription',
+    pro_upgrade_btn: 'Upgrade to Pro (¥1,980, one-time)',
+    pro_price_line: '¥1,980 (one-time)',
+    pro_portal_btn: 'Receipts',
     pro_clear_btn: 'Remove license',
-    pro_portal_hint: 'Cancel, change plan, or download receipts from "Manage subscription".',
+    pro_portal_hint: 'Download receipts from "Receipts".',
   }
 };
 
@@ -842,6 +842,7 @@ const proVerifyMsg = document.getElementById('pro_verify_msg');
 const proInfoSection = document.getElementById('pro_info_section');
 const proInfoEmail = document.getElementById('pro_info_email');
 const proInfoExpiry = document.getElementById('pro_info_expiry');
+const proInfoExpiryRow = document.getElementById('pro_info_expiry_row');
 const proUpgradeBtn = document.getElementById('pro_upgrade_btn');
 const proPriceLine = document.getElementById('pro_price_line');
 const proPortalBtn = document.getElementById('pro_portal_btn');
@@ -881,6 +882,8 @@ function updateProStatusUI(cache, key) {
       }
     }
     if (proInfoEmail) proInfoEmail.textContent = cache.email || '—';
+    // 買い切り(lifetime)や有効期限の無いライセンスは「次回更新日」行ごと隠す。トライアルや旧サブスクは expiry があるので表示を維持。
+    if (proInfoExpiryRow) proInfoExpiryRow.hidden = !cache.expiry;
     if (proInfoExpiry && cache.expiry) {
       const d = new Date(cache.expiry);
       proInfoExpiry.textContent = isNaN(d.getTime()) ? cache.expiry : d.toLocaleDateString(currentLang === 'en' ? 'en-US' : 'ja-JP');
