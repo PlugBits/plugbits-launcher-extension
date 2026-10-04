@@ -3778,12 +3778,15 @@
         `${active.name || resolveText(this.language, 'layoutPresetDefault')} copy`
       );
       if (nextName === null) return;
+      // 表示中の列構成(ビュー列連動の結果を含む)を写す。保存済みの値を写すと、
+      // ビューで列が絞られている画面から複製したときに全列のコピーになる
+      const layout = this.captureCurrentLayout();
       const preset = {
         ...active,
         id: this.createLayoutPresetId(),
         name: this.sanitizeLayoutPresetName(nextName, resolveText(this.language, 'layoutPresetNewName')),
-        visibleColumns: Array.isArray(active.visibleColumns) ? active.visibleColumns.slice() : [],
-        columnOrder: Array.isArray(active.columnOrder) ? active.columnOrder.slice() : [],
+        visibleColumns: Array.isArray(layout?.visibleColumns) ? layout.visibleColumns.slice() : [],
+        columnOrder: Array.isArray(layout?.columnOrder) ? layout.columnOrder.slice() : [],
         columnWidths: { ...(active.columnWidths || {}) },
         pinnedColumns: Array.isArray(active.pinnedColumns) ? active.pinnedColumns.slice() : [],
         // 複製で新規作成したプリセットは default ではないので常にカスタマイズ
