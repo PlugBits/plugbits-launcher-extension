@@ -40,7 +40,11 @@ const SUITES = [
   ['newrow-defaults-unit', './newrow-defaults-unit.test.mjs'],
   ['paste-verify-unit', './paste-verify-unit.test.mjs'],
   ['overlay-quality-unit', './overlay-quality-unit.test.mjs'],
-  ['query-split-unit', './query-split-unit.test.mjs']
+  ['query-split-unit', './query-split-unit.test.mjs'],
+  ['view-column-sync-unit', './view-column-sync-unit.test.mjs'],
+  // ビュー列連動 E2E（chrome-stub + fake bridge + chrome.runtime.sendMessage
+  // のPB_GET_METADATA_BUNDLE応答で実際のビュー列連動を再現する系）
+  ['view-column-sync-e2e', './view-column-sync-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];

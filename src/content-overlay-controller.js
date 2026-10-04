@@ -95,6 +95,7 @@
       this.fieldsMeta = [];
       this.listAllFields = [];
       this.viewFieldOrder = [];
+      this.viewFieldOrderTrusted = false;
       this.recordFetchFieldCodes = [];
       this.fieldMap = new Map();
       this.fieldsMetaMap = new Map();
@@ -1098,6 +1099,15 @@
         ))
         : [];
 
+      // columnsCustomized: true になったら以後「列・列順をユーザーが明示的に
+      // 変更済み」として扱い、ビュー列連動を無効化してこのプリセットの保存内容を
+      // 優先する。boolean 以外(未設定の古い保存データ)は undefined のまま返し、
+      // 呼び出し側(normalizeOverlayLayoutState)の移行ロジックに判定を委ねる。
+      const columnsCustomizedRaw = rawPreset?.columnsCustomized;
+      const columnsCustomized = columnsCustomizedRaw === true || columnsCustomizedRaw === false
+        ? columnsCustomizedRaw
+        : undefined;
+
       return {
         id: String(rawPreset?.id || fallbackId || this.createLayoutPresetId()),
         name: this.sanitizeLayoutPresetName(rawPreset?.name, fallbackName),
@@ -1105,8 +1115,35 @@
         visibleColumns,
         columnOrder: order,
         columnWidths: widths,
-        pinnedColumns: pinned
+        pinnedColumns: pinned,
+        columnsCustomized
       };
+    }
+
+    // 保存済みプリセットに columnsCustomized が無い(3.1.0以前のデータ)場合の
+    // 移行判定。default プリセットは「全ベース列を含み、フォーム順と一致」=
+    // 未変更ならカスタマイズ無し(false)。それ以外(一部列のみ/順序変更済み)は
+    // customized=true。default 以外のプリセット(ユーザーが作成したもの)は常に
+    // customized=true とする。
+    isUntouchedBaseColumnConfig(preset, baseCodes) {
+      const codes = Array.isArray(baseCodes) ? baseCodes : [];
+      const visible = Array.isArray(preset?.visibleColumns) ? preset.visibleColumns : [];
+      const order = Array.isArray(preset?.columnOrder) ? preset.columnOrder : [];
+      if (visible.length !== codes.length) return false;
+      const visibleSet = new Set(visible);
+      if (!codes.every((code) => visibleSet.has(code))) return false;
+      if (order.length !== codes.length) return false;
+      for (let i = 0; i < codes.length; i += 1) {
+        if (order[i] !== codes[i]) return false;
+      }
+      return true;
+    }
+
+    applyLayoutPresetCustomizedMigration(preset, baseCodes) {
+      if (typeof preset.columnsCustomized === 'boolean') return preset;
+      const isDefaultPreset = String(preset?.id || '') === 'default';
+      const customized = isDefaultPreset ? !this.isUntouchedBaseColumnConfig(preset, baseCodes) : true;
+      return { ...preset, columnsCustomized: customized };
     }
 
     createDefaultLayoutPreset(baseFields, legacyPref = null, scope = 'list') {
@@ -1120,7 +1157,10 @@
         scope,
         visibleColumns: baseCodes,
         columnOrder: legacyOrder.length ? legacyOrder : baseOrder,
-        columnWidths: legacyWidths
+        columnWidths: legacyWidths,
+        // 旧バージョンの列順プリファレンス(legacyPref)から復元した場合は
+        // ユーザーが既に列をカスタマイズ済みとみなし、ビュー列連動を無効化する
+        columnsCustomized: legacyOrder.length > 0
       }, baseCodes, resolveText(this.language, 'layoutPresetDefault'), 'default');
       return preset;
     }
@@ -1203,7 +1243,8 @@
           `${resolveText(this.language, 'layoutPresetDefault')} ${index + 1}`,
           index === 0 ? 'default' : ''
         ))
-        .filter((preset) => preset.columnOrder.length > 0 || preset.visibleColumns.length > 0);
+        .filter((preset) => preset.columnOrder.length > 0 || preset.visibleColumns.length > 0)
+        .map((preset) => this.applyLayoutPresetCustomizedMigration(preset, baseCodes));
       if (!presets.length) {
         presets.push(this.createDefaultLayoutPreset(baseFields));
       }
@@ -1289,9 +1330,47 @@
       }
     }
 
+    // ビュー列連動: リスト表示かつアクティブプリセットが未カスタマイズ
+    // (columnsCustomized=false)、かつ viewFieldOrder が信頼できるソース
+    // (resolveViewInfoFromMetadata 経由。安全フォールバック/all_records時は
+    // 常に空になる)から非空で得られている場合のみ、ビューの表示列+列順を
+    // 採用する。対応外フィールド(allowedTypes外)は allowed でそもそも除外
+    // 済み。フィルタ後が空になったら null を返し、通常の全列表示に委ねる。
+    resolveViewSyncColumns(preset, allowed) {
+      if (!this.isListMode()) return null;
+      if (!preset || preset.columnsCustomized) return null;
+      if (!this.viewFieldOrderTrusted) return null;
+      const viewOrder = Array.isArray(this.viewFieldOrder) ? this.viewFieldOrder : [];
+      if (!viewOrder.length) return null;
+      const filtered = [];
+      const seen = new Set();
+      viewOrder.forEach((codeRaw) => {
+        const code = String(codeRaw || '').trim();
+        if (!code || !allowed.has(code) || seen.has(code)) return;
+        filtered.push(code);
+        seen.add(code);
+      });
+      return filtered.length ? filtered : null;
+    }
+
     resolvePresetColumnConfig(baseFields, preset) {
       const baseCodes = this.getBaseFieldCodeList(baseFields);
       const allowed = new Set(baseCodes);
+      const widths = preset?.columnWidths && typeof preset.columnWidths === 'object'
+        ? preset.columnWidths
+        : {};
+
+      const viewSyncColumns = this.resolveViewSyncColumns(preset, allowed);
+      if (viewSyncColumns) {
+        return {
+          baseCodes,
+          visibleColumns: viewSyncColumns.slice(),
+          orderedCodes: viewSyncColumns.slice(),
+          widths,
+          viewSynced: true
+        };
+      }
+
       const rawVisible = Array.isArray(preset?.visibleColumns) ? preset.visibleColumns : [];
       const visible = Array.from(new Set(
         rawVisible
@@ -1314,10 +1393,7 @@
         ordered.push(code);
         seen.add(code);
       });
-      const widths = preset?.columnWidths && typeof preset.columnWidths === 'object'
-        ? preset.columnWidths
-        : {};
-      return { baseCodes, visibleColumns, orderedCodes: ordered, widths };
+      return { baseCodes, visibleColumns, orderedCodes: ordered, widths, viewSynced: false };
     }
 
     buildVisibleFieldsFromPreset(baseFields, preset) {
@@ -1508,6 +1584,9 @@
       active.visibleColumns = layout.visibleColumns;
       active.columnOrder = layout.columnOrder;
       active.columnWidths = { ...(active.columnWidths || {}), ...(layout.columnWidths || {}) };
+      // 現在表示中の列構成(ビュー列連動の結果を含む)を明示的に保存した
+      // ので、以後このプリセットはユーザーカスタマイズ済みとして扱う
+      active.columnsCustomized = true;
       await this.persistOverlayLayoutState();
       this.notify(resolveText(this.language, 'toastLayoutPresetSaved'));
     }
@@ -1529,7 +1608,10 @@
         visibleColumns: Array.isArray(active.visibleColumns) ? active.visibleColumns.slice() : [],
         columnOrder: Array.isArray(active.columnOrder) ? active.columnOrder.slice() : [],
         columnWidths: { ...(active.columnWidths || {}) },
-        pinnedColumns: Array.isArray(active.pinnedColumns) ? active.pinnedColumns.slice() : []
+        pinnedColumns: Array.isArray(active.pinnedColumns) ? active.pinnedColumns.slice() : [],
+        // 複製で新規作成したプリセットは default ではないので常にカスタマイズ
+        // 済み扱い(ビュー列連動は default プリセットにのみ適用する)
+        columnsCustomized: true
       };
       this.overlayLayoutState.presets.push(preset);
       this.overlayLayoutState.activePresetId = preset.id;
@@ -2135,6 +2217,13 @@
       this.viewKey = 'default';
       let resolvedQuery = currentQuery;
       let viewFieldOrder = [];
+      // ビュー列連動(columnsCustomized=falseのプリセットに適用)で信頼するのは
+      // resolveViewInfoFromMetadata 経由(pickViewFromViews の guessed 検証つき)
+      // の結果のみ。metadataBundle が取得できず EXCEL_GET_VIEW_INFO(page-bridge.js)
+      // の旧実装にフォールバックした場合は、そちらに安全な guessed 検証が無く
+      // 誤ったビューの列(entries[0])を返す可能性があるため、fieldOrder が
+      // 非空でも列連動には使わない(全列表示のフォールバックに留める)。
+      let viewFieldOrderTrusted = false;
       if (!this.isDetailSingleRowMode()) {
         const viewInfoFromMeta = this.resolveViewInfoFromMetadata(metadataBundle?.views?.raw, {
           appId: this.appId,
@@ -2142,6 +2231,7 @@
           currentQuery
         });
         if (viewInfoFromMeta) {
+          viewFieldOrderTrusted = true;
           if (typeof viewInfoFromMeta.query === 'string') {
             resolvedQuery = viewInfoFromMeta.query;
           }
@@ -2191,6 +2281,7 @@
           .map((code) => String(code || '').trim())
           .filter(Boolean)
       ));
+      this.viewFieldOrderTrusted = viewFieldOrderTrusted;
       this.baseQuery = String(resolvedQuery || '').trim();
       this.query = this.baseQuery;
       this.pageOffset = 0;
@@ -4117,6 +4208,9 @@
       active.visibleColumns = baseCodes.slice();
       active.columnOrder = baseCodes.slice();
       active.columnWidths = {};
+      // 全列・フォーム順に戻す = 未カスタマイズの状態。以後はビュー列連動が
+      // 再び効くようにカスタマイズ済みフラグも外す
+      active.columnsCustomized = false;
       await this.persistOverlayLayoutState();
       this.updateLayoutPresetToolbarUi();
     }
@@ -4559,6 +4653,9 @@
           const orderedVisible = this.columnOrderDraft.filter((code) => visibleCodes.includes(code));
           activePreset.visibleColumns = visibleCodes.slice();
           activePreset.columnOrder = orderedVisible.slice();
+          // 列ダイアログから明示的に保存 = ユーザーカスタマイズ済み。
+          // 以後このプリセットはビュー列連動より保存内容を優先する
+          activePreset.columnsCustomized = true;
         }
         const widths = this.collectColumnWidths();
         await this.persistColumnPref(this.columnOrderDraft, widths);
@@ -9944,6 +10041,7 @@
       this.fieldsMeta = [];
       this.listAllFields = [];
       this.viewFieldOrder = [];
+      this.viewFieldOrderTrusted = false;
       this.overlayLayoutState = null;
       this.recordFetchFieldCodes = [];
       this.fieldMap.clear();
