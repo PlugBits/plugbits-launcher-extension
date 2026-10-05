@@ -17,6 +17,7 @@ const SUITES = [
   ['palette', './palette.test.mjs'],
   ['palette-settings', './palette-settings.test.mjs'],
   ['trial', './trial.test.mjs'],
+  ['options-pro-actions', './options-pro-actions.test.mjs'],
   ['options-api-usage', './options-api-usage.test.mjs'],
   ['api-usage-tracking', './api-usage-tracking.test.mjs'],
   // Excel Overlay E2E（chrome-stub + fake bridge + Proライセンス投入でフル起動する系）

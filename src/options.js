@@ -411,7 +411,9 @@ const I18N_MESSAGES = {
     pro_verify_btn: '認証する',
     pro_info_email: 'メールアドレス',
     pro_info_expiry: '次回更新日',
-    pro_upgrade_btn: 'Pro にアップグレード（¥1,980・買い切り）',
+    pro_trial_cta_btn: '14日間無料で試す',
+    pro_buy_btn: '購入 ¥1,980（買い切り）',
+    pro_learn_more_link: '詳しく',
     pro_price_line: '¥1,980（買い切り）',
     pro_portal_btn: '領収書',
     pro_clear_btn: 'ライセンス解除',
@@ -731,7 +733,9 @@ const I18N_MESSAGES = {
     pro_verify_btn: 'Verify',
     pro_info_email: 'Email',
     pro_info_expiry: 'Next renewal',
-    pro_upgrade_btn: 'Upgrade to Pro (¥1,980, one-time)',
+    pro_trial_cta_btn: 'Try free for 14 days',
+    pro_buy_btn: 'Buy — ¥1,980 (one-time)',
+    pro_learn_more_link: 'Learn more',
     pro_price_line: '¥1,980 (one-time)',
     pro_portal_btn: 'Receipts',
     pro_clear_btn: 'Remove license',
@@ -843,7 +847,9 @@ const proInfoSection = document.getElementById('pro_info_section');
 const proInfoEmail = document.getElementById('pro_info_email');
 const proInfoExpiry = document.getElementById('pro_info_expiry');
 const proInfoExpiryRow = document.getElementById('pro_info_expiry_row');
-const proUpgradeBtn = document.getElementById('pro_upgrade_btn');
+const proTrialCtaBtn = document.getElementById('pro_trial_cta_btn');
+const proBuyBtn = document.getElementById('pro_buy_btn');
+const proLearnMoreLink = document.getElementById('pro_learn_more_link');
 const proPriceLine = document.getElementById('pro_price_line');
 const proPortalBtn = document.getElementById('pro_portal_btn');
 const proClearBtn = document.getElementById('pro_clear_btn');
@@ -864,7 +870,10 @@ function updateProStatusUI(cache, key) {
   proStatusBanner.dataset.status = isActive ? 'active' : (hasKey ? 'inactive' : 'free');
   if (proBadge) proBadge.hidden = !isActive;
   // トライアルカードは「未使用かつ有料キー未設定」のときだけ見せる
-  if (proTrialCard) proTrialCard.hidden = Boolean(isActive || isTrial || hasKey);
+  const trialCardHidden = Boolean(isActive || isTrial || hasKey);
+  if (proTrialCard) proTrialCard.hidden = trialCardHidden;
+  // トライアルCTAボタンはトライアルカードが見えている時だけ出す(導線の一致)
+  if (proTrialCtaBtn) proTrialCtaBtn.hidden = trialCardHidden;
 
   if (isActive) {
     if (proStatusLabel) {
@@ -890,7 +899,8 @@ function updateProStatusUI(cache, key) {
     }
     if (proInfoSection) proInfoSection.hidden = false;
     // トライアル中もアップグレード導線は見せ続ける
-    if (proUpgradeBtn) proUpgradeBtn.hidden = !isTrial;
+    if (proBuyBtn) proBuyBtn.hidden = !isTrial;
+    if (proLearnMoreLink) proLearnMoreLink.hidden = !isTrial;
     if (proPriceLine) proPriceLine.hidden = !isTrial;
     proPortalUrl = cache.portalUrl || '';
     if (proPortalBtn) proPortalBtn.hidden = !proPortalUrl;
@@ -899,7 +909,8 @@ function updateProStatusUI(cache, key) {
     if (proStatusLabel) proStatusLabel.textContent = hasKey ? t('pro_status_unverified') : t('pro_status_free');
     if (proStatusSub) proStatusSub.textContent = hasKey ? t('pro_status_enter_key') : '';
     if (proInfoSection) proInfoSection.hidden = true;
-    if (proUpgradeBtn) proUpgradeBtn.hidden = false;
+    if (proBuyBtn) proBuyBtn.hidden = false;
+    if (proLearnMoreLink) proLearnMoreLink.hidden = false;
     if (proPriceLine) proPriceLine.hidden = false;
     if (proPortalBtn) proPortalBtn.hidden = true;
     if (proClearBtn) proClearBtn.hidden = !hasKey;
@@ -1004,6 +1015,15 @@ if (proClearBtn) {
 }
 
 // ── 14日トライアル ───────────────────────────────────────────────────────────
+
+if (proTrialCtaBtn) {
+  // 「14日間無料で試す」ボタンは外部サイトへ遷移せず、ページ内のトライアルカード
+  // (pro_trial_card / 既存の startProTrial 導線)を表示・フォーカスするだけにする。
+  proTrialCtaBtn.addEventListener('click', () => {
+    if (proTrialCard) proTrialCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    proTrialEmailInput?.focus();
+  });
+}
 
 function setProTrialMsg(message, kind = '') {
   if (!proTrialMsg) return;

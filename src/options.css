@@ -1517,6 +1517,24 @@ ul {
 }
 .pro-upgrade-btn:hover { opacity: 0.88; }
 
+.pro-trial-cta-btn {
+  background: var(--pb-surface-3);
+  color: var(--pb-text);
+  border: 1px solid var(--pb-line-2);
+  box-shadow: none;
+  cursor: pointer;
+}
+.pro-trial-cta-btn:hover { opacity: 1; background: var(--pb-line); }
+
+.pro-learn-more-link {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  color: var(--pb-muted);
+  text-decoration: underline;
+}
+.pro-learn-more-link:hover { color: var(--pb-text); }
+
 .pro-portal-btn {
   padding: 9px 16px;
   background: var(--pb-surface-3);

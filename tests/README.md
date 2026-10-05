@@ -22,6 +22,7 @@ Chromium のパスを固定したい環境では `PB_TEST_CHROMIUM=/path/to/chro
 | `palette.test.mjs` | コマンドパレットのi18n切替・ARIA・Tabフォーカストラップ、チートシートの開閉全経路 |
 | `palette-settings.test.mjs` | コマンドパレット: 拡張機能設定ジャンプコマンド・フィールド一覧コピーのアプリID行 |
 | `trial.test.mjs` | 14日トライアルの開始フロー（`/trial` をモック。不正メール拒否・即時有効化・状態表示） |
+| `options-pro-actions.test.mjs` | Pro ライセンス欄のアクション導線（「14日間無料で試す」はページ内トライアルカードを表示・フォーカス、「購入」はStripe Payment Linkへ直リンク、「詳しく」はplugbits.app価格セクションへ） |
 | `options-api-usage.test.mjs` | 設定画面のAPI使用量表示 |
 | `api-usage-tracking.test.mjs` | API使用量トラッキング |
 
