@@ -6341,26 +6341,46 @@
       if (!active) return;
       const baseCodes = this.getBaseFieldCodeList(sourceFields);
       const allowed = new Set(baseCodes);
-      const visibleSet = new Set(
-        Array.isArray(active.visibleColumns) && active.visibleColumns.length
-          ? active.visibleColumns
-          : this.fields.map((field) => String(field?.code || '').trim()).filter(Boolean)
-      );
-      active.visibleColumns = Array.from(visibleSet).filter((code) => allowed.has(code));
-      const nextOrder = [];
-      const seen = new Set();
-      order.forEach((codeRaw) => {
-        const code = String(codeRaw || '').trim();
-        if (!code || !allowed.has(code) || !visibleSet.has(code) || seen.has(code)) return;
-        nextOrder.push(code);
-        seen.add(code);
-      });
-      active.visibleColumns.forEach((code) => {
-        if (seen.has(code)) return;
-        nextOrder.push(code);
-        seen.add(code);
-      });
-      active.columnOrder = nextOrder;
+      // 列ダイアログを開いた時点の columnOrderDraft は「現在表示中の順序」から
+      // 作られる。未カスタマイズ(columnsCustomized!==true)のプリセットは
+      // ビュー列連動中で、表示順がビューの列順(ベースのフォーム順とは異なる
+      // 部分集合)になっていることがある。この resize-only の経路(幅だけの
+      // 変更)で order をそのまま columnOrder に書き戻すと、「全ベース列・
+      // フォーム順」という default プリセットの前提が崩れ、保存データが
+      // ビューの表示順で“スクランブル”された状態になる。columnsCustomized
+      // フラグ自体は false のまま保たれるため、このスクランブルは一見無害
+      // (ビュー列連動はフラグだけを見て列順を決めるので直後は壊れない)だが、
+      // 後でこのプリセットが columnsCustomized フラグを失う(例: 設定画面の
+      // レイアウト一覧からの保存で落ちるバグ)と、移行ヒューリスティックが
+      // 「フォーム順と食い違う default」を誤ってユーザーカスタマイズ済みと
+      // 判定し、ビュー列連動が復帰しなくなる(列ダイアログのリセットでしか
+      // 直せない)。これを避けるため、未カスタマイズのプリセットでは
+      // visibleColumns/columnOrder を一切書き換えず、幅だけを永続化する。
+      // すでに明示カスタマイズ済み(columnsCustomized===true)のプリセットは、
+      // 表示中の順序がそのまま保存済みの順序と一致するはずなので、従来どおり
+      // order から組み立て直す。
+      if (active.columnsCustomized === true) {
+        const visibleSet = new Set(
+          Array.isArray(active.visibleColumns) && active.visibleColumns.length
+            ? active.visibleColumns
+            : this.fields.map((field) => String(field?.code || '').trim()).filter(Boolean)
+        );
+        active.visibleColumns = Array.from(visibleSet).filter((code) => allowed.has(code));
+        const nextOrder = [];
+        const seen = new Set();
+        order.forEach((codeRaw) => {
+          const code = String(codeRaw || '').trim();
+          if (!code || !allowed.has(code) || !visibleSet.has(code) || seen.has(code)) return;
+          nextOrder.push(code);
+          seen.add(code);
+        });
+        active.visibleColumns.forEach((code) => {
+          if (seen.has(code)) return;
+          nextOrder.push(code);
+          seen.add(code);
+        });
+        active.columnOrder = nextOrder;
+      }
       const mergedWidths = active.columnWidths && typeof active.columnWidths === 'object'
         ? { ...active.columnWidths }
         : {};

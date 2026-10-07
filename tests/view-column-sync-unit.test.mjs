@@ -221,16 +221,22 @@ export async function run({ check }) {
       normalizedMissing.columnsCustomized === undefined);
   }
 
-  // ── 7. width-only の持続化経路(persistColumnPref)はフラグを一切触らない ──
-  //     (resizer drag / 自動幅調整からの呼び出しは columnOrderDraft をそのまま
-  //     渡すだけで列・表示を変えないため、ここでフラグに触れないことが
-  //     「幅だけの変更ではカスタマイズ済みにしない」要件を保証する)
+  // ── 7. width-only の持続化経路(persistColumnPref)はフラグを一切書き換えない
+  //     ──(resizer drag / 自動幅調整からの呼び出しは columnOrderDraft をそのまま
+  //     渡すだけで列・表示を変えないため、ここでフラグへの代入が無いことが
+  //     「幅だけの変更ではカスタマイズ済みにしない」要件を保証する。
+  //     ただし、未カスタマイズ(ビュー列連動中)のプリセットで columnOrder を
+  //     ビューの表示順のまま誤って永続化してしまう不具合(v3.2.1で修正)を防ぐため、
+  //     columnsCustomized===true かどうかを読んで分岐するようになった。
+  //     「読む」のは許容し、「書く(代入する)」ことだけが無い、を確認する)
   {
     const persistColumnPrefSrc = extractFunctionSource(
       contentJs, new RegExp('\\n {4}async persistColumnPref\\(order, widths\\)\\s\\{')
     );
     check('persistColumnPref never writes columnsCustomized (width-only changes do not flip the flag)',
-      !persistColumnPrefSrc.includes('columnsCustomized'));
+      !/\.columnsCustomized\s*=[^=]/.test(persistColumnPrefSrc));
+    check('persistColumnPref reads columnsCustomized to decide whether to resync columnOrder from the live render order',
+      /active\.columnsCustomized === true/.test(persistColumnPrefSrc));
   }
 
   // ── 8. 列ダイアログの明示保存(handleColumnSave)とリセット(removeColumnOrder)は

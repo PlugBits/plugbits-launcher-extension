@@ -45,7 +45,8 @@ const SUITES = [
   ['view-column-sync-unit', './view-column-sync-unit.test.mjs'],
   // ビュー列連動 E2E（chrome-stub + fake bridge + chrome.runtime.sendMessage
   // のPB_GET_METADATA_BUNDLE応答で実際のビュー列連動を再現する系）
-  ['view-column-sync-e2e', './view-column-sync-e2e.test.mjs']
+  ['view-column-sync-e2e', './view-column-sync-e2e.test.mjs'],
+  ['view-sync-after-trial-e2e', './view-sync-after-trial-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];

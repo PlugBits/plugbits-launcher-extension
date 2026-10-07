@@ -3547,7 +3547,13 @@ function normalizeOverlayLayoutPreset(rawPreset, index = 0) {
     if (!Number.isFinite(numeric) || numeric <= 0) return;
     columnWidths[code] = Math.round(numeric);
   });
-  return {
+  // columnsCustomized (v3.2.0, ビュー列連動): boolean のときだけそのまま
+  // 引き継ぐ。ここで落としてしまうと、content.js側の移行ヒューリスティック
+  // (default プリセットが「全ベース列・フォーム順のまま」かどうかで判定)に
+  // 判断を委ねることになり、保存済みの列順がフォーム順と食い違う状態
+  // (例: 幅調整などで列順がビュー表示順のまま保存されたケース)を誤って
+  // 「ユーザーがカスタマイズ済み」と判定し、ビュー列連動が復帰しなくなる。
+  const result = {
     id,
     name,
     scope: String(rawPreset.scope || '').trim().toLowerCase() === 'detail' ? 'detail' : 'list',
@@ -3558,6 +3564,10 @@ function normalizeOverlayLayoutPreset(rawPreset, index = 0) {
       ? Array.from(new Set(rawPreset.pinnedColumns.map((code) => String(code || '').trim()).filter(Boolean)))
       : []
   };
+  if (typeof rawPreset.columnsCustomized === 'boolean') {
+    result.columnsCustomized = rawPreset.columnsCustomized;
+  }
+  return result;
 }
 
 function normalizeOverlayLayoutPresets(raw) {
