@@ -6664,7 +6664,7 @@
           if (!this.isMultiLineField(child)) return s2;
           return s2 + String(item?.value?.[child.code]?.value ?? '').length;
         }, 0), 0);
-        console.debug(`[PB][diag] subtable_save_click rows=${editorRows.length} hasMultiline=${__diagHasMultiline} multilineValueLen=${__diagValueLen} ms=0`);
+        console.log(`[PB][diag] subtable_save_click rows=${editorRows.length} hasMultiline=${__diagHasMultiline} multilineValueLen=${__diagValueLen} ms=0`);
         const beforeValueSnapshot = this.deepClone(row.values[field.code]);
         for (const item of editorRows) {
           for (const child of childFields) {
@@ -6674,14 +6674,14 @@
               const validation = this.validate(raw ?? '', child);
               if (!validation.ok) {
                 this.notify(resolveText(this.language, 'toastInvalidCells'));
-                console.debug(`[PB][diag] subtable_save_invalid fieldCode=${child.code} ms=${Math.round(performance.now() - __diagT0)}`);
+                console.log(`[PB][diag] subtable_save_invalid fieldCode=${child.code} ms=${Math.round(performance.now() - __diagT0)}`);
                 return;
               }
               setSubtableCellValue(item, child, validation.value);
             }
           }
         }
-        console.debug(`[PB][diag] subtable_save_validated ms=${Math.round(performance.now() - __diagT0)}`);
+        console.log(`[PB][diag] subtable_save_validated ms=${Math.round(performance.now() - __diagT0)}`);
         const nextValue = editorRows.map((item) => {
           const out = { value: item.value && typeof item.value === 'object' ? JSON.parse(JSON.stringify(item.value)) : {} };
           if (item.id) out.id = item.id;
@@ -6690,7 +6690,7 @@
         const currentRow = this.rowMap.get(row.id);
         if (!currentRow) {
           this.closeSubtableEditor(true);
-          console.debug(`[PB][diag] subtable_save_close reason=row_missing ms=${Math.round(performance.now() - __diagT0)}`);
+          console.log(`[PB][diag] subtable_save_close reason=row_missing ms=${Math.round(performance.now() - __diagT0)}`);
           return;
         }
         currentRow.values[field.code] = nextValue;
@@ -6710,7 +6710,7 @@
         } else {
           this.removeDiff(currentRow.id, field.code);
         }
-        console.debug(`[PB][diag] subtable_save_diff_applied changed=${changed} ms=${Math.round(performance.now() - __diagT0)}`);
+        console.log(`[PB][diag] subtable_save_diff_applied changed=${changed} ms=${Math.round(performance.now() - __diagT0)}`);
         const input = this.findInput(currentRow.id, field.code);
         if (input) {
           this.applyCellVisualState(input, currentRow, field.code);
@@ -6719,7 +6719,7 @@
         this.updateStats();
         void this.persistSubtableColumnWidths(field.code, currentColumnWidths);
         this.closeSubtableEditor(true);
-        console.debug(`[PB][diag] subtable_save_close ms=${Math.round(performance.now() - __diagT0)}`);
+        console.log(`[PB][diag] subtable_save_close ms=${Math.round(performance.now() - __diagT0)}`);
       });
       addBtn.disabled = readOnlyMode;
       autoBtn.disabled = false;
@@ -9717,7 +9717,7 @@
       const savedIds = new Set();
       // [PB][diag] 3.2.0診断版b: save()の開始・各PUT試行の結果・終了をms付きで出す
       const __diagSaveT0 = performance.now();
-      console.debug(`[PB][diag] save_start put=${putBatches.length} post=${postBatches.length} del=${deleteBatches.length} ms=0`);
+      console.log(`[PB][diag] save_start put=${putBatches.length} post=${postBatches.length} del=${deleteBatches.length} ms=0`);
       try {
         await this.flushPendingFileUploads();
         putBatches = this.createPutBatches();
@@ -9739,7 +9739,7 @@
               records: batch,
               __pbTrigger: 'save_click'
             });
-            console.debug(`[PB][diag] save_put_attempt index=${index} attempt=${attempt} ok=${Boolean(response?.ok)} conflict=${this.isConflictResponse(response)} ms=${Math.round(performance.now() - __diagSaveT0)}`);
+            console.log(`[PB][diag] save_put_attempt index=${index} attempt=${attempt} ok=${Boolean(response?.ok)} conflict=${this.isConflictResponse(response)} ms=${Math.round(performance.now() - __diagSaveT0)}`);
             if (response?.ok) {
               this.applySaveResult(batch, response.result);
               batch.forEach((entry) => {
@@ -9871,12 +9871,12 @@
         const serverMessage = key === 'toastSaveFailed' ? String(error?.serverMessage || '').trim() : '';
         this.notify(serverMessage ? `${baseMessage}: ${serverMessage}` : baseMessage);
         console.error('[kintone-excel-overlay] save failed', error);
-        console.debug(`[PB][diag] save_end ok=false anySaved=${anySaved} conflict=${Boolean(error?.conflict)} ms=${Math.round(performance.now() - __diagSaveT0)}`);
+        console.log(`[PB][diag] save_end ok=false anySaved=${anySaved} conflict=${Boolean(error?.conflict)} ms=${Math.round(performance.now() - __diagSaveT0)}`);
       } finally {
         this.setSaving(false);
       }
       if (anySaved) {
-        console.debug(`[PB][diag] save_end ok=true anySaved=${anySaved} ms=${Math.round(performance.now() - __diagSaveT0)}`);
+        console.log(`[PB][diag] save_end ok=true anySaved=${anySaved} ms=${Math.round(performance.now() - __diagSaveT0)}`);
       }
     }
 
