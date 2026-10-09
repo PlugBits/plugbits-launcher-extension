@@ -957,12 +957,35 @@
       };
     }
 
+    // chrome.runtime.sendMessage はService Worker側がsendResponseを呼ばない
+    // (MV3でSWが処理中に落ちる等)場合、呼び出し側に無期限に解決されないPromiseが
+    // 残る。window.postMessageブリッジ側のpostToPage(content.template.js)と同じ
+    // 作り(Promise.race+setTimeout)でクライアント側の時間切れを必ず設ける。
+    // 時間切れ時は{ok:false,error:'Timeout'}を返し、呼び出し元は既存の
+    // 失敗時の経路(metadataBundleがnull→legacyフォールバック等)へ進む。
+    async sendRuntimeMessageWithTimeout(message, timeoutMs = 10000) {
+      let timer = null;
+      try {
+        const response = await Promise.race([
+          chrome.runtime.sendMessage(message),
+          new Promise((resolve) => {
+            timer = setTimeout(() => resolve({ ok: false, error: 'Timeout' }), timeoutMs);
+          })
+        ]);
+        return response;
+      } catch (err) {
+        return { ok: false, error: String(err?.message || err || 'runtime_message_failed') };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+
     async getMetadataBundle(options = {}) {
       const host = String(location?.origin || '').trim();
       const appId = String(this.appId || '').trim();
       if (!host || !appId) return null;
       try {
-        const res = await chrome.runtime.sendMessage({
+        const res = await this.sendRuntimeMessageWithTimeout({
           type: 'PB_GET_METADATA_BUNDLE',
           payload: {
             host,
@@ -977,7 +1000,7 @@
             source: String(options?.source || 'overlay'),
             logGroup: String(options?.logGroup || 'overlay')
           }
-        });
+        }, 10000);
         return res && typeof res === 'object' ? res : null;
       } catch (_err) {
         return null;
@@ -6633,6 +6656,15 @@
           this.notifyViewOnlyBlocked();
           return;
         }
+        // [PB][diag] 3.2.0診断版b: サブテーブル保存の各段で1行ログを出す。
+        // 値の中身は出さず、行数・複数行フィールドの有無・値の長さだけを出す。
+        const __diagT0 = performance.now();
+        const __diagHasMultiline = childFields.some((child) => this.isMultiLineField(child));
+        const __diagValueLen = editorRows.reduce((sum, item) => sum + childFields.reduce((s2, child) => {
+          if (!this.isMultiLineField(child)) return s2;
+          return s2 + String(item?.value?.[child.code]?.value ?? '').length;
+        }, 0), 0);
+        console.debug(`[PB][diag] subtable_save_click rows=${editorRows.length} hasMultiline=${__diagHasMultiline} multilineValueLen=${__diagValueLen} ms=0`);
         const beforeValueSnapshot = this.deepClone(row.values[field.code]);
         for (const item of editorRows) {
           for (const child of childFields) {
@@ -6642,12 +6674,14 @@
               const validation = this.validate(raw ?? '', child);
               if (!validation.ok) {
                 this.notify(resolveText(this.language, 'toastInvalidCells'));
+                console.debug(`[PB][diag] subtable_save_invalid fieldCode=${child.code} ms=${Math.round(performance.now() - __diagT0)}`);
                 return;
               }
               setSubtableCellValue(item, child, validation.value);
             }
           }
         }
+        console.debug(`[PB][diag] subtable_save_validated ms=${Math.round(performance.now() - __diagT0)}`);
         const nextValue = editorRows.map((item) => {
           const out = { value: item.value && typeof item.value === 'object' ? JSON.parse(JSON.stringify(item.value)) : {} };
           if (item.id) out.id = item.id;
@@ -6656,6 +6690,7 @@
         const currentRow = this.rowMap.get(row.id);
         if (!currentRow) {
           this.closeSubtableEditor(true);
+          console.debug(`[PB][diag] subtable_save_close reason=row_missing ms=${Math.round(performance.now() - __diagT0)}`);
           return;
         }
         currentRow.values[field.code] = nextValue;
@@ -6675,6 +6710,7 @@
         } else {
           this.removeDiff(currentRow.id, field.code);
         }
+        console.debug(`[PB][diag] subtable_save_diff_applied changed=${changed} ms=${Math.round(performance.now() - __diagT0)}`);
         const input = this.findInput(currentRow.id, field.code);
         if (input) {
           this.applyCellVisualState(input, currentRow, field.code);
@@ -6683,6 +6719,7 @@
         this.updateStats();
         void this.persistSubtableColumnWidths(field.code, currentColumnWidths);
         this.closeSubtableEditor(true);
+        console.debug(`[PB][diag] subtable_save_close ms=${Math.round(performance.now() - __diagT0)}`);
       });
       addBtn.disabled = readOnlyMode;
       autoBtn.disabled = false;
@@ -9678,11 +9715,20 @@
       this.setSaving(true);
       let anySaved = false;
       const savedIds = new Set();
+      // [PB][diag] 3.2.0診断版b: save()の開始・各PUT試行の結果・終了をms付きで出す
+      const __diagSaveT0 = performance.now();
+      console.debug(`[PB][diag] save_start put=${putBatches.length} post=${postBatches.length} del=${deleteBatches.length} ms=0`);
       try {
         await this.flushPendingFileUploads();
         putBatches = this.createPutBatches();
         postBatches = this.createPostBatches();
         deleteBatches = this.createDeleteBatches();
+        // コンフリクト(409/412等)の再試行回数に上限を設ける。handleConflict後も
+        // 再送が常に競合し続ける場合(例: revisionの取り直しが効かないケース)に
+        // 無限に retry し続けて保存中フラグ(this.saving)が戻らず「固まった」ように
+        // 見える状態を避け、既存のエラー表示経路(catch→conflictFailed)で確実に止める。
+        const MAX_CONFLICT_RETRY = 3;
+        let conflictRetryCount = 0;
         for (let index = 0; index < putBatches.length;) {
           let batch = putBatches[index];
           let attempt = 0;
@@ -9693,6 +9739,7 @@
               records: batch,
               __pbTrigger: 'save_click'
             });
+            console.debug(`[PB][diag] save_put_attempt index=${index} attempt=${attempt} ok=${Boolean(response?.ok)} conflict=${this.isConflictResponse(response)} ms=${Math.round(performance.now() - __diagSaveT0)}`);
             if (response?.ok) {
               this.applySaveResult(batch, response.result);
               batch.forEach((entry) => {
@@ -9703,6 +9750,19 @@
               break;
             }
             if (attempt === 1 && this.isConflictResponse(response)) {
+              conflictRetryCount += 1;
+              if (conflictRetryCount > MAX_CONFLICT_RETRY) {
+                const errorTargets = this.collectSaveErrorTargets(batch, response?.errorDetails);
+                if (errorTargets.length) {
+                  this.markSaveErrorCells(errorTargets);
+                } else {
+                  this.markBatchError(batch);
+                }
+                const err = new Error(response?.error || 'save failed (conflict retry limit)');
+                err.serverMessage = String(response?.error || '');
+                err.conflict = true;
+                throw err;
+              }
               const handling = await this.handleConflict(batch);
               if (handling === 'retry') {
                 this.notify(resolveText(this.language, 'conflictRetry'));
@@ -9811,8 +9871,12 @@
         const serverMessage = key === 'toastSaveFailed' ? String(error?.serverMessage || '').trim() : '';
         this.notify(serverMessage ? `${baseMessage}: ${serverMessage}` : baseMessage);
         console.error('[kintone-excel-overlay] save failed', error);
+        console.debug(`[PB][diag] save_end ok=false anySaved=${anySaved} conflict=${Boolean(error?.conflict)} ms=${Math.round(performance.now() - __diagSaveT0)}`);
       } finally {
         this.setSaving(false);
+      }
+      if (anySaved) {
+        console.debug(`[PB][diag] save_end ok=true anySaved=${anySaved} ms=${Math.round(performance.now() - __diagSaveT0)}`);
       }
     }
 

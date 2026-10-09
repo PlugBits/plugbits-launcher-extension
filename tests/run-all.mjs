@@ -41,6 +41,9 @@ const SUITES = [
   ['newrow-defaults-unit', './newrow-defaults-unit.test.mjs'],
   ['paste-verify-unit', './paste-verify-unit.test.mjs'],
   ['overlay-quality-unit', './overlay-quality-unit.test.mjs'],
+  // sendRuntimeMessageWithTimeout(3.2.0診断版b): SWが応答しないchrome.runtime.sendMessage
+  // でもクライアント側の時間切れで必ず解決することの単体テスト
+  ['metadata-bundle-timeout-unit', './metadata-bundle-timeout-unit.test.mjs'],
   ['query-split-unit', './query-split-unit.test.mjs'],
   ['view-column-sync-unit', './view-column-sync-unit.test.mjs'],
   // ビュー列連動 E2E（chrome-stub + fake bridge + chrome.runtime.sendMessage
