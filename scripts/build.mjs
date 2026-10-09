@@ -111,6 +111,22 @@ function patchManifest() {
   );
 }
 
+// PB_DIAG=1 のときだけ [PB][diag] の診断ログを既定でオンにする(診断版の zip 用)。
+// ストア提出用は PB_DIAG を付けずにビルドする(既定オフ)。
+function applyDiagFlag() {
+  const contentPath = path.join(distDir, 'content.js');
+  const code = fs.readFileSync(contentPath, 'utf8');
+  const off = 'static DIAG_LOG = false;';
+  const count = code.split(off).length - 1;
+  if (count !== 1) {
+    throw new Error(`[build] DIAG_LOG marker expected once in content.js, found ${count}`);
+  }
+  if (process.env.PB_DIAG === '1') {
+    fs.writeFileSync(contentPath, code.replace(off, 'static DIAG_LOG = true;'), 'utf8');
+    console.log('[build] PB_DIAG=1: [PB][diag] logs ON');
+  }
+}
+
 function scanDangerousCode(dir) {
   const files = fs.readdirSync(dir);
 
@@ -147,6 +163,7 @@ generateContent(); // keeps src/content.js in sync even if a part file was edite
 resetDir(distDir);
 copyRecursive(srcDir, distDir);
 patchManifest();
+applyDiagFlag();
 scanDangerousCode(distDir);
 
 console.log('[OK] build completed');
