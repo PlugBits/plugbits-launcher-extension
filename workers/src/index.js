@@ -471,17 +471,20 @@ async function sendLicenseEmail(env, { email, licenseKey, lifetime = false, prod
     body: JSON.stringify({
       sender: {
         email: env.BREVO_SENDER_EMAIL || 'no-reply@plugbits.app',
-        name: env.BREVO_SENDER_NAME || 'PlugBits Launcher'
+        // 送信者名の secret は Launcher 用なので、kintone プラグインは PlugBits 名義にする
+        name: isKintone ? 'PlugBits' : (env.BREVO_SENDER_NAME || 'PlugBits Launcher')
       },
       to: [{ email }],
       subject: `${meta.name} ライセンスキーのご案内`,
-      htmlContent: `
+      htmlContent: isKintone
+        ? kintoneLicenseEmailHtml(meta, licenseKey)
+        : `
         <h2>${meta.name} へようこそ！</h2>
-        <p>ご購入ありがとうございます。下記のライセンスキーを${isKintone ? 'プラグインの設定画面の「ライセンス」欄' : '拡張機能の設定画面'}に入力してください。</p>
+        <p>ご購入ありがとうございます。下記のライセンスキーを拡張機能の設定画面に入力してください。</p>
         <p style="font-family:monospace;font-size:18px;background:#f3f4f6;padding:12px;border-radius:6px;">
           ${licenseKey}
         </p>
-        <p>設定画面: ${isKintone ? 'kintoneアプリの設定 → プラグイン → 対象プラグイン → 「ライセンス」欄' : 'Chrome 拡張アイコン → 設定 → Pro ライセンス'}</p>
+        <p>設定画面: Chrome 拡張アイコン → 設定 → Pro ライセンス</p>
         <hr/>
         <p style="font-size:12px;color:#6b7280;">
           ${lifetime
@@ -491,6 +494,29 @@ async function sendLicenseEmail(env, { email, licenseKey, lifetime = false, prod
       `
     })
   });
+}
+
+// kintone プラグイン(買い切り・会社ドメイン単位)のキーのメール本文
+function kintoneLicenseEmailHtml(meta, licenseKey) {
+  return `
+        <h2>${meta.name}(kintone プラグイン)をご購入いただきありがとうございます</h2>
+        <p>ライセンスキーは次のとおりです。</p>
+        <p style="font-family:monospace;font-size:18px;background:#f3f4f6;padding:12px;border-radius:6px;">
+          ${licenseKey}
+        </p>
+        <p><b>キーの入れ方</b></p>
+        <ol>
+          <li>kintone でプラグインを入れたアプリを開き、アプリの設定 → プラグイン から ${meta.name} の設定画面を開きます。</li>
+          <li>いちばん上の「ライセンス」欄にキーを貼り付けて「確認」を押します。「有効です」と出れば完了です。</li>
+          <li>設定を保存し、アプリを更新してください。</li>
+        </ol>
+        <p>このキーは会社の kintone ドメイン(例: example.cybozu.com)単位で 1 つです。最初に確認したドメインに結び付き、同じドメインのほかのアプリにも同じキーを入れられます。</p>
+        <hr/>
+        <p style="font-size:12px;color:#6b7280;">
+          買い切りのライセンスです。<br/>
+          ドメインの移行やご不明な点は <a href="mailto:support@plugbits.app">support@plugbits.app</a> までご連絡ください。
+        </p>
+      `;
 }
 
 // ── Stripe Portalセッション URL 生成 ───────────────────────────────────────
