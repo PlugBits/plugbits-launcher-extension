@@ -10,6 +10,10 @@
     // localStorage.setItem('pbDiag', '1') すれば出る(切るときは removeItem)。
     static DIAG_LOG = false;
 
+    // 「このビューの列」疑似プリセットのID。presets[]には保存しない
+    // セッション限定の選択状態(viewDefaultPseudoActive)を表す印として使う
+    static VIEW_DEFAULT_PRESET_ID = '__view__';
+
     diagLog(line) {
       if (!ExcelOverlayController.DIAG_LOG) {
         try {
@@ -19,6 +23,37 @@
         }
       }
       console.log(line);
+    }
+
+    // [PB][diag] overlay-open 計測: open() 起動からの各段(ステージ)境界を
+    // ms付きで記録する。既存のdiagLog(デフォルトOFF、localStorage.pbDiag=1で
+    // 有効化)にそのまま乗せるので、通常運用では一切出力されない。
+    beginOverlayOpenDiag() {
+      this.__diagOpenT0 = performance.now();
+      this.__diagOpenStages = [];
+    }
+
+    markOverlayOpenStage(name) {
+      if (!this.__diagOpenT0) return;
+      const now = performance.now();
+      const prevT = this.__diagOpenStages.length
+        ? this.__diagOpenStages[this.__diagOpenStages.length - 1].t
+        : this.__diagOpenT0;
+      const sinceStart = Math.round(now - this.__diagOpenT0);
+      const sincePrev = Math.round(now - prevT);
+      this.__diagOpenStages.push({ name, t: now });
+      this.diagLog(`[PB][diag] overlay-open stage=${name} +${sinceStart}ms (${sincePrev}ms)`);
+    }
+
+    finishOverlayOpenDiag() {
+      if (!this.__diagOpenT0) return;
+      const total = Math.round(performance.now() - this.__diagOpenT0);
+      const summary = this.__diagOpenStages
+        .map((s) => `${s.name}=+${Math.round(s.t - this.__diagOpenT0)}ms`)
+        .join(' ');
+      this.diagLog(`[PB][diag] overlay-open summary total=${total}ms ${summary}`);
+      this.__diagOpenT0 = null;
+      this.__diagOpenStages = [];
     }
 
     constructor(postFn) {
@@ -59,6 +94,11 @@
       this.layoutPresetDuplicateButton = null;
       this.layoutPresetRenameButton = null;
       this.layoutPresetDeleteButton = null;
+      this.layoutPresetSetViewDefaultButton = null;
+      // ビューの既定プリセット選択(per-view default)。'__view__'(このビューの列)
+      // が選ばれている間だけ true になるセッション限定フラグ。presets[]には
+      // 保存しない(getActiveLayoutPreset が代わりに疑似プリセットを返す)
+      this.viewDefaultPseudoActive = false;
       // 列表示・再計算・ルックアップ再取得（低頻度の管理系）をまとめる
       // 「ツール ▾」メニュー。開閉の作法はレイアウトプリセットメニューに揃える
       this.toolMenuWrap = null;
@@ -248,7 +288,9 @@
 
     async open(options = {}) {
       if (this.isOpen) return;
+      this.beginOverlayOpenDiag();
       await this.loadOverlayMode();
+      this.markOverlayOpenStage('load_overlay_mode');
       const requestedRuntimeMode = String(options?.runtimeMode || OVERLAY_RUNTIME_MODE_LIST);
       this.runtimeMode = requestedRuntimeMode === OVERLAY_RUNTIME_MODE_DETAIL_SINGLE_ROW
         ? OVERLAY_RUNTIME_MODE_DETAIL_SINGLE_ROW
@@ -275,27 +317,38 @@
         this.requireReload = false;
         this._savedInSession = false;
         this.viewOnlyNoticeShown = false;
+        // ビューの既定プリセット選択はセッション限定。毎回の起動で一旦外し、
+        // fetchData() 内の applyViewDefaultPresetSelection() に再判定させる
+        this.viewDefaultPseudoActive = false;
         await this.ensureStyles();
+        this.markOverlayOpenStage('ensure_styles');
         await this.loadLanguage();
+        this.markOverlayOpenStage('load_language');
         this.attachUiLanguageListener();
         this.mountShell();
+        this.markOverlayOpenStage('mount_shell');
         this.showLoading(resolveText(this.language, 'loading'), { skeleton: true });
         await this.fetchData();
+        this.markOverlayOpenStage('fetch_data');
         this.hideLoading();
         if (!this.fields.length) {
           this.renderNoFields();
+          this.finishOverlayOpenDiag();
           return;
         }
         console.log('[overlay] render grid start');
         this.renderGrid();
+        this.markOverlayOpenStage('render_grid');
         this.attachEvents();
         this.updateDirtyBadge();
         this.updateStats();
         this.focusFirstCell();
+        this.finishOverlayOpenDiag();
       } catch (error) {
         this.hideLoading();
         this.notify(resolveText(this.language, 'loadFailed'));
         console.error('[kintone-excel-overlay] failed to open overlay', error);
+        this.finishOverlayOpenDiag();
         this.close(true);
       }
     }
@@ -527,6 +580,17 @@
         this.closeLayoutPresetMenu();
         void this.handleLayoutPresetRename();
       });
+      // このビュー(viewKey)の既定プリセットを設定するメニュー項目。
+      // viewKeyがid:<viewId>形式で特定できない時はupdateLayoutPresetToolbarUiが
+      // disabled+titleで理由を示す
+      const presetSetViewDefaultBtn = document.createElement('button');
+      presetSetViewDefaultBtn.type = 'button';
+      presetSetViewDefaultBtn.className = 'pb-overlay__preset-menu-item';
+      presetSetViewDefaultBtn.setAttribute('role', 'menuitem');
+      presetSetViewDefaultBtn.addEventListener('click', () => {
+        this.closeLayoutPresetMenu();
+        void this.handleLayoutPresetSetViewDefault();
+      });
       const presetDeleteBtn = document.createElement('button');
       presetDeleteBtn.type = 'button';
       presetDeleteBtn.className = 'pb-overlay__preset-menu-item pb-overlay__preset-menu-item--danger';
@@ -538,6 +602,7 @@
       presetMenu.appendChild(presetSaveBtn);
       presetMenu.appendChild(presetDuplicateBtn);
       presetMenu.appendChild(presetRenameBtn);
+      presetMenu.appendChild(presetSetViewDefaultBtn);
       presetMenu.appendChild(presetDeleteBtn);
       presetWrap.appendChild(presetLabel);
       presetWrap.appendChild(presetSelect);
@@ -552,6 +617,7 @@
       this.layoutPresetDuplicateButton = presetDuplicateBtn;
       this.layoutPresetRenameButton = presetRenameBtn;
       this.layoutPresetDeleteButton = presetDeleteBtn;
+      this.layoutPresetSetViewDefaultButton = presetSetViewDefaultBtn;
       this.updateLayoutPresetToolbarUi();
 
       const dirty = document.createElement('span');
@@ -1294,8 +1360,28 @@
         appId: String(this.appId || ''),
         activePresetId: hasActive ? active : presets[0].id,
         presets,
+        viewDefaults: this.normalizeViewDefaultsMap(rawState?.viewDefaults, presets),
         updatedAt: Number(rawState?.updatedAt || Date.now())
       };
+    }
+
+    // ビューごとの既定プリセット選択(viewKey -> presetId | '__view__')を正規化する。
+    // キーは id:<viewId> 形式のみ保持(ビューIDはリネームに影響されないため)。
+    // 値は実在するプリセットID、または疑似プリセットID('__view__')のみ許可し、
+    // 削除済みプリセットを指すエントリ(presetが無くなった場合)は落とす
+    normalizeViewDefaultsMap(rawViewDefaults, presets) {
+      const presetIds = new Set((Array.isArray(presets) ? presets : []).map((preset) => String(preset?.id || '')));
+      const raw = rawViewDefaults && typeof rawViewDefaults === 'object' ? rawViewDefaults : {};
+      const result = {};
+      Object.entries(raw).forEach(([viewKeyRaw, presetIdRaw]) => {
+        const viewKey = String(viewKeyRaw || '').trim();
+        if (!viewKey.startsWith('id:')) return;
+        const presetId = String(presetIdRaw || '').trim();
+        if (!presetId) return;
+        if (presetId !== ExcelOverlayController.VIEW_DEFAULT_PRESET_ID && !presetIds.has(presetId)) return;
+        result[viewKey] = presetId;
+      });
+      return result;
     }
 
     async ensureOverlayLayoutState(baseFields) {
@@ -1320,6 +1406,7 @@
             legacyPref,
             this.isDetailSingleRowMode() ? 'detail' : 'list'
           )],
+          viewDefaults: {},
           updatedAt: Date.now()
         };
         await this.markLegacyLayoutMigrated(key);
@@ -1347,9 +1434,111 @@
     getActiveLayoutPreset() {
       const state = this.overlayLayoutState;
       if (!state || !Array.isArray(state.presets) || !state.presets.length) return null;
+      if (this.viewDefaultPseudoActive && this.isListMode()) {
+        return this.buildViewDefaultPseudoPreset(state);
+      }
       const activeId = String(state.activePresetId || '').trim();
       const selected = state.presets.find((preset) => preset.id === activeId);
       return selected || state.presets[0];
+    }
+
+    // 「このビューの列」疑似プリセット(presets[]には保存しない、セッション限定の
+    // 選択)。columnsCustomized=false で返すことで resolveViewSyncColumns が
+    // (アクティブな実プリセットのcolumnsCustomizedに関係なく)必ずビューの
+    // 表示列・順序を採用する。幅はベース(1番目=default)プリセットの保存値を
+    // 流用し、ビュー列連動が効かない場合(viewFieldOrderTrusted=false等)の
+    // フォールバックもベースプリセットの列構成にする
+    buildViewDefaultPseudoPreset(state) {
+      const base = Array.isArray(state?.presets) ? state.presets[0] : null;
+      return {
+        id: ExcelOverlayController.VIEW_DEFAULT_PRESET_ID,
+        name: resolveText(this.language, 'layoutPresetViewColumns'),
+        scope: 'list',
+        visibleColumns: Array.isArray(base?.visibleColumns) ? base.visibleColumns.slice() : [],
+        columnOrder: Array.isArray(base?.columnOrder) ? base.columnOrder.slice() : [],
+        columnWidths: base?.columnWidths && typeof base.columnWidths === 'object' ? { ...base.columnWidths } : {},
+        pinnedColumns: Array.isArray(base?.pinnedColumns) ? base.pinnedColumns.slice() : [],
+        columnsCustomized: false
+      };
+    }
+
+    // このビュー(viewKey)に対して「既定にする」操作が可能かどうか。
+    // viewKey が id:<viewId> 形式(リネームに影響されないビューID経由で
+    // 解決できた場合)のときだけ許可する。name:/param:/default はビューを
+    // 一意に特定できないため既定として保存しない
+    isViewKeyEligibleForViewDefault() {
+      return this.isListMode() && /^id:/.test(String(this.viewKey || ''));
+    }
+
+    // open()の初回ロード時にのみ呼ばれる。viewKey確定後・列解決前に、この
+    // アプリのビュー別既定(viewDefaults)を見てactivePresetId/疑似プリセット
+    // 選択を決める。マッピングが1件も無いアプリでは何もしない(3.2.0までの
+    // 挙動と完全互換)
+    applyViewDefaultPresetSelection() {
+      this.viewDefaultPseudoActive = false;
+      const state = this.overlayLayoutState;
+      if (!state) return;
+      const viewDefaults = state.viewDefaults && typeof state.viewDefaults === 'object' ? state.viewDefaults : {};
+      if (!Object.keys(viewDefaults).length) return;
+      const viewKey = String(this.viewKey || '').trim();
+      const viewColumnsAvailable = Boolean(this.viewFieldOrderTrusted) && Array.isArray(this.viewFieldOrder) && this.viewFieldOrder.length > 0;
+      const mapped = String(viewDefaults[viewKey] || '').trim();
+      if (mapped) {
+        if (mapped === ExcelOverlayController.VIEW_DEFAULT_PRESET_ID) {
+          if (viewColumnsAvailable) this.viewDefaultPseudoActive = true;
+          return;
+        }
+        const exists = Array.isArray(state.presets) && state.presets.some((preset) => String(preset?.id || '') === mapped);
+        if (exists) state.activePresetId = mapped;
+        return;
+      }
+      // このビュー専用の既定は無いが、このアプリには他ビューの既定が
+      // 1件以上ある -> 「このビューの列」を選ぶ(ビュー列が信頼できる時のみ)
+      if (viewColumnsAvailable) this.viewDefaultPseudoActive = true;
+    }
+
+    // 編集操作(列ダイアログ保存・幅変更の永続化・プリセットメニューの保存/
+    // 複製/名前変更)の入口。「このビューの列」疑似プリセットが選択中なら、
+    // 現在表示中の列構成(=ビューに連動した列)を内容として新しい実プリセットを
+    // 作成・アクティブ化してから返す(duplicateと同じ考え方)。これにより
+    // 疑似プリセットへの書き込みが別の実プリセットへ黒子的に紛れ込む/消える
+    // ことを防ぐ。疑似プリセットが選択中でなければ通常のgetActiveLayoutPresetと同じ
+    async ensureEditablePreset() {
+      if (!this.viewDefaultPseudoActive || !this.overlayLayoutState) {
+        return this.getActiveLayoutPreset();
+      }
+      const state = this.overlayLayoutState;
+      if (!Array.isArray(state.presets)) state.presets = [];
+      const firstPreset = state.presets[0] || null;
+      const layout = this.captureCurrentLayout();
+      if (state.presets.length >= MAX_LAYOUT_PRESET_COUNT) {
+        const referencedIds = new Set(Object.values(state.viewDefaults || {}));
+        const removableIndex = state.presets.findIndex((preset) => {
+          const id = String(preset?.id || '');
+          return id !== 'default' && id !== String(state.activePresetId || '') && !referencedIds.has(id);
+        });
+        if (removableIndex !== -1) state.presets.splice(removableIndex, 1);
+      }
+      const preset = {
+        id: this.createLayoutPresetId(),
+        name: this.sanitizeLayoutPresetName(this.viewName, resolveText(this.language, 'layoutPresetNewName')),
+        scope: 'list',
+        visibleColumns: Array.isArray(layout?.visibleColumns) ? layout.visibleColumns.slice() : [],
+        columnOrder: Array.isArray(layout?.columnOrder) ? layout.columnOrder.slice() : [],
+        columnWidths: {
+          ...(firstPreset?.columnWidths && typeof firstPreset.columnWidths === 'object' ? firstPreset.columnWidths : {}),
+          ...(layout?.columnWidths || {})
+        },
+        pinnedColumns: Array.isArray(firstPreset?.pinnedColumns) ? firstPreset.pinnedColumns.slice() : [],
+        // 疑似プリセットから生まれた実プリセットはdefaultではないので常にカスタマイズ
+        // 済み扱い(ビュー列連動はdefaultプリセットにのみ適用する)
+        columnsCustomized: true
+      };
+      state.presets.push(preset);
+      state.activePresetId = preset.id;
+      this.viewDefaultPseudoActive = false;
+      await this.persistOverlayLayoutState();
+      return preset;
     }
 
     logOverlayPresetDebug(activePreset, resolvedFields, reason = '') {
@@ -1562,18 +1751,49 @@
         const select = this.layoutPresetSelect;
         const activeId = String(this.overlayLayoutState.activePresetId || '').trim();
         const prev = String(select.value || '');
+        // 「このビューの列」疑似プリセットの選択肢は、ビュー列が信頼できる
+        // ソースから非空で得られている時だけ先頭に出す(resolveViewSyncColumns
+        // と同じ条件)
+        const showViewOption = Boolean(this.viewFieldOrderTrusted)
+          && Array.isArray(this.viewFieldOrder) && this.viewFieldOrder.length > 0;
+        const viewKey = String(this.viewKey || '').trim();
+        const viewDefaults = this.overlayLayoutState.viewDefaults && typeof this.overlayLayoutState.viewDefaults === 'object'
+          ? this.overlayLayoutState.viewDefaults
+          : {};
+        const defaultForThisView = viewKey.startsWith('id:') ? String(viewDefaults[viewKey] || '').trim() : '';
+        const mark = `${resolveText(this.language, 'layoutPresetViewDefaultMark')} `;
         select.textContent = '';
+        if (showViewOption) {
+          const viewOption = document.createElement('option');
+          viewOption.value = ExcelOverlayController.VIEW_DEFAULT_PRESET_ID;
+          const label = resolveText(this.language, 'layoutPresetViewColumns');
+          viewOption.textContent = defaultForThisView === ExcelOverlayController.VIEW_DEFAULT_PRESET_ID ? `${mark}${label}` : label;
+          select.appendChild(viewOption);
+        }
         this.overlayLayoutState.presets.forEach((preset) => {
           const option = document.createElement('option');
           option.value = String(preset.id || '');
-          option.textContent = String(preset.name || resolveText(this.language, 'layoutPresetDefault'));
+          const label = String(preset.name || resolveText(this.language, 'layoutPresetDefault'));
+          option.textContent = defaultForThisView === String(preset.id || '') ? `${mark}${label}` : label;
           select.appendChild(option);
         });
-        const resolved = this.overlayLayoutState.presets.some((preset) => String(preset.id) === activeId)
-          ? activeId
-          : (this.overlayLayoutState.presets[0]?.id || '');
+        let resolved;
+        if (this.viewDefaultPseudoActive && showViewOption) {
+          resolved = ExcelOverlayController.VIEW_DEFAULT_PRESET_ID;
+        } else {
+          resolved = this.overlayLayoutState.presets.some((preset) => String(preset.id) === activeId)
+            ? activeId
+            : (this.overlayLayoutState.presets[0]?.id || '');
+        }
         select.value = resolved || prev || '';
-        select.disabled = this.saving || this.overlayLayoutState.presets.length <= 1;
+        select.disabled = this.saving || (this.overlayLayoutState.presets.length <= 1 && !showViewOption);
+      }
+      if (this.layoutPresetSetViewDefaultButton) {
+        const btn = this.layoutPresetSetViewDefaultButton;
+        btn.textContent = resolveText(this.language, 'layoutPresetSetViewDefault');
+        const eligible = this.isViewKeyEligibleForViewDefault();
+        btn.disabled = this.saving || !eligible;
+        btn.title = eligible ? '' : resolveText(this.language, 'layoutPresetViewDefaultUnavailable');
       }
       if (this.layoutPresetMenuButton) {
         this.layoutPresetMenuButton.title = resolveText(this.language, 'layoutPresetMenu');
@@ -1601,7 +1821,16 @@
     async handleLayoutPresetSelectChanged() {
       if (!this.layoutPresetSelect || !this.overlayLayoutState) return;
       const nextId = String(this.layoutPresetSelect.value || '').trim();
-      if (!nextId || nextId === String(this.overlayLayoutState.activePresetId || '')) return;
+      if (!nextId) return;
+      if (nextId === ExcelOverlayController.VIEW_DEFAULT_PRESET_ID) {
+        if (this.viewDefaultPseudoActive) return;
+        this.viewDefaultPseudoActive = true;
+        console.debug('[PB] OVERLAY rerender reason=preset_switch_view_default');
+        await this.applyListFieldScope(this.listFieldScopeMode);
+        return;
+      }
+      if (nextId === String(this.overlayLayoutState.activePresetId || '') && !this.viewDefaultPseudoActive) return;
+      this.viewDefaultPseudoActive = false;
       this.overlayLayoutState.activePresetId = nextId;
       await this.persistOverlayLayoutState();
       console.debug('[PB] OVERLAY rerender reason=preset_switch');
@@ -1617,7 +1846,7 @@
 
     async handleLayoutPresetSave() {
       if (!this.overlayLayoutState) return;
-      const active = this.getActiveLayoutPreset();
+      const active = await this.ensureEditablePreset();
       if (!active) return;
       const layout = this.captureCurrentLayout();
       active.visibleColumns = layout.visibleColumns;
@@ -1633,7 +1862,7 @@
     async handleLayoutPresetDuplicate() {
       if (!this.overlayLayoutState) return;
       if (this.overlayLayoutState.presets.length >= MAX_LAYOUT_PRESET_COUNT) return;
-      const active = this.getActiveLayoutPreset();
+      const active = await this.ensureEditablePreset();
       if (!active) return;
       const nextName = window.prompt(
         resolveText(this.language, 'layoutPresetPromptName'),
@@ -1664,7 +1893,7 @@
 
     async handleLayoutPresetRename() {
       if (!this.overlayLayoutState) return;
-      const active = this.getActiveLayoutPreset();
+      const active = await this.ensureEditablePreset();
       if (!active) return;
       const nextName = window.prompt(resolveText(this.language, 'layoutPresetPromptName'), active.name || '');
       if (nextName === null) return;
@@ -1683,9 +1912,38 @@
         return;
       }
       this.overlayLayoutState.activePresetId = String(this.overlayLayoutState.presets[0].id || '');
+      // 削除したプリセットを指していたビュー別既定(viewDefaults)は落とす
+      if (this.overlayLayoutState.viewDefaults && typeof this.overlayLayoutState.viewDefaults === 'object') {
+        Object.keys(this.overlayLayoutState.viewDefaults).forEach((viewKey) => {
+          if (this.overlayLayoutState.viewDefaults[viewKey] === activeId) {
+            delete this.overlayLayoutState.viewDefaults[viewKey];
+          }
+        });
+      }
       await this.persistOverlayLayoutState();
       await this.applyListFieldScope(this.listFieldScopeMode);
       this.notify(resolveText(this.language, 'toastLayoutPresetDeleted'));
+    }
+
+    // 現在選択中のプリセット(実プリセットのID、または疑似プリセット
+    // '__view__')を、このビュー(viewKey)を開いた時の既定として保存する。
+    // viewKeyが id:<viewId> 形式で特定できない(isViewKeyEligibleForViewDefault
+    // がfalse)場合は何もしない(ボタン自体もその時はdisabled)
+    async handleLayoutPresetSetViewDefault() {
+      if (!this.overlayLayoutState || !this.isViewKeyEligibleForViewDefault()) return;
+      const viewKey = String(this.viewKey || '').trim();
+      if (!viewKey.startsWith('id:')) return;
+      const selection = this.viewDefaultPseudoActive
+        ? ExcelOverlayController.VIEW_DEFAULT_PRESET_ID
+        : String(this.overlayLayoutState.activePresetId || '').trim();
+      if (!selection) return;
+      if (!this.overlayLayoutState.viewDefaults || typeof this.overlayLayoutState.viewDefaults !== 'object') {
+        this.overlayLayoutState.viewDefaults = {};
+      }
+      this.overlayLayoutState.viewDefaults[viewKey] = selection;
+      await this.persistOverlayLayoutState();
+      this.updateLayoutPresetToolbarUi();
+      this.notify(resolveText(this.language, 'layoutPresetViewDefaultSaved'));
     }
 
     getRecordFetchFieldCodes() {
@@ -1727,6 +1985,9 @@
       const baseCodes = baseFields.map((field) => String(field.code || '').trim()).filter(Boolean);
       this.defaultFieldCodes = baseCodes.slice();
       await this.ensureOverlayLayoutState(baseFields);
+      if (options.resolveViewDefault) {
+        this.applyViewDefaultPresetSelection();
+      }
       const activePreset = this.getActiveLayoutPreset();
       this.fields = this.buildVisibleFieldsFromPreset(baseFields, activePreset);
       this.logOverlayPresetDebug(activePreset, this.fields, 'apply_list_scope');
@@ -2221,6 +2482,7 @@
 
     async fetchData() {
       const contextRes = await this.postFn('EXCEL_GET_APP_CONTEXT');
+      this.markOverlayOpenStage('app_context');
       if (!contextRes?.ok || !contextRes.appId) {
         throw new Error('Context unavailable');
       }
@@ -2241,6 +2503,7 @@
         forceViewsRefresh: this.isListMode(),
         forceFieldsRefresh: true
       });
+      this.markOverlayOpenStage('metadata_bundle');
       const metadataBundle = metadataRes?.bundle && typeof metadataRes.bundle === 'object'
         ? metadataRes.bundle
         : null;
@@ -2328,6 +2591,7 @@
       this.query = this.baseQuery;
       this.pageOffset = 0;
       this.totalCount = 0;
+      this.markOverlayOpenStage('view_info');
 
       let candidateFields = [];
       const cachedFieldsMeta = Array.isArray(metadataBundle?.fields?.normalized)
@@ -2422,10 +2686,14 @@
           .filter(Boolean)
       ));
       this.syncPermissionServiceFields();
+      this.markOverlayOpenStage('fields_meta');
 
       if (this.isListMode()) {
         this.listAllFields = this.fieldsMeta.map((field) => ({ ...field }));
-        await this.applyListFieldScope(this.listFieldScopeMode, { skipRender: true });
+        // resolveViewDefault: true は open() の初回ロード時にのみ渡す。
+        // この後の視点(ビュー)の既定プリセット選択(viewDefaults)の反映は
+        // ここで一度だけ行い、プリセット切替等での再呼び出しには影響させない
+        await this.applyListFieldScope(this.listFieldScopeMode, { skipRender: true, resolveViewDefault: true });
       } else {
         this.listAllFields = [];
         const baseFields = this.fieldsMeta.map((field) => ({ ...field }));
@@ -2434,9 +2702,12 @@
         const activePreset = this.getActiveLayoutPreset();
         this.fields = this.buildVisibleFieldsFromPreset(baseFields, activePreset);
       }
+      this.markOverlayOpenStage('layout_state');
       this.rebuildFieldMaps();
       await this.loadPermissions();
+      this.markOverlayOpenStage('permissions');
       await this.loadCurrentPageRecords();
+      this.markOverlayOpenStage('records');
       if (this.isDetailSingleRowMode()) {
         if (!this.rows.length) {
           throw new Error('Detail record not found');
@@ -4199,7 +4470,7 @@
       const baseFields = this.getListScopeBaseFields(this.listFieldScopeMode);
       const sourceFields = baseFields.length ? baseFields : this.fieldsMeta;
       await this.ensureOverlayLayoutState(sourceFields);
-      const active = this.getActiveLayoutPreset();
+      const active = await this.ensureEditablePreset();
       if (!active) return;
       const baseCodes = this.getBaseFieldCodeList(sourceFields);
       const allowed = new Set(baseCodes);
@@ -4710,7 +4981,7 @@
       }
       try {
         const visibleCodes = Array.from(this.columnVisibilityDraft);
-        const activePreset = this.getActiveLayoutPreset();
+        const activePreset = await this.ensureEditablePreset();
         if (activePreset) {
           const orderedVisible = this.columnOrderDraft.filter((code) => visibleCodes.includes(code));
           activePreset.visibleColumns = visibleCodes.slice();

@@ -3531,3 +3531,129 @@
 .pb-newrec__lookup-reload:hover {
   color: #1d4ed8;
 }
+
+/* ── Quick New: 項目を選ぶ（専用設定の案内ラベル・起動ボタン） ── */
+.pb-newrec__fields-custom-label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.pb-newrec__fields-pick-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* ── Quick New: 項目選択パネル（プリセット行と本体の間にインラインで表示） ── */
+.pb-newrec__fields-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
+  flex-shrink: 0;
+  max-height: 60vh;
+  overflow: hidden;
+}
+
+.pb-newrec__fields-picker-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #374151;
+  flex-shrink: 0;
+}
+
+.pb-newrec__fields-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  max-height: 280px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px;
+}
+
+.pb-newrec__fields-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 4px;
+}
+
+.pb-newrec__fields-picker-row:hover {
+  background: #f3f4f6;
+}
+
+.pb-newrec__fields-picker-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.pb-newrec__fields-picker-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: #111827;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pb-newrec__fields-picker-move {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.pb-newrec__fields-picker-move-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+  color: #6b7280;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pb-newrec__fields-picker-move-btn:hover:not(:disabled) {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.pb-newrec__fields-picker-move-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pb-newrec__fields-picker-notice {
+  color: #dc2626;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.pb-newrec__fields-picker-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.pb-newrec__fields-picker-reset {
+  margin-right: auto;
+}

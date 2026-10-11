@@ -1536,6 +1536,24 @@
       layoutPresetNewName: "新しいレイアウト",
       layoutPresetDeleteConfirm: "このレイアウトを削除しますか？",
       layoutPresetPromptName: "レイアウト名を入力してください",
+      // 3.3.0 ビューごとの既定の列
+      layoutPresetViewColumns: "（このビューの列）",
+      layoutPresetSetViewDefault: "このビューの既定にする",
+      layoutPresetViewDefaultMark: "★",
+      layoutPresetViewDefaultSaved: "このビューを開いたときの既定にしました",
+      layoutPresetViewDefaultUnavailable: "ビューを特定できないため、既定にできません",
+      // 3.3.0 Quick New の項目選び
+      qnrFieldsPick: "項目を選ぶ",
+      qnrFieldsPickTitle: "Quick New に出す項目",
+      qnrFieldsSave: "保存",
+      qnrFieldsCancel: "キャンセル",
+      qnrFieldsReset: "Excel Overlay の列に戻す",
+      qnrFieldsCustomLabel: "Quick New 用（Excel Overlay とは別）",
+      qnrFieldsMoveUp: "上へ",
+      qnrFieldsMoveDown: "下へ",
+      qnrFieldsNoneSelected: "1つ以上選んでください",
+      // 3.3.0 利用者アンケート
+      surveyPaletteRow: "3つだけ教えてください（アンケート・1分）",
       btnFieldsViewOnly: "ビュー",
       btnFieldsAll: "全項目",
       titleFieldsViewOnly: "現在のビュー項目のみ表示",
@@ -1852,6 +1870,24 @@
       layoutPresetNewName: "New layout",
       layoutPresetDeleteConfirm: "Delete this layout?",
       layoutPresetPromptName: "Enter layout name",
+      // 3.3.0 per-view default columns
+      layoutPresetViewColumns: "(This view's columns)",
+      layoutPresetSetViewDefault: "Make default for this view",
+      layoutPresetViewDefaultMark: "★",
+      layoutPresetViewDefaultSaved: "Set as the default when this view opens",
+      layoutPresetViewDefaultUnavailable: "Can't identify this view, so it can't be set as default",
+      // 3.3.0 Quick New field picker
+      qnrFieldsPick: "Choose fields",
+      qnrFieldsPickTitle: "Fields shown in Quick New",
+      qnrFieldsSave: "Save",
+      qnrFieldsCancel: "Cancel",
+      qnrFieldsReset: "Use Excel Overlay columns",
+      qnrFieldsCustomLabel: "Quick New only (separate from Excel Overlay)",
+      qnrFieldsMoveUp: "Up",
+      qnrFieldsMoveDown: "Down",
+      qnrFieldsNoneSelected: "Choose at least one field",
+      // 3.3.0 user survey
+      surveyPaletteRow: "3 quick questions (survey, 1 min)",
       btnFieldsViewOnly: "View",
       btnFieldsAll: "All fields",
       titleFieldsViewOnly: "Show only fields in current view",
@@ -2035,6 +2071,10 @@
 
   const COLUMN_PREF_STORAGE_KEY = 'kfavExcelColumns';
   const OVERLAY_LAYOUT_PRESETS_KEY = 'kfavOverlayLayoutPresets';
+  // 3.3.0: Quick New 専用の項目(host::appId → { fields: [code...], updatedAt })。無いアプリは従来どおり Overlay のプリセット
+  const QUICK_NEW_FIELDS_KEY = 'kfavQuickNewFields';
+  // 3.3.0: 利用者アンケート A の状態(service_worker が更新時に書く)
+  const SURVEY_A_KEY = 'kfavSurveyA';
   const OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY = 'kfavOverlayLayoutLegacyMigrated';
   const SUBTABLE_WIDTH_PREF_STORAGE_KEY = 'kfavExcelSubtableWidths';
   const EXCEL_OVERLAY_MODE_STANDARD = 'standard';

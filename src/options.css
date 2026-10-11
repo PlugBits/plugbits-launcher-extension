@@ -1686,3 +1686,56 @@ ul {
   background: var(--pb-surface);
   font-variant-numeric: tabular-nums;
 }
+
+/* 利用者アンケート A のバナー（ページ最上部・常時表示） */
+.survey-a-band {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--pb-accent-soft);
+  border-bottom: 1px solid var(--pb-accent-border);
+  color: var(--pb-text);
+  font-size: 13px;
+}
+
+.survey-a-band[hidden] {
+  display: none;
+}
+
+.survey-a-band__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.survey-a-band__answer {
+  appearance: none;
+  border: 1px solid var(--pb-accent-border);
+  border-radius: 8px;
+  padding: 6px 14px;
+  background: var(--pb-accent);
+  color: var(--pb-on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.survey-a-band__answer:hover {
+  background: var(--pb-accent-strong);
+}
+
+.survey-a-band__close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--pb-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.survey-a-band__close:hover {
+  color: var(--pb-text);
+}

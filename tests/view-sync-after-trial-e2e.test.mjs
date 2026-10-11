@@ -41,10 +41,12 @@ import { extractFunctionSource } from './helpers/extract-src.mjs';
 function extractOptionsOverlayLayoutNormalizers(text) {
   const presetSrc = extractFunctionSource(text, /\nfunction normalizeOverlayLayoutPreset\(rawPreset, index = 0\)\s\{/);
   const presetsSrc = extractFunctionSource(text, /\nfunction normalizeOverlayLayoutPresets\(raw\)\s\{/);
+  const viewDefaultsSrc = extractFunctionSource(text, /\nfunction normalizeOverlayViewDefaults\(raw, presets\)\s\{/);
   // eslint-disable-next-line no-eval
   return eval(`(function () {
     ${presetSrc}
     ${presetsSrc}
+    ${viewDefaultsSrc}
     return { normalizeOverlayLayoutPreset, normalizeOverlayLayoutPresets };
   })()`);
 }

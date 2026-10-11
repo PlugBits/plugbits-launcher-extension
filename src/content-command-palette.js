@@ -226,6 +226,58 @@
   }
   void cpSyncLanguage();
 
+  // 3.3.0: 利用者アンケート A ── 検索語が空のときだけ一覧の最後に1行出す。
+  // 対象/期間は service_worker が書く kfavSurveyA（eligibleAt から7日間・doneなら出さない）。
+  const SURVEY_A_PALETTE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+  const SURVEY_A_FORM_BASE_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdVQboVqyIhnqa_EgwthxUzkOmbLgld9tg2c04AcxUVBR8ROw/viewform';
+  let cpSurveyState = null;
+  let cpSurveyRowVisible = false;
+  async function cpSyncSurveyState() {
+    try {
+      const stored = await chrome.storage.local.get(SURVEY_A_KEY);
+      const state = stored?.[SURVEY_A_KEY];
+      cpSurveyState = state && typeof state === 'object' ? state : null;
+      const now = Date.now();
+      cpSurveyRowVisible = Boolean(
+        cpSurveyState &&
+        !cpSurveyState.done &&
+        typeof cpSurveyState.eligibleAt === 'number' &&
+        now >= cpSurveyState.eligibleAt &&
+        now < cpSurveyState.eligibleAt + SURVEY_A_PALETTE_WINDOW_MS
+      );
+    } catch (_) {
+      cpSurveyState = null;
+      cpSurveyRowVisible = false;
+    }
+  }
+  function cpBuildSurveyFormUrl(language) {
+    const version = chrome.runtime.getManifest?.()?.version || '';
+    const lang = language === 'en' ? 'en' : 'ja';
+    return `${SURVEY_A_FORM_BASE_URL}?usp=pp_url&entry.1032001690=${encodeURIComponent(version)}&entry.1077819437=${lang}`;
+  }
+  async function cpMarkSurveyDone() {
+    try {
+      const next = { ...(cpSurveyState || {}), done: true };
+      cpSurveyState = next;
+      cpSurveyRowVisible = false;
+      await chrome.storage.local.set({ [SURVEY_A_KEY]: next });
+    } catch (_) { /* ignore */ }
+  }
+  function cpBuildSurveyRowCommand() {
+    return {
+      id: 'survey-a',
+      labelKey: 'surveyPaletteRow',
+      icon: '✎',
+      badge: '',
+      keywords: [],
+      action() {
+        window.open(cpBuildSurveyFormUrl(cpLanguage), '_blank', 'noopener,noreferrer');
+        void cpMarkSurveyDone();
+      }
+    };
+  }
+  void cpSyncSurveyState();
+
   const CP_COMMANDS = [
     // ─ App search ─
     {
@@ -993,7 +1045,7 @@
         if (cpItemLabel(cmd).toLowerCase().includes(q)) return true;
         return (cmd.keywords || []).some((k) => k.toLowerCase().includes(q));
       });
-      this.filtered = cmds;
+      this.filtered = (!q && cpSurveyRowVisible) ? [...cmds, cpBuildSurveyRowCommand()] : cmds;
       this.activeIndex = 0;
       this.renderFooter();
       this.renderList();
@@ -1166,6 +1218,7 @@
 
     async open() {
       await cpSyncLanguage();
+      await cpSyncSurveyState();
       if (!this.backdropEl) this.mount();
       await Promise.all([this.fetchContext(), this.fetchShortcutCommands()]);
       this.backdropEl.style.display = 'flex';

@@ -1540,6 +1540,24 @@
       layoutPresetNewName: "新しいレイアウト",
       layoutPresetDeleteConfirm: "このレイアウトを削除しますか？",
       layoutPresetPromptName: "レイアウト名を入力してください",
+      // 3.3.0 ビューごとの既定の列
+      layoutPresetViewColumns: "（このビューの列）",
+      layoutPresetSetViewDefault: "このビューの既定にする",
+      layoutPresetViewDefaultMark: "★",
+      layoutPresetViewDefaultSaved: "このビューを開いたときの既定にしました",
+      layoutPresetViewDefaultUnavailable: "ビューを特定できないため、既定にできません",
+      // 3.3.0 Quick New の項目選び
+      qnrFieldsPick: "項目を選ぶ",
+      qnrFieldsPickTitle: "Quick New に出す項目",
+      qnrFieldsSave: "保存",
+      qnrFieldsCancel: "キャンセル",
+      qnrFieldsReset: "Excel Overlay の列に戻す",
+      qnrFieldsCustomLabel: "Quick New 用（Excel Overlay とは別）",
+      qnrFieldsMoveUp: "上へ",
+      qnrFieldsMoveDown: "下へ",
+      qnrFieldsNoneSelected: "1つ以上選んでください",
+      // 3.3.0 利用者アンケート
+      surveyPaletteRow: "3つだけ教えてください（アンケート・1分）",
       btnFieldsViewOnly: "ビュー",
       btnFieldsAll: "全項目",
       titleFieldsViewOnly: "現在のビュー項目のみ表示",
@@ -1856,6 +1874,24 @@
       layoutPresetNewName: "New layout",
       layoutPresetDeleteConfirm: "Delete this layout?",
       layoutPresetPromptName: "Enter layout name",
+      // 3.3.0 per-view default columns
+      layoutPresetViewColumns: "(This view's columns)",
+      layoutPresetSetViewDefault: "Make default for this view",
+      layoutPresetViewDefaultMark: "★",
+      layoutPresetViewDefaultSaved: "Set as the default when this view opens",
+      layoutPresetViewDefaultUnavailable: "Can't identify this view, so it can't be set as default",
+      // 3.3.0 Quick New field picker
+      qnrFieldsPick: "Choose fields",
+      qnrFieldsPickTitle: "Fields shown in Quick New",
+      qnrFieldsSave: "Save",
+      qnrFieldsCancel: "Cancel",
+      qnrFieldsReset: "Use Excel Overlay columns",
+      qnrFieldsCustomLabel: "Quick New only (separate from Excel Overlay)",
+      qnrFieldsMoveUp: "Up",
+      qnrFieldsMoveDown: "Down",
+      qnrFieldsNoneSelected: "Choose at least one field",
+      // 3.3.0 user survey
+      surveyPaletteRow: "3 quick questions (survey, 1 min)",
       btnFieldsViewOnly: "View",
       btnFieldsAll: "All fields",
       titleFieldsViewOnly: "Show only fields in current view",
@@ -2039,6 +2075,10 @@
 
   const COLUMN_PREF_STORAGE_KEY = 'kfavExcelColumns';
   const OVERLAY_LAYOUT_PRESETS_KEY = 'kfavOverlayLayoutPresets';
+  // 3.3.0: Quick New 専用の項目(host::appId → { fields: [code...], updatedAt })。無いアプリは従来どおり Overlay のプリセット
+  const QUICK_NEW_FIELDS_KEY = 'kfavQuickNewFields';
+  // 3.3.0: 利用者アンケート A の状態(service_worker が更新時に書く)
+  const SURVEY_A_KEY = 'kfavSurveyA';
   const OVERLAY_LAYOUT_LEGACY_MIGRATED_KEY = 'kfavOverlayLayoutLegacyMigrated';
   const SUBTABLE_WIDTH_PREF_STORAGE_KEY = 'kfavExcelSubtableWidths';
   const EXCEL_OVERLAY_MODE_STANDARD = 'standard';
@@ -2187,6 +2227,10 @@
     // localStorage.setItem('pbDiag', '1') すれば出る(切るときは removeItem)。
     static DIAG_LOG = false;
 
+    // 「このビューの列」疑似プリセットのID。presets[]には保存しない
+    // セッション限定の選択状態(viewDefaultPseudoActive)を表す印として使う
+    static VIEW_DEFAULT_PRESET_ID = '__view__';
+
     diagLog(line) {
       if (!ExcelOverlayController.DIAG_LOG) {
         try {
@@ -2196,6 +2240,37 @@
         }
       }
       console.log(line);
+    }
+
+    // [PB][diag] overlay-open 計測: open() 起動からの各段(ステージ)境界を
+    // ms付きで記録する。既存のdiagLog(デフォルトOFF、localStorage.pbDiag=1で
+    // 有効化)にそのまま乗せるので、通常運用では一切出力されない。
+    beginOverlayOpenDiag() {
+      this.__diagOpenT0 = performance.now();
+      this.__diagOpenStages = [];
+    }
+
+    markOverlayOpenStage(name) {
+      if (!this.__diagOpenT0) return;
+      const now = performance.now();
+      const prevT = this.__diagOpenStages.length
+        ? this.__diagOpenStages[this.__diagOpenStages.length - 1].t
+        : this.__diagOpenT0;
+      const sinceStart = Math.round(now - this.__diagOpenT0);
+      const sincePrev = Math.round(now - prevT);
+      this.__diagOpenStages.push({ name, t: now });
+      this.diagLog(`[PB][diag] overlay-open stage=${name} +${sinceStart}ms (${sincePrev}ms)`);
+    }
+
+    finishOverlayOpenDiag() {
+      if (!this.__diagOpenT0) return;
+      const total = Math.round(performance.now() - this.__diagOpenT0);
+      const summary = this.__diagOpenStages
+        .map((s) => `${s.name}=+${Math.round(s.t - this.__diagOpenT0)}ms`)
+        .join(' ');
+      this.diagLog(`[PB][diag] overlay-open summary total=${total}ms ${summary}`);
+      this.__diagOpenT0 = null;
+      this.__diagOpenStages = [];
     }
 
     constructor(postFn) {
@@ -2236,6 +2311,11 @@
       this.layoutPresetDuplicateButton = null;
       this.layoutPresetRenameButton = null;
       this.layoutPresetDeleteButton = null;
+      this.layoutPresetSetViewDefaultButton = null;
+      // ビューの既定プリセット選択(per-view default)。'__view__'(このビューの列)
+      // が選ばれている間だけ true になるセッション限定フラグ。presets[]には
+      // 保存しない(getActiveLayoutPreset が代わりに疑似プリセットを返す)
+      this.viewDefaultPseudoActive = false;
       // 列表示・再計算・ルックアップ再取得（低頻度の管理系）をまとめる
       // 「ツール ▾」メニュー。開閉の作法はレイアウトプリセットメニューに揃える
       this.toolMenuWrap = null;
@@ -2425,7 +2505,9 @@
 
     async open(options = {}) {
       if (this.isOpen) return;
+      this.beginOverlayOpenDiag();
       await this.loadOverlayMode();
+      this.markOverlayOpenStage('load_overlay_mode');
       const requestedRuntimeMode = String(options?.runtimeMode || OVERLAY_RUNTIME_MODE_LIST);
       this.runtimeMode = requestedRuntimeMode === OVERLAY_RUNTIME_MODE_DETAIL_SINGLE_ROW
         ? OVERLAY_RUNTIME_MODE_DETAIL_SINGLE_ROW
@@ -2452,27 +2534,38 @@
         this.requireReload = false;
         this._savedInSession = false;
         this.viewOnlyNoticeShown = false;
+        // ビューの既定プリセット選択はセッション限定。毎回の起動で一旦外し、
+        // fetchData() 内の applyViewDefaultPresetSelection() に再判定させる
+        this.viewDefaultPseudoActive = false;
         await this.ensureStyles();
+        this.markOverlayOpenStage('ensure_styles');
         await this.loadLanguage();
+        this.markOverlayOpenStage('load_language');
         this.attachUiLanguageListener();
         this.mountShell();
+        this.markOverlayOpenStage('mount_shell');
         this.showLoading(resolveText(this.language, 'loading'), { skeleton: true });
         await this.fetchData();
+        this.markOverlayOpenStage('fetch_data');
         this.hideLoading();
         if (!this.fields.length) {
           this.renderNoFields();
+          this.finishOverlayOpenDiag();
           return;
         }
         console.log('[overlay] render grid start');
         this.renderGrid();
+        this.markOverlayOpenStage('render_grid');
         this.attachEvents();
         this.updateDirtyBadge();
         this.updateStats();
         this.focusFirstCell();
+        this.finishOverlayOpenDiag();
       } catch (error) {
         this.hideLoading();
         this.notify(resolveText(this.language, 'loadFailed'));
         console.error('[kintone-excel-overlay] failed to open overlay', error);
+        this.finishOverlayOpenDiag();
         this.close(true);
       }
     }
@@ -2704,6 +2797,17 @@
         this.closeLayoutPresetMenu();
         void this.handleLayoutPresetRename();
       });
+      // このビュー(viewKey)の既定プリセットを設定するメニュー項目。
+      // viewKeyがid:<viewId>形式で特定できない時はupdateLayoutPresetToolbarUiが
+      // disabled+titleで理由を示す
+      const presetSetViewDefaultBtn = document.createElement('button');
+      presetSetViewDefaultBtn.type = 'button';
+      presetSetViewDefaultBtn.className = 'pb-overlay__preset-menu-item';
+      presetSetViewDefaultBtn.setAttribute('role', 'menuitem');
+      presetSetViewDefaultBtn.addEventListener('click', () => {
+        this.closeLayoutPresetMenu();
+        void this.handleLayoutPresetSetViewDefault();
+      });
       const presetDeleteBtn = document.createElement('button');
       presetDeleteBtn.type = 'button';
       presetDeleteBtn.className = 'pb-overlay__preset-menu-item pb-overlay__preset-menu-item--danger';
@@ -2715,6 +2819,7 @@
       presetMenu.appendChild(presetSaveBtn);
       presetMenu.appendChild(presetDuplicateBtn);
       presetMenu.appendChild(presetRenameBtn);
+      presetMenu.appendChild(presetSetViewDefaultBtn);
       presetMenu.appendChild(presetDeleteBtn);
       presetWrap.appendChild(presetLabel);
       presetWrap.appendChild(presetSelect);
@@ -2729,6 +2834,7 @@
       this.layoutPresetDuplicateButton = presetDuplicateBtn;
       this.layoutPresetRenameButton = presetRenameBtn;
       this.layoutPresetDeleteButton = presetDeleteBtn;
+      this.layoutPresetSetViewDefaultButton = presetSetViewDefaultBtn;
       this.updateLayoutPresetToolbarUi();
 
       const dirty = document.createElement('span');
@@ -3471,8 +3577,28 @@
         appId: String(this.appId || ''),
         activePresetId: hasActive ? active : presets[0].id,
         presets,
+        viewDefaults: this.normalizeViewDefaultsMap(rawState?.viewDefaults, presets),
         updatedAt: Number(rawState?.updatedAt || Date.now())
       };
+    }
+
+    // ビューごとの既定プリセット選択(viewKey -> presetId | '__view__')を正規化する。
+    // キーは id:<viewId> 形式のみ保持(ビューIDはリネームに影響されないため)。
+    // 値は実在するプリセットID、または疑似プリセットID('__view__')のみ許可し、
+    // 削除済みプリセットを指すエントリ(presetが無くなった場合)は落とす
+    normalizeViewDefaultsMap(rawViewDefaults, presets) {
+      const presetIds = new Set((Array.isArray(presets) ? presets : []).map((preset) => String(preset?.id || '')));
+      const raw = rawViewDefaults && typeof rawViewDefaults === 'object' ? rawViewDefaults : {};
+      const result = {};
+      Object.entries(raw).forEach(([viewKeyRaw, presetIdRaw]) => {
+        const viewKey = String(viewKeyRaw || '').trim();
+        if (!viewKey.startsWith('id:')) return;
+        const presetId = String(presetIdRaw || '').trim();
+        if (!presetId) return;
+        if (presetId !== ExcelOverlayController.VIEW_DEFAULT_PRESET_ID && !presetIds.has(presetId)) return;
+        result[viewKey] = presetId;
+      });
+      return result;
     }
 
     async ensureOverlayLayoutState(baseFields) {
@@ -3497,6 +3623,7 @@
             legacyPref,
             this.isDetailSingleRowMode() ? 'detail' : 'list'
           )],
+          viewDefaults: {},
           updatedAt: Date.now()
         };
         await this.markLegacyLayoutMigrated(key);
@@ -3524,9 +3651,111 @@
     getActiveLayoutPreset() {
       const state = this.overlayLayoutState;
       if (!state || !Array.isArray(state.presets) || !state.presets.length) return null;
+      if (this.viewDefaultPseudoActive && this.isListMode()) {
+        return this.buildViewDefaultPseudoPreset(state);
+      }
       const activeId = String(state.activePresetId || '').trim();
       const selected = state.presets.find((preset) => preset.id === activeId);
       return selected || state.presets[0];
+    }
+
+    // 「このビューの列」疑似プリセット(presets[]には保存しない、セッション限定の
+    // 選択)。columnsCustomized=false で返すことで resolveViewSyncColumns が
+    // (アクティブな実プリセットのcolumnsCustomizedに関係なく)必ずビューの
+    // 表示列・順序を採用する。幅はベース(1番目=default)プリセットの保存値を
+    // 流用し、ビュー列連動が効かない場合(viewFieldOrderTrusted=false等)の
+    // フォールバックもベースプリセットの列構成にする
+    buildViewDefaultPseudoPreset(state) {
+      const base = Array.isArray(state?.presets) ? state.presets[0] : null;
+      return {
+        id: ExcelOverlayController.VIEW_DEFAULT_PRESET_ID,
+        name: resolveText(this.language, 'layoutPresetViewColumns'),
+        scope: 'list',
+        visibleColumns: Array.isArray(base?.visibleColumns) ? base.visibleColumns.slice() : [],
+        columnOrder: Array.isArray(base?.columnOrder) ? base.columnOrder.slice() : [],
+        columnWidths: base?.columnWidths && typeof base.columnWidths === 'object' ? { ...base.columnWidths } : {},
+        pinnedColumns: Array.isArray(base?.pinnedColumns) ? base.pinnedColumns.slice() : [],
+        columnsCustomized: false
+      };
+    }
+
+    // このビュー(viewKey)に対して「既定にする」操作が可能かどうか。
+    // viewKey が id:<viewId> 形式(リネームに影響されないビューID経由で
+    // 解決できた場合)のときだけ許可する。name:/param:/default はビューを
+    // 一意に特定できないため既定として保存しない
+    isViewKeyEligibleForViewDefault() {
+      return this.isListMode() && /^id:/.test(String(this.viewKey || ''));
+    }
+
+    // open()の初回ロード時にのみ呼ばれる。viewKey確定後・列解決前に、この
+    // アプリのビュー別既定(viewDefaults)を見てactivePresetId/疑似プリセット
+    // 選択を決める。マッピングが1件も無いアプリでは何もしない(3.2.0までの
+    // 挙動と完全互換)
+    applyViewDefaultPresetSelection() {
+      this.viewDefaultPseudoActive = false;
+      const state = this.overlayLayoutState;
+      if (!state) return;
+      const viewDefaults = state.viewDefaults && typeof state.viewDefaults === 'object' ? state.viewDefaults : {};
+      if (!Object.keys(viewDefaults).length) return;
+      const viewKey = String(this.viewKey || '').trim();
+      const viewColumnsAvailable = Boolean(this.viewFieldOrderTrusted) && Array.isArray(this.viewFieldOrder) && this.viewFieldOrder.length > 0;
+      const mapped = String(viewDefaults[viewKey] || '').trim();
+      if (mapped) {
+        if (mapped === ExcelOverlayController.VIEW_DEFAULT_PRESET_ID) {
+          if (viewColumnsAvailable) this.viewDefaultPseudoActive = true;
+          return;
+        }
+        const exists = Array.isArray(state.presets) && state.presets.some((preset) => String(preset?.id || '') === mapped);
+        if (exists) state.activePresetId = mapped;
+        return;
+      }
+      // このビュー専用の既定は無いが、このアプリには他ビューの既定が
+      // 1件以上ある -> 「このビューの列」を選ぶ(ビュー列が信頼できる時のみ)
+      if (viewColumnsAvailable) this.viewDefaultPseudoActive = true;
+    }
+
+    // 編集操作(列ダイアログ保存・幅変更の永続化・プリセットメニューの保存/
+    // 複製/名前変更)の入口。「このビューの列」疑似プリセットが選択中なら、
+    // 現在表示中の列構成(=ビューに連動した列)を内容として新しい実プリセットを
+    // 作成・アクティブ化してから返す(duplicateと同じ考え方)。これにより
+    // 疑似プリセットへの書き込みが別の実プリセットへ黒子的に紛れ込む/消える
+    // ことを防ぐ。疑似プリセットが選択中でなければ通常のgetActiveLayoutPresetと同じ
+    async ensureEditablePreset() {
+      if (!this.viewDefaultPseudoActive || !this.overlayLayoutState) {
+        return this.getActiveLayoutPreset();
+      }
+      const state = this.overlayLayoutState;
+      if (!Array.isArray(state.presets)) state.presets = [];
+      const firstPreset = state.presets[0] || null;
+      const layout = this.captureCurrentLayout();
+      if (state.presets.length >= MAX_LAYOUT_PRESET_COUNT) {
+        const referencedIds = new Set(Object.values(state.viewDefaults || {}));
+        const removableIndex = state.presets.findIndex((preset) => {
+          const id = String(preset?.id || '');
+          return id !== 'default' && id !== String(state.activePresetId || '') && !referencedIds.has(id);
+        });
+        if (removableIndex !== -1) state.presets.splice(removableIndex, 1);
+      }
+      const preset = {
+        id: this.createLayoutPresetId(),
+        name: this.sanitizeLayoutPresetName(this.viewName, resolveText(this.language, 'layoutPresetNewName')),
+        scope: 'list',
+        visibleColumns: Array.isArray(layout?.visibleColumns) ? layout.visibleColumns.slice() : [],
+        columnOrder: Array.isArray(layout?.columnOrder) ? layout.columnOrder.slice() : [],
+        columnWidths: {
+          ...(firstPreset?.columnWidths && typeof firstPreset.columnWidths === 'object' ? firstPreset.columnWidths : {}),
+          ...(layout?.columnWidths || {})
+        },
+        pinnedColumns: Array.isArray(firstPreset?.pinnedColumns) ? firstPreset.pinnedColumns.slice() : [],
+        // 疑似プリセットから生まれた実プリセットはdefaultではないので常にカスタマイズ
+        // 済み扱い(ビュー列連動はdefaultプリセットにのみ適用する)
+        columnsCustomized: true
+      };
+      state.presets.push(preset);
+      state.activePresetId = preset.id;
+      this.viewDefaultPseudoActive = false;
+      await this.persistOverlayLayoutState();
+      return preset;
     }
 
     logOverlayPresetDebug(activePreset, resolvedFields, reason = '') {
@@ -3739,18 +3968,49 @@
         const select = this.layoutPresetSelect;
         const activeId = String(this.overlayLayoutState.activePresetId || '').trim();
         const prev = String(select.value || '');
+        // 「このビューの列」疑似プリセットの選択肢は、ビュー列が信頼できる
+        // ソースから非空で得られている時だけ先頭に出す(resolveViewSyncColumns
+        // と同じ条件)
+        const showViewOption = Boolean(this.viewFieldOrderTrusted)
+          && Array.isArray(this.viewFieldOrder) && this.viewFieldOrder.length > 0;
+        const viewKey = String(this.viewKey || '').trim();
+        const viewDefaults = this.overlayLayoutState.viewDefaults && typeof this.overlayLayoutState.viewDefaults === 'object'
+          ? this.overlayLayoutState.viewDefaults
+          : {};
+        const defaultForThisView = viewKey.startsWith('id:') ? String(viewDefaults[viewKey] || '').trim() : '';
+        const mark = `${resolveText(this.language, 'layoutPresetViewDefaultMark')} `;
         select.textContent = '';
+        if (showViewOption) {
+          const viewOption = document.createElement('option');
+          viewOption.value = ExcelOverlayController.VIEW_DEFAULT_PRESET_ID;
+          const label = resolveText(this.language, 'layoutPresetViewColumns');
+          viewOption.textContent = defaultForThisView === ExcelOverlayController.VIEW_DEFAULT_PRESET_ID ? `${mark}${label}` : label;
+          select.appendChild(viewOption);
+        }
         this.overlayLayoutState.presets.forEach((preset) => {
           const option = document.createElement('option');
           option.value = String(preset.id || '');
-          option.textContent = String(preset.name || resolveText(this.language, 'layoutPresetDefault'));
+          const label = String(preset.name || resolveText(this.language, 'layoutPresetDefault'));
+          option.textContent = defaultForThisView === String(preset.id || '') ? `${mark}${label}` : label;
           select.appendChild(option);
         });
-        const resolved = this.overlayLayoutState.presets.some((preset) => String(preset.id) === activeId)
-          ? activeId
-          : (this.overlayLayoutState.presets[0]?.id || '');
+        let resolved;
+        if (this.viewDefaultPseudoActive && showViewOption) {
+          resolved = ExcelOverlayController.VIEW_DEFAULT_PRESET_ID;
+        } else {
+          resolved = this.overlayLayoutState.presets.some((preset) => String(preset.id) === activeId)
+            ? activeId
+            : (this.overlayLayoutState.presets[0]?.id || '');
+        }
         select.value = resolved || prev || '';
-        select.disabled = this.saving || this.overlayLayoutState.presets.length <= 1;
+        select.disabled = this.saving || (this.overlayLayoutState.presets.length <= 1 && !showViewOption);
+      }
+      if (this.layoutPresetSetViewDefaultButton) {
+        const btn = this.layoutPresetSetViewDefaultButton;
+        btn.textContent = resolveText(this.language, 'layoutPresetSetViewDefault');
+        const eligible = this.isViewKeyEligibleForViewDefault();
+        btn.disabled = this.saving || !eligible;
+        btn.title = eligible ? '' : resolveText(this.language, 'layoutPresetViewDefaultUnavailable');
       }
       if (this.layoutPresetMenuButton) {
         this.layoutPresetMenuButton.title = resolveText(this.language, 'layoutPresetMenu');
@@ -3778,7 +4038,16 @@
     async handleLayoutPresetSelectChanged() {
       if (!this.layoutPresetSelect || !this.overlayLayoutState) return;
       const nextId = String(this.layoutPresetSelect.value || '').trim();
-      if (!nextId || nextId === String(this.overlayLayoutState.activePresetId || '')) return;
+      if (!nextId) return;
+      if (nextId === ExcelOverlayController.VIEW_DEFAULT_PRESET_ID) {
+        if (this.viewDefaultPseudoActive) return;
+        this.viewDefaultPseudoActive = true;
+        console.debug('[PB] OVERLAY rerender reason=preset_switch_view_default');
+        await this.applyListFieldScope(this.listFieldScopeMode);
+        return;
+      }
+      if (nextId === String(this.overlayLayoutState.activePresetId || '') && !this.viewDefaultPseudoActive) return;
+      this.viewDefaultPseudoActive = false;
       this.overlayLayoutState.activePresetId = nextId;
       await this.persistOverlayLayoutState();
       console.debug('[PB] OVERLAY rerender reason=preset_switch');
@@ -3794,7 +4063,7 @@
 
     async handleLayoutPresetSave() {
       if (!this.overlayLayoutState) return;
-      const active = this.getActiveLayoutPreset();
+      const active = await this.ensureEditablePreset();
       if (!active) return;
       const layout = this.captureCurrentLayout();
       active.visibleColumns = layout.visibleColumns;
@@ -3810,7 +4079,7 @@
     async handleLayoutPresetDuplicate() {
       if (!this.overlayLayoutState) return;
       if (this.overlayLayoutState.presets.length >= MAX_LAYOUT_PRESET_COUNT) return;
-      const active = this.getActiveLayoutPreset();
+      const active = await this.ensureEditablePreset();
       if (!active) return;
       const nextName = window.prompt(
         resolveText(this.language, 'layoutPresetPromptName'),
@@ -3841,7 +4110,7 @@
 
     async handleLayoutPresetRename() {
       if (!this.overlayLayoutState) return;
-      const active = this.getActiveLayoutPreset();
+      const active = await this.ensureEditablePreset();
       if (!active) return;
       const nextName = window.prompt(resolveText(this.language, 'layoutPresetPromptName'), active.name || '');
       if (nextName === null) return;
@@ -3860,9 +4129,38 @@
         return;
       }
       this.overlayLayoutState.activePresetId = String(this.overlayLayoutState.presets[0].id || '');
+      // 削除したプリセットを指していたビュー別既定(viewDefaults)は落とす
+      if (this.overlayLayoutState.viewDefaults && typeof this.overlayLayoutState.viewDefaults === 'object') {
+        Object.keys(this.overlayLayoutState.viewDefaults).forEach((viewKey) => {
+          if (this.overlayLayoutState.viewDefaults[viewKey] === activeId) {
+            delete this.overlayLayoutState.viewDefaults[viewKey];
+          }
+        });
+      }
       await this.persistOverlayLayoutState();
       await this.applyListFieldScope(this.listFieldScopeMode);
       this.notify(resolveText(this.language, 'toastLayoutPresetDeleted'));
+    }
+
+    // 現在選択中のプリセット(実プリセットのID、または疑似プリセット
+    // '__view__')を、このビュー(viewKey)を開いた時の既定として保存する。
+    // viewKeyが id:<viewId> 形式で特定できない(isViewKeyEligibleForViewDefault
+    // がfalse)場合は何もしない(ボタン自体もその時はdisabled)
+    async handleLayoutPresetSetViewDefault() {
+      if (!this.overlayLayoutState || !this.isViewKeyEligibleForViewDefault()) return;
+      const viewKey = String(this.viewKey || '').trim();
+      if (!viewKey.startsWith('id:')) return;
+      const selection = this.viewDefaultPseudoActive
+        ? ExcelOverlayController.VIEW_DEFAULT_PRESET_ID
+        : String(this.overlayLayoutState.activePresetId || '').trim();
+      if (!selection) return;
+      if (!this.overlayLayoutState.viewDefaults || typeof this.overlayLayoutState.viewDefaults !== 'object') {
+        this.overlayLayoutState.viewDefaults = {};
+      }
+      this.overlayLayoutState.viewDefaults[viewKey] = selection;
+      await this.persistOverlayLayoutState();
+      this.updateLayoutPresetToolbarUi();
+      this.notify(resolveText(this.language, 'layoutPresetViewDefaultSaved'));
     }
 
     getRecordFetchFieldCodes() {
@@ -3904,6 +4202,9 @@
       const baseCodes = baseFields.map((field) => String(field.code || '').trim()).filter(Boolean);
       this.defaultFieldCodes = baseCodes.slice();
       await this.ensureOverlayLayoutState(baseFields);
+      if (options.resolveViewDefault) {
+        this.applyViewDefaultPresetSelection();
+      }
       const activePreset = this.getActiveLayoutPreset();
       this.fields = this.buildVisibleFieldsFromPreset(baseFields, activePreset);
       this.logOverlayPresetDebug(activePreset, this.fields, 'apply_list_scope');
@@ -4398,6 +4699,7 @@
 
     async fetchData() {
       const contextRes = await this.postFn('EXCEL_GET_APP_CONTEXT');
+      this.markOverlayOpenStage('app_context');
       if (!contextRes?.ok || !contextRes.appId) {
         throw new Error('Context unavailable');
       }
@@ -4418,6 +4720,7 @@
         forceViewsRefresh: this.isListMode(),
         forceFieldsRefresh: true
       });
+      this.markOverlayOpenStage('metadata_bundle');
       const metadataBundle = metadataRes?.bundle && typeof metadataRes.bundle === 'object'
         ? metadataRes.bundle
         : null;
@@ -4505,6 +4808,7 @@
       this.query = this.baseQuery;
       this.pageOffset = 0;
       this.totalCount = 0;
+      this.markOverlayOpenStage('view_info');
 
       let candidateFields = [];
       const cachedFieldsMeta = Array.isArray(metadataBundle?.fields?.normalized)
@@ -4599,10 +4903,14 @@
           .filter(Boolean)
       ));
       this.syncPermissionServiceFields();
+      this.markOverlayOpenStage('fields_meta');
 
       if (this.isListMode()) {
         this.listAllFields = this.fieldsMeta.map((field) => ({ ...field }));
-        await this.applyListFieldScope(this.listFieldScopeMode, { skipRender: true });
+        // resolveViewDefault: true は open() の初回ロード時にのみ渡す。
+        // この後の視点(ビュー)の既定プリセット選択(viewDefaults)の反映は
+        // ここで一度だけ行い、プリセット切替等での再呼び出しには影響させない
+        await this.applyListFieldScope(this.listFieldScopeMode, { skipRender: true, resolveViewDefault: true });
       } else {
         this.listAllFields = [];
         const baseFields = this.fieldsMeta.map((field) => ({ ...field }));
@@ -4611,9 +4919,12 @@
         const activePreset = this.getActiveLayoutPreset();
         this.fields = this.buildVisibleFieldsFromPreset(baseFields, activePreset);
       }
+      this.markOverlayOpenStage('layout_state');
       this.rebuildFieldMaps();
       await this.loadPermissions();
+      this.markOverlayOpenStage('permissions');
       await this.loadCurrentPageRecords();
+      this.markOverlayOpenStage('records');
       if (this.isDetailSingleRowMode()) {
         if (!this.rows.length) {
           throw new Error('Detail record not found');
@@ -6376,7 +6687,7 @@
       const baseFields = this.getListScopeBaseFields(this.listFieldScopeMode);
       const sourceFields = baseFields.length ? baseFields : this.fieldsMeta;
       await this.ensureOverlayLayoutState(sourceFields);
-      const active = this.getActiveLayoutPreset();
+      const active = await this.ensureEditablePreset();
       if (!active) return;
       const baseCodes = this.getBaseFieldCodeList(sourceFields);
       const allowed = new Set(baseCodes);
@@ -6887,7 +7198,7 @@
       }
       try {
         const visibleCodes = Array.from(this.columnVisibilityDraft);
-        const activePreset = this.getActiveLayoutPreset();
+        const activePreset = await this.ensureEditablePreset();
         if (activePreset) {
           const orderedVisible = this.columnOrderDraft.filter((code) => visibleCodes.includes(code));
           activePreset.visibleColumns = visibleCodes.slice();
@@ -13124,6 +13435,58 @@
   }
   void cpSyncLanguage();
 
+  // 3.3.0: 利用者アンケート A ── 検索語が空のときだけ一覧の最後に1行出す。
+  // 対象/期間は service_worker が書く kfavSurveyA（eligibleAt から7日間・doneなら出さない）。
+  const SURVEY_A_PALETTE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+  const SURVEY_A_FORM_BASE_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdVQboVqyIhnqa_EgwthxUzkOmbLgld9tg2c04AcxUVBR8ROw/viewform';
+  let cpSurveyState = null;
+  let cpSurveyRowVisible = false;
+  async function cpSyncSurveyState() {
+    try {
+      const stored = await chrome.storage.local.get(SURVEY_A_KEY);
+      const state = stored?.[SURVEY_A_KEY];
+      cpSurveyState = state && typeof state === 'object' ? state : null;
+      const now = Date.now();
+      cpSurveyRowVisible = Boolean(
+        cpSurveyState &&
+        !cpSurveyState.done &&
+        typeof cpSurveyState.eligibleAt === 'number' &&
+        now >= cpSurveyState.eligibleAt &&
+        now < cpSurveyState.eligibleAt + SURVEY_A_PALETTE_WINDOW_MS
+      );
+    } catch (_) {
+      cpSurveyState = null;
+      cpSurveyRowVisible = false;
+    }
+  }
+  function cpBuildSurveyFormUrl(language) {
+    const version = chrome.runtime.getManifest?.()?.version || '';
+    const lang = language === 'en' ? 'en' : 'ja';
+    return `${SURVEY_A_FORM_BASE_URL}?usp=pp_url&entry.1032001690=${encodeURIComponent(version)}&entry.1077819437=${lang}`;
+  }
+  async function cpMarkSurveyDone() {
+    try {
+      const next = { ...(cpSurveyState || {}), done: true };
+      cpSurveyState = next;
+      cpSurveyRowVisible = false;
+      await chrome.storage.local.set({ [SURVEY_A_KEY]: next });
+    } catch (_) { /* ignore */ }
+  }
+  function cpBuildSurveyRowCommand() {
+    return {
+      id: 'survey-a',
+      labelKey: 'surveyPaletteRow',
+      icon: '✎',
+      badge: '',
+      keywords: [],
+      action() {
+        window.open(cpBuildSurveyFormUrl(cpLanguage), '_blank', 'noopener,noreferrer');
+        void cpMarkSurveyDone();
+      }
+    };
+  }
+  void cpSyncSurveyState();
+
   const CP_COMMANDS = [
     // ─ App search ─
     {
@@ -13891,7 +14254,7 @@
         if (cpItemLabel(cmd).toLowerCase().includes(q)) return true;
         return (cmd.keywords || []).some((k) => k.toLowerCase().includes(q));
       });
-      this.filtered = cmds;
+      this.filtered = (!q && cpSurveyRowVisible) ? [...cmds, cpBuildSurveyRowCommand()] : cmds;
       this.activeIndex = 0;
       this.renderFooter();
       this.renderList();
@@ -14064,6 +14427,7 @@
 
     async open() {
       await cpSyncLanguage();
+      await cpSyncSurveyState();
       if (!this.backdropEl) this.mount();
       await Promise.all([this.fetchContext(), this.fetchShortcutCommands()]);
       this.backdropEl.style.display = 'flex';
@@ -14876,6 +15240,41 @@
     });
   }
 
+  // Quick New専用の項目設定（QUICK_NEW_FIELDS_KEY, host::appId単位）。
+  // 未設定のアプリは常に null を返し、呼び出し側は Excel Overlay の
+  // レイアウトプリセットにフォールバックする。
+  async function qnrLoadFieldsConfig(appKey) {
+    try {
+      const stored = await chrome.storage.local.get(QUICK_NEW_FIELDS_KEY);
+      const map = stored?.[QUICK_NEW_FIELDS_KEY];
+      const entry = map && typeof map === 'object' ? map[appKey] : null;
+      if (entry && Array.isArray(entry.fields) && entry.fields.length) {
+        return { fields: entry.fields.slice(), updatedAt: entry.updatedAt };
+      }
+    } catch (_err) { /* ストレージ失敗時は未設定として扱う */ }
+    return null;
+  }
+
+  async function qnrSaveFieldsConfig(appKey, fields) {
+    try {
+      const stored = await chrome.storage.local.get(QUICK_NEW_FIELDS_KEY);
+      const prevMap = stored?.[QUICK_NEW_FIELDS_KEY];
+      const map = (prevMap && typeof prevMap === 'object') ? { ...prevMap } : {};
+      map[appKey] = { fields: Array.isArray(fields) ? fields.slice() : [], updatedAt: Date.now() };
+      await chrome.storage.local.set({ [QUICK_NEW_FIELDS_KEY]: map });
+    } catch (_err) { /* noop */ }
+  }
+
+  async function qnrRemoveFieldsConfig(appKey) {
+    try {
+      const stored = await chrome.storage.local.get(QUICK_NEW_FIELDS_KEY);
+      const prevMap = stored?.[QUICK_NEW_FIELDS_KEY];
+      const map = (prevMap && typeof prevMap === 'object') ? { ...prevMap } : {};
+      delete map[appKey];
+      await chrome.storage.local.set({ [QUICK_NEW_FIELDS_KEY]: map });
+    } catch (_err) { /* noop */ }
+  }
+
   // 数値フィールド向けの入力正規化。全角数字・全角記号を半角化し、
   // 桁区切りカンマを除去する（"１，０００" → "1000"）。
   function qnrNormalizeNumberText(raw) {
@@ -15103,9 +15502,12 @@
           activePresetId = 'default';
         }
 
+        // Quick New専用の項目設定（あれば Excel Overlay のプリセットより優先する）
+        const quickNewConfig = await qnrLoadFieldsConfig(appKey);
+
         // Rebuild panel
         panel.innerHTML = '';
-        this._buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName);
+        this._buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName, quickNewConfig, appKey);
       } catch (err) {
         console.error('[kintone-excel-overlay] quick new record load failed', err);
         this.close();
@@ -15129,6 +15531,13 @@
           if (openPicker) {
             if (typeof openPicker.__pbClose === 'function') openPicker.__pbClose();
             else openPicker.remove();
+            return;
+          }
+          // 項目選択パネルが開いていれば、まずそれだけ閉じる（モーダル自体は閉じない）
+          const openFieldsPicker = layer.querySelector('.pb-newrec__fields-picker');
+          if (openFieldsPicker) {
+            if (typeof openFieldsPicker.__pbClose === 'function') openFieldsPicker.__pbClose();
+            else openFieldsPicker.remove();
             return;
           }
           void this.requestClose();
@@ -15204,8 +15613,14 @@
       return result;
     }
 
-    _buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName = '') {
+    _buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName = '', quickNewConfig = null, appKey = '') {
       const t = (key) => resolveText(language, key);
+
+      // Quick New専用の項目設定（あれば Excel Overlay のプリセットより優先）。
+      // 保存/リセットで書き換わるため let で持つ
+      let activeConfigFields = (quickNewConfig && Array.isArray(quickNewConfig.fields) && quickNewConfig.fields.length)
+        ? quickNewConfig.fields.slice()
+        : null;
 
       // Header（アプリ名 + タイトル）
       const head = document.createElement('div');
@@ -15236,7 +15651,7 @@
       head.appendChild(titleWrap);
       head.appendChild(closeBtn);
 
-      // Preset selector
+      // Preset selector（Quick New専用設定があるときはこの行をラベル表示に切り替える）
       const presetRow = document.createElement('div');
       presetRow.className = 'pb-newrec__preset-row';
       const presetLabelEl = document.createElement('label');
@@ -15251,8 +15666,24 @@
         opt.selected = p.id === activePresetId;
         presetSelect.appendChild(opt);
       });
+      const customLabelEl = document.createElement('span');
+      customLabelEl.className = 'pb-newrec__fields-custom-label';
+      customLabelEl.textContent = t('qnrFieldsCustomLabel');
+      const fieldsPickBtn = document.createElement('button');
+      fieldsPickBtn.type = 'button';
+      fieldsPickBtn.className = 'pb-overlay__btn pb-newrec__fields-pick-btn';
+      fieldsPickBtn.textContent = t('qnrFieldsPick');
+      const updatePresetRowMode = () => {
+        const custom = Boolean(activeConfigFields);
+        presetLabelEl.style.display = custom ? 'none' : '';
+        presetSelect.style.display = custom ? 'none' : '';
+        customLabelEl.style.display = custom ? '' : 'none';
+      };
+      updatePresetRowMode();
       presetRow.appendChild(presetLabelEl);
       presetRow.appendChild(presetSelect);
+      presetRow.appendChild(customLabelEl);
+      presetRow.appendChild(fieldsPickBtn);
 
       // Body (form fields)
       const body = document.createElement('div');
@@ -15280,11 +15711,23 @@
       foot.appendChild(saveNextBtn);
       foot.appendChild(saveBtn);
 
+      // 現在表示中の項目コード列（Quick New専用設定があればそれ、なければ
+      // 選択中の Excel Overlay プリセット）。項目選択パネルの初期状態に使う
+      const getCurrentFieldCodesOrdered = () => {
+        if (activeConfigFields) return activeConfigFields.slice();
+        const preset = presets.find((p) => p.id === presetSelect.value) || presets[0];
+        const visible = new Set(Array.isArray(preset.visibleColumns) ? preset.visibleColumns : []);
+        const order = Array.isArray(preset.columnOrder) ? preset.columnOrder : [];
+        return order.filter((c) => visible.size === 0 || visible.has(c));
+      };
+
       let fieldInputMap = new Map();
-      const renderBody = (presetId) => {
+      const renderBody = () => {
         body.innerHTML = '';
         fieldInputMap = new Map();
-        const preset = presets.find((p) => p.id === presetId) || presets[0];
+        const preset = activeConfigFields
+          ? { id: '__qnrCustom__', columnOrder: activeConfigFields, visibleColumns: activeConfigFields }
+          : (presets.find((p) => p.id === presetSelect.value) || presets[0]);
         const fields = this._getFieldsForPreset(preset, allFieldsMap);
         if (!fields.length) {
           const empty = document.createElement('div');
@@ -15523,15 +15966,187 @@
         });
       };
 
-      renderBody(activePresetId || (presets[0]?.id || ''));
+      renderBody();
 
-      presetSelect.addEventListener('change', () => renderBody(presetSelect.value));
+      presetSelect.addEventListener('change', () => renderBody());
 
       // 「保存して次へ」成功後にフォームを初期状態へ戻す
       const resetForm = () => {
-        renderBody(presetSelect.value || activePresetId || (presets[0]?.id || ''));
+        renderBody();
         focusFirst();
       };
+
+      // 入力中の値をコード単位で退避/復元する（項目選択の保存/リセットで
+      // フォームを再構築しても、残る項目の入力済み値は失わないようにする）
+      const captureFieldValues = () => {
+        const vals = new Map();
+        fieldInputMap.forEach((entry, code) => {
+          try { vals.set(code, entry.getValue()); } catch (_e) { /* noop */ }
+        });
+        return vals;
+      };
+      const restoreFieldValues = (vals) => {
+        if (!vals) return;
+        fieldInputMap.forEach((entry, code) => {
+          if (!vals.has(code) || typeof entry.setValue !== 'function') return;
+          try { entry.setValue(vals.get(code)); } catch (_e) { /* noop */ }
+        });
+      };
+
+      // ── 項目選択パネル（項目を選ぶ） ────────────────────────────────────
+      let fieldsPickerEl = null;
+      const closeFieldsPicker = () => {
+        if (fieldsPickerEl) { fieldsPickerEl.remove(); fieldsPickerEl = null; }
+        try { fieldsPickBtn.focus(); } catch (_e) { /* noop */ }
+      };
+      const openFieldsPicker = () => {
+        if (fieldsPickerEl) return;
+        const pickableFields = Array.from(allFieldsMap.values())
+          .filter((f) => !NON_EDITABLE_QNR_TYPES.has(String(f.type || '').toUpperCase()) && !f.lookupAuto);
+        const pickableCodes = new Set(pickableFields.map((f) => f.code));
+        const currentCodes = getCurrentFieldCodesOrdered().filter((c) => pickableCodes.has(c));
+        const currentSet = new Set(currentCodes);
+        const remaining = pickableFields.map((f) => f.code).filter((c) => !currentSet.has(c));
+        const order = [...currentCodes, ...remaining];
+        const checked = new Set(currentCodes);
+
+        const root = document.createElement('div');
+        root.className = 'pb-newrec__fields-picker';
+        root.setAttribute('role', 'dialog');
+        root.setAttribute('aria-label', t('qnrFieldsPickTitle'));
+
+        const titleEl = document.createElement('div');
+        titleEl.className = 'pb-newrec__fields-picker-title';
+        titleEl.textContent = t('qnrFieldsPickTitle');
+
+        const listEl = document.createElement('div');
+        listEl.className = 'pb-newrec__fields-picker-list';
+
+        const noticeEl = document.createElement('div');
+        noticeEl.className = 'pb-newrec__fields-picker-notice';
+        noticeEl.textContent = t('qnrFieldsNoneSelected');
+        noticeEl.style.display = 'none';
+
+        const footEl = document.createElement('div');
+        footEl.className = 'pb-newrec__fields-picker-foot';
+        const resetConfigBtn = document.createElement('button');
+        resetConfigBtn.type = 'button';
+        resetConfigBtn.className = 'pb-overlay__btn pb-newrec__fields-picker-reset';
+        resetConfigBtn.textContent = t('qnrFieldsReset');
+        resetConfigBtn.style.display = activeConfigFields ? '' : 'none';
+        const cancelPickBtn = document.createElement('button');
+        cancelPickBtn.type = 'button';
+        cancelPickBtn.className = 'pb-overlay__btn';
+        cancelPickBtn.textContent = t('qnrFieldsCancel');
+        const savePickBtn = document.createElement('button');
+        savePickBtn.type = 'button';
+        savePickBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
+        savePickBtn.textContent = t('qnrFieldsSave');
+        footEl.append(resetConfigBtn, cancelPickBtn, savePickBtn);
+
+        const renderList = (focus) => {
+          listEl.innerHTML = '';
+          order.forEach((code, idx) => {
+            const f = allFieldsMap.get(code);
+            if (!f) return;
+            const row = document.createElement('div');
+            row.className = 'pb-newrec__fields-picker-row';
+            const cbId = `pb-newrec-fp-cb-${idx}`;
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.id = cbId;
+            cb.checked = checked.has(code);
+            cb.addEventListener('change', () => {
+              if (cb.checked) checked.add(code); else checked.delete(code);
+            });
+            const label = document.createElement('label');
+            label.setAttribute('for', cbId);
+            label.className = 'pb-newrec__fields-picker-label';
+            label.textContent = f.label || f.code;
+            const moveWrap = document.createElement('div');
+            moveWrap.className = 'pb-newrec__fields-picker-move';
+            const upBtn = document.createElement('button');
+            upBtn.type = 'button';
+            upBtn.className = 'pb-newrec__fields-picker-move-btn pb-newrec__fields-picker-move-btn--up';
+            upBtn.textContent = '▲';
+            upBtn.setAttribute('aria-label', t('qnrFieldsMoveUp'));
+            upBtn.disabled = idx === 0;
+            upBtn.addEventListener('click', () => {
+              if (idx === 0) return;
+              [order[idx - 1], order[idx]] = [order[idx], order[idx - 1]];
+              renderList({ idx: idx - 1, dir: 'up' });
+            });
+            const downBtn = document.createElement('button');
+            downBtn.type = 'button';
+            downBtn.className = 'pb-newrec__fields-picker-move-btn pb-newrec__fields-picker-move-btn--down';
+            downBtn.textContent = '▼';
+            downBtn.setAttribute('aria-label', t('qnrFieldsMoveDown'));
+            downBtn.disabled = idx === order.length - 1;
+            downBtn.addEventListener('click', () => {
+              if (idx === order.length - 1) return;
+              [order[idx], order[idx + 1]] = [order[idx + 1], order[idx]];
+              renderList({ idx: idx + 1, dir: 'down' });
+            });
+            moveWrap.append(upBtn, downBtn);
+            row.append(cb, label, moveWrap);
+            listEl.appendChild(row);
+          });
+          if (focus) {
+            requestAnimationFrame(() => {
+              const rows = listEl.querySelectorAll('.pb-newrec__fields-picker-row');
+              const row = rows[focus.idx];
+              const btn = row?.querySelector(focus.dir === 'up'
+                ? '.pb-newrec__fields-picker-move-btn--up'
+                : '.pb-newrec__fields-picker-move-btn--down');
+              try { btn?.focus(); } catch (_e) { /* noop */ }
+            });
+          }
+        };
+        renderList();
+
+        cancelPickBtn.addEventListener('click', () => closeFieldsPicker());
+        savePickBtn.addEventListener('click', () => {
+          const selected = order.filter((c) => checked.has(c));
+          if (!selected.length) {
+            noticeEl.style.display = '';
+            return;
+          }
+          void (async () => {
+            await qnrSaveFieldsConfig(appKey, selected);
+            const prevValues = captureFieldValues();
+            activeConfigFields = selected;
+            updatePresetRowMode();
+            renderBody();
+            restoreFieldValues(prevValues);
+            closeFieldsPicker();
+          })();
+        });
+        resetConfigBtn.addEventListener('click', () => {
+          void (async () => {
+            await qnrRemoveFieldsConfig(appKey);
+            const prevValues = captureFieldValues();
+            activeConfigFields = null;
+            updatePresetRowMode();
+            renderBody();
+            restoreFieldValues(prevValues);
+            closeFieldsPicker();
+          })();
+        });
+
+        root.append(titleEl, listEl, noticeEl, footEl);
+        root.__pbClose = closeFieldsPicker;
+        // プリセット行とフォーム本体の間にインラインで差し込む（新規ウィンドウではなく
+        // モーダル内パネルとして表示する）
+        panel.insertBefore(root, body);
+        fieldsPickerEl = root;
+        requestAnimationFrame(() => {
+          try { listEl.querySelector('input[type="checkbox"]')?.focus(); } catch (_e) { /* noop */ }
+        });
+      };
+      fieldsPickBtn.addEventListener('click', () => {
+        if (fieldsPickerEl) closeFieldsPicker();
+        else openFieldsPicker();
+      });
 
       const buttons = { saveBtn, saveNextBtn, cancelBtn };
       saveBtn.addEventListener('click', () => {
