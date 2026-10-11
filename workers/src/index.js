@@ -50,7 +50,8 @@ const PRODUCTS = {
   'kintone-gallery': { name: 'サブテーブルギャラリー化', kind: 'kintone' },
   'kintone-listkit': { name: 'PlugBits ListKit', kind: 'kintone' },
   'kintone-rule-builder': { name: '文字列条件分岐ビルダー', kind: 'kintone' },
-  'kintone-excel-report': { name: 'Excel帳票一括生成', kind: 'kintone' }
+  'kintone-excel-report': { name: 'Excel帳票一括生成', kind: 'kintone' },
+  'kintone-signage': { name: 'AutoSignage', kind: 'kintone' }
 };
 
 // レコードに product が無い(旧データ)場合は grid-edit-pro とみなす
