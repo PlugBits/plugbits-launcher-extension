@@ -51,6 +51,7 @@ chrome.runtime.onStartup?.addListener(() => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (!changes || !Object.prototype.hasOwnProperty.call(changes, UI_LANGUAGE_KEY)) return;
+  refreshUninstallUrl().catch(() => {});
   setupContextMenus().catch((error) => {
     console.error('[kfav] failed to rebuild context menus on language change', error);
   });
@@ -2121,8 +2122,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
+// アンインストール時に開くページ(plugbits.app/launcher/bye/ にやめた理由の1問)。
+// 版と言語だけを渡す。言語は拡張の言語設定(ja/en)を優先し、自動のときは Chrome の表示言語。
+const UNINSTALL_URL_BASE = 'https://plugbits.app/launcher/bye/';
 
+async function resolveUninstallLanguage() {
+  try {
+    const data = await chrome.storage.local.get(UI_LANGUAGE_KEY);
+    const setting = normalizeUiLanguageSetting(data?.[UI_LANGUAGE_KEY]);
+    if (setting === 'ja' || setting === 'en') return setting;
+  } catch (_err) {
+    // 読めなければ Chrome の表示言語で決める
+  }
+  const uiLang = String(chrome.i18n?.getUILanguage?.() || '').toLowerCase();
+  return uiLang.startsWith('ja') ? 'ja' : 'en';
+}
 
+async function refreshUninstallUrl() {
+  if (!chrome.runtime?.setUninstallURL) return;
+  const version = chrome.runtime.getManifest?.()?.version || '';
+  const lang = await resolveUninstallLanguage();
+  const url = `${UNINSTALL_URL_BASE}?v=${encodeURIComponent(version)}&lang=${lang}`;
+  await chrome.runtime.setUninstallURL(url);
+}
 
-
-
+refreshUninstallUrl().catch((error) => {
+  console.error('[kfav] failed to set uninstall URL', error);
+});
