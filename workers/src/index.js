@@ -4,12 +4,21 @@
  * Routes:
  *   POST /webhook       – Stripe webhook（署名検証 → KV更新 → Brevoメール）
  *   GET  /verify        – ライセンスキー認証（KVキャッシュ → Stripe確認）
+ *                          ?product= を付けるkintoneプラグインは product不一致/domain不一致を追加で検証する
  *   POST /trial         – 14日トライアルキー発行（メール単位・即時有効）
- *   GET  /trial/verify  – トライアルのメール確認（48時間以内・後追い検証）
+ *                          body.product がkintone系プラグインの場合はドメイン単位の即時発行（メール確認無し）
+ *   GET  /trial/verify  – トライアルのメール確認（48時間以内・後追い検証。kintone系は対象外）
  *
  * 2026-09-29 買い切り(¥1,980)に切り替え: Payment Link は mode=payment(サブスクリプション無し)。
  * checkout.session.completed の mode=payment でライセンスを発行(kind:'lifetime'・expiry 空)、
  * charge.refunded(全額)でそのライセンスを status:'refunded' にする。サブスクの分岐は旧契約用に残す。
+ *
+ * 2026-10-11 複数プロダクト対応: Grid Edit Pro（Chrome拡張）に加え、kintoneプラグイン3本
+ * （サブテーブルギャラリー化・PlugBits ListKit・文字列条件分岐ビルダー）をこのWorker1本で束ねる。
+ * レコードの `product` フィールドで判別する（無ければ grid-edit-pro とみなす・下記 productOf）。
+ * kintone系は購入・トライアルの単位が「kintoneドメイン」なので、レコードに `domain` を持ち、
+ * 最初の /verify でそのドメインに束縛する（ドメイン固定・移転不可）。
+ *   trialdom_{product}_{domain} … kintone系トライアルの重複発行防止index → key
  */
 
 const CORS_HEADERS = {
@@ -30,6 +39,37 @@ function json(data, status = 200, extraHeaders = {}) {
     status,
     headers: { 'Content-Type': 'application/json', ...extraHeaders }
   });
+}
+
+// ── 対象プロダクト ───────────────────────────────────────────────────────────
+// kind: 'extension' … Chrome拡張（Grid Edit Pro）。/verify・/trial に product を送らない旧クライアント
+//       'kintone'   … kintoneプラグイン。kintone.proxy 経由で product・domain を送ってくる
+
+const PRODUCTS = {
+  'grid-edit-pro': { name: 'PlugBits Launcher Pro', kind: 'extension' },
+  'kintone-gallery': { name: 'サブテーブルギャラリー化', kind: 'kintone' },
+  'kintone-listkit': { name: 'PlugBits ListKit', kind: 'kintone' },
+  'kintone-rule-builder': { name: '文字列条件分岐ビルダー', kind: 'kintone' }
+};
+
+// レコードに product が無い(旧データ)場合は grid-edit-pro とみなす
+function productOf(record) {
+  return record?.product || 'grid-edit-pro';
+}
+
+// kintoneドメインの正規化: 小文字化 + スキーム/パス/ポート除去。
+// xxx.cybozu.com 系サブドメインのみ許可し、裸のサフィックスや他ドメインは無効にする。
+const KINTONE_DOMAIN_SUFFIXES = ['.cybozu.com', '.kintone.com', '.cybozu.cn', '.cybozu-dev.com', '.kintone-dev.com'];
+
+function normalizeKintoneDomain(raw) {
+  let s = String(raw || '').trim().toLowerCase();
+  if (!s) return null;
+  s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, ''); // スキーム除去
+  s = s.split(/[/?#]/)[0]; // パス・クエリ・フラグメント除去
+  s = s.split(':')[0]; // ポート除去
+  if (!s || !/^[a-z0-9.-]+$/.test(s)) return null;
+  if (!KINTONE_DOMAIN_SUFFIXES.some((suffix) => s.endsWith(suffix))) return null;
+  return s;
 }
 
 // ── KV ─────────────────────────────────────────────────────────────────────
@@ -192,13 +232,19 @@ function generateLicenseKey() {
 // メールを送る。48時間以内にリンクが開かれなければ /verify が
 // trial_unverified を返してトライアルは停止する（後追い検証）。
 //
+// kintone系プラグインはメールアドレスを持たない（kintone.proxy 経由でメール確認が
+// できない）ため、ドメイン単位で即時有効化するだけの別経路を用いる
+// （handleKintoneTrialStart・email:'' のまま・確認メールは送らない）。
+//
 // KVレイアウト:
-//   lic_{key}        … ライセンス本体（kind:'trial' を含む）
-//   trial_{email}    … 正規化メール → key（重複取得の防止）
-//   trialtok_{token} … 確認トークン → key（確認後に削除）
+//   lic_{key}             … ライセンス本体（kind:'trial' を含む）
+//   trial_{email}         … 正規化メール → key（Grid Edit Pro。重複取得の防止）
+//   trialtok_{token}      … 確認トークン → key（確認後に削除）
+//   trialdom_{product}_{domain} … kintone系: ドメイン単位の重複発行防止index → key
 
 const TRIAL_EMAIL_PREFIX = 'trial_';
 const TRIAL_TOKEN_PREFIX = 'trialtok_';
+const KINTONE_TRIAL_DOMAIN_PREFIX = 'trialdom_';
 const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 const TRIAL_VERIFY_WINDOW_MS = 48 * 60 * 60 * 1000;
 
@@ -230,15 +276,81 @@ async function isTrialRateLimited(request, env) {
   }
 }
 
-async function handleTrialStart(request, env) {
-  if (await isTrialRateLimited(request, env)) {
+// kintone系プラグインのドメイン単位レート制限（KVのTTL付きカウンタ）。
+// kintone.proxy のリクエストは Cybozu 側の共有IPから来るため、IP単位の
+// isTrialRateLimited は使えない（1社の乱打で全社が止まる）。
+const KINTONE_TRIAL_RATE_LIMIT_PER_HOUR = 5;
+
+async function isKintoneTrialRateLimited(env, product, domain) {
+  try {
+    const key = `ratelimit_ktrial_${product}_${domain}`;
+    const current = Number(await env.LICENSES.get(key)) || 0;
+    if (current >= KINTONE_TRIAL_RATE_LIMIT_PER_HOUR) return true;
+    await env.LICENSES.put(key, String(current + 1), { expirationTtl: 3600 });
+    return false;
+  } catch (_err) {
+    return false; // 制限機構の障害でトライアル自体を止めない
+  }
+}
+
+// kintone系トライアル: メール確認は行わず、ドメイン単位で即時有効化する。
+// 同じ product+domain からの再呼び出しは同じキーを reused:true で返す
+// （拡張機能の初回アクセスを想定してキーを探しに来るケースも含む）。
+async function handleKintoneTrialStart(env, product, body) {
+  const domain = normalizeKintoneDomain(body?.domain);
+  if (!domain) return json({ ok: false, reason: 'invalid_domain' }, 400);
+
+  const indexKey = `${KINTONE_TRIAL_DOMAIN_PREFIX}${product}_${domain}`;
+  const existingKey = await env.LICENSES.get(indexKey);
+  if (existingKey) {
+    const record = await kvGet(env, existingKey);
+    if (record) {
+      const expiryMs = Date.parse(record.expiry || '') || 0;
+      const status = expiryMs && Date.now() > expiryMs ? 'trial_expired' : 'active';
+      return json({ ok: status === 'active', license_key: existingKey, expiry: record.expiry, status, reused: true });
+    }
+  }
+
+  if (await isKintoneTrialRateLimited(env, product, domain)) {
     return json({ ok: false, reason: 'rate_limited' }, 429);
   }
+
+  const licenseKey = generateLicenseKey();
+  const now = Date.now();
+  const expiry = new Date(now + TRIAL_DURATION_MS).toISOString();
+  const record = {
+    email: '',
+    status: 'active',
+    kind: 'trial',
+    product,
+    domain,
+    trial_verified: true,
+    started_at: new Date(now).toISOString(),
+    expiry
+  };
+  await kvSet(env, licenseKey, record);
+  await env.LICENSES.put(indexKey, licenseKey);
+
+  return json({ ok: true, license_key: licenseKey, expiry, status: 'active', reused: false });
+}
+
+async function handleTrialStart(request, env) {
   let body;
   try {
     body = await request.json();
   } catch (_err) {
     return json({ ok: false, reason: 'bad_request' }, 400);
+  }
+
+  // body.product がkintone系プラグインなら、メール単位の既存経路ではなく
+  // ドメイン単位の即時発行経路に振る（IP単位レート制限もここでは使わない）
+  const requestedProduct = typeof body?.product === 'string' ? body.product : '';
+  if (requestedProduct && PRODUCTS[requestedProduct]?.kind === 'kintone') {
+    return handleKintoneTrialStart(env, requestedProduct, body);
+  }
+
+  if (await isTrialRateLimited(request, env)) {
+    return json({ ok: false, reason: 'rate_limited' }, 429);
   }
   const email = String(body?.email || '').trim();
   const normalized = normalizeTrialEmail(email);
@@ -344,8 +456,10 @@ async function sendTrialEmail(env, { email, licenseKey, verifyToken, origin, rec
 
 // ── Brevo メール送信 ────────────────────────────────────────────────────────
 
-async function sendLicenseEmail(env, { email, licenseKey, lifetime = false }) {
+async function sendLicenseEmail(env, { email, licenseKey, lifetime = false, product = 'grid-edit-pro' }) {
   if (!env.BREVO_API_KEY) return; // 未設定時はスキップ
+  const meta = PRODUCTS[product] || PRODUCTS['grid-edit-pro'];
+  const isKintone = meta.kind === 'kintone';
   await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
@@ -358,14 +472,14 @@ async function sendLicenseEmail(env, { email, licenseKey, lifetime = false }) {
         name: env.BREVO_SENDER_NAME || 'PlugBits Launcher'
       },
       to: [{ email }],
-      subject: 'PlugBits Launcher Pro ライセンスキーのご案内',
+      subject: `${meta.name} ライセンスキーのご案内`,
       htmlContent: `
-        <h2>PlugBits Launcher Pro へようこそ！</h2>
-        <p>ご購入ありがとうございます。下記のライセンスキーを拡張機能の設定画面に入力してください。</p>
+        <h2>${meta.name} へようこそ！</h2>
+        <p>ご購入ありがとうございます。下記のライセンスキーを${isKintone ? 'プラグインの設定画面の「ライセンス」欄' : '拡張機能の設定画面'}に入力してください。</p>
         <p style="font-family:monospace;font-size:18px;background:#f3f4f6;padding:12px;border-radius:6px;">
           ${licenseKey}
         </p>
-        <p>設定画面: Chrome 拡張アイコン → 設定 → Pro ライセンス</p>
+        <p>設定画面: ${isKintone ? 'kintoneアプリの設定 → プラグイン → 対象プラグイン → 「ライセンス」欄' : 'Chrome 拡張アイコン → 設定 → Pro ライセンス'}</p>
         <hr/>
         <p style="font-size:12px;color:#6b7280;">
           ${lifetime
@@ -417,19 +531,33 @@ async function handleWebhook(request, env) {
     // webhook の再送(同じ支払い)では二重に発行しない
     if (await getKeyForPaymentIntent(env, paymentIntentId)) return json({ ok: true, skipped: 'already_issued' });
 
+    // Payment Link の metadata がCheckout Sessionにコピーされてくる。
+    // 既存の Launcher 用Payment Linkには metadata が無いため grid-edit-pro になる
+    const metaProduct = obj?.metadata?.product;
+    const product = PRODUCTS[metaProduct] ? metaProduct : 'grid-edit-pro';
+    const isKintone = PRODUCTS[product].kind === 'kintone';
+
     const licenseKey = generateLicenseKey();
     const record = {
       email,
       status: 'active',
       kind: 'lifetime',
+      product,
       stripe_customer_id: obj?.customer || '',
       stripe_payment_intent: paymentIntentId,
       purchased_at: new Date((event.created || Date.now() / 1000) * 1000).toISOString(),
       expiry: ''
     };
+    if (isKintone) {
+      // Payment Link のカスタムフィールド(kintonedomain)。無ければ空のまま保存し、
+      // 最初の /verify でドメインに束縛する
+      const customFields = Array.isArray(obj?.custom_fields) ? obj.custom_fields : [];
+      const domainField = customFields.find((f) => f?.key === 'kintonedomain');
+      record.domain = normalizeKintoneDomain(domainField?.text?.value) || '';
+    }
     await kvSet(env, licenseKey, record);
     await env.LICENSES.put(PI_INDEX_PREFIX + paymentIntentId, licenseKey);
-    await sendLicenseEmail(env, { email, licenseKey, lifetime: true });
+    await sendLicenseEmail(env, { email, licenseKey, lifetime: true, product });
     return json({ ok: true, action: 'key_issued', kind: 'lifetime' });
   }
 
@@ -511,37 +639,84 @@ async function handleVerify(request, env) {
   const licenseKey = url.searchParams.get('key')?.trim() || '';
   if (!licenseKey) return json({ ok: false, reason: 'missing_key' }, 400);
 
+  // product を送ってくるのはkintoneプラグイン(新クライアント)。
+  // 旧Chrome拡張は product を送らないため、下の分岐は丸ごと素通りして挙動不変
+  const requestedProduct = url.searchParams.get('product')?.trim() || '';
+
   const rawKey = licenseKey.startsWith('lic_') ? licenseKey.slice(4) : licenseKey;
 
   // 1. KVキャッシュ確認
-  const cached = await kvGet(env, rawKey);
-  if (cached) {
-    // トライアルは有効期限と後追い検証（48時間）を評価してstatusを決める
-    if (cached.kind === 'trial') {
-      const now = Date.now();
-      const expiryMs = Date.parse(cached.expiry || '') || 0;
-      const verifyDeadlineMs = Date.parse(cached.trial_verify_deadline || '') || 0;
-      let status = cached.status || 'active';
-      if (status === 'active') {
-        if (expiryMs && now > expiryMs) {
-          status = 'trial_expired';
-        } else if (!cached.trial_verified && verifyDeadlineMs && now > verifyDeadlineMs) {
-          status = 'trial_unverified';
-        }
-      }
-      return json({ ok: status === 'active', ...cached, status, reason: status === 'active' ? undefined : status, portal_url: '' });
-    }
-    // 返金済み(refunded)・解約(canceled)などは ok:false(拡張は status==='active' だけを Pro とみなす)
-    const status = cached.status || 'active';
-    const portalUrl = cached.stripe_customer_id
-      ? await createPortalSession(env, cached.stripe_customer_id)
-      : '';
-    return json({ ok: status === 'active', ...cached, status, reason: status === 'active' ? undefined : status, portal_url: portalUrl });
+  let cached = await kvGet(env, rawKey);
+  if (!cached) {
+    // 2. KV miss → Stripe から直接サブスクを調べる術がないため not_found
+    // （KVへの書き込みは checkout.session.completed webhook 経由のみ）
+    return json({ ok: false, status: 'not_found', reason: 'key_not_found' }, 404);
   }
 
-  // 2. KV miss → Stripe から直接サブスクを調べる術がないため not_found
-  // （KVへの書き込みは checkout.session.completed webhook 経由のみ）
-  return json({ ok: false, status: 'not_found', reason: 'key_not_found' }, 404);
+  let isKintoneRequest = false;
+  if (requestedProduct) {
+    if (productOf(cached) !== requestedProduct) {
+      return json({ ok: false, status: 'product_mismatch', reason: 'product_mismatch' });
+    }
+    isKintoneRequest = PRODUCTS[requestedProduct]?.kind === 'kintone';
+    if (isKintoneRequest) {
+      const domain = normalizeKintoneDomain(url.searchParams.get('domain'));
+      if (!domain) return json({ ok: false, reason: 'missing_domain' }, 400);
+      if (!cached.domain) {
+        // 初回アクセスでこのライセンスをドメインに束縛する
+        cached = { ...cached, domain, domain_bound_at: new Date().toISOString() };
+        await kvSet(env, rawKey, cached);
+      } else if (cached.domain !== domain) {
+        return json({ ok: false, status: 'domain_mismatch', reason: 'domain_mismatch' });
+      }
+    }
+  }
+
+  // トライアルは有効期限と後追い検証（48時間）を評価してstatusを決める
+  // （kintone系トライアルは trial_verify_deadline を持たないのでこの分岐には来ない）
+  if (cached.kind === 'trial') {
+    const now = Date.now();
+    const expiryMs = Date.parse(cached.expiry || '') || 0;
+    const verifyDeadlineMs = Date.parse(cached.trial_verify_deadline || '') || 0;
+    let status = cached.status || 'active';
+    if (status === 'active') {
+      if (expiryMs && now > expiryMs) {
+        status = 'trial_expired';
+      } else if (!cached.trial_verified && verifyDeadlineMs && now > verifyDeadlineMs) {
+        status = 'trial_unverified';
+      }
+    }
+    if (isKintoneRequest) {
+      return json({
+        ok: status === 'active',
+        status,
+        reason: status === 'active' ? undefined : status,
+        kind: cached.kind,
+        product: productOf(cached),
+        domain: cached.domain || '',
+        expiry: cached.expiry
+      });
+    }
+    return json({ ok: status === 'active', ...cached, status, reason: status === 'active' ? undefined : status, portal_url: '' });
+  }
+
+  // 返金済み(refunded)・解約(canceled)などは ok:false(拡張は status==='active' だけを Pro とみなす)
+  const status = cached.status || 'active';
+  if (isKintoneRequest) {
+    return json({
+      ok: status === 'active',
+      status,
+      reason: status === 'active' ? undefined : status,
+      kind: cached.kind,
+      product: productOf(cached),
+      domain: cached.domain || '',
+      expiry: cached.expiry
+    });
+  }
+  const portalUrl = cached.stripe_customer_id
+    ? await createPortalSession(env, cached.stripe_customer_id)
+    : '';
+  return json({ ok: status === 'active', ...cached, status, reason: status === 'active' ? undefined : status, portal_url: portalUrl });
 }
 
 // ── トライアル リマインダー（Cron） ─────────────────────────────────────────
@@ -616,6 +791,7 @@ async function runTrialReminderSweep(env) {
     for (const key of page.keys) {
       const licenseKey = key.name.slice(KV_PREFIX.length);
       const record = await kvGet(env, licenseKey);
+      // kintone系トライアルは email:'' なのでここで素通りする(メール送信対象外)
       if (!record || record.kind !== 'trial' || !record.email) continue;
 
       const expiryMs = Date.parse(record.expiry || '') || 0;
