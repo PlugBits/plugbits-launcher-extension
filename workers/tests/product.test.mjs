@@ -133,3 +133,13 @@ assert.equal(r.body.ok, true);
 assert.equal(r.body.key !== undefined, true);
 
 console.log('product.test.mjs: 全部通りました');
+
+// Excel帳票(2026-10-11 追加)も kintone 製品として試用が出る
+{
+  const r2 = await trial({ product: 'kintone-excel-report', domain: 'tenant9.cybozu.com' });
+  assert.equal(r2.status, 200);
+  const b2 = r2.body;
+  assert.equal(b2.ok, true);
+  assert.ok(b2.license_key);
+  console.log('product.test.mjs: kintone-excel-report OK');
+}
