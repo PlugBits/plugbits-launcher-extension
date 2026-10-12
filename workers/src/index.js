@@ -540,6 +540,7 @@ function kintoneLicenseEmailHtml(meta, licenseKey) {
         <hr/>
         <p style="font-size:12px;color:#6b7280;">
           買い切りのライセンスです。<br/>
+          領収書は Stripe からのメールでお送りしています。利用規約: <a href="https://plugbits.app/kintone/terms/">https://plugbits.app/kintone/terms/</a><br/>
           ドメインの移行やご不明な点は <a href="mailto:support@plugbits.app">support@plugbits.app</a> までご連絡ください。
         </p>
       `;
