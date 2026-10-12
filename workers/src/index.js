@@ -54,6 +54,32 @@ const PRODUCTS = {
   'kintone-signage': { name: 'AutoSignage', kind: 'kintone' }
 };
 
+// Payment Link(plink_…)→ product。Payment Link の metadata は Checkout Session に
+// 引き継がれないことがある(2026-10-12 の本番購入で確認)ため、session.payment_link で判別する。
+// 価格だけでは ¥3,980 が2本あり区別できない。ID は Stripe の管理画面の値(オケオ)。
+// env.PAYMENT_LINK_PRODUCTS(JSON)があれば上書きで足す(テスト・一時的な追加用)。
+const PAYMENT_LINK_PRODUCTS = {
+};
+
+function paymentLinkProducts(env) {
+  let extra = {};
+  try {
+    if (env?.PAYMENT_LINK_PRODUCTS) extra = JSON.parse(env.PAYMENT_LINK_PRODUCTS);
+  } catch (_err) {
+    extra = {};
+  }
+  return { ...PAYMENT_LINK_PRODUCTS, ...extra };
+}
+
+// Checkout Session から product を決める: metadata.product → payment_link の対応表 → grid-edit-pro
+function resolveCheckoutProduct(obj, env) {
+  const metaProduct = obj?.metadata?.product;
+  if (PRODUCTS[metaProduct]) return metaProduct;
+  const linkProduct = paymentLinkProducts(env)[obj?.payment_link];
+  if (PRODUCTS[linkProduct]) return linkProduct;
+  return 'grid-edit-pro';
+}
+
 // レコードに product が無い(旧データ)場合は grid-edit-pro とみなす
 function productOf(record) {
   return record?.product || 'grid-edit-pro';
@@ -559,10 +585,9 @@ async function handleWebhook(request, env) {
     // webhook の再送(同じ支払い)では二重に発行しない
     if (await getKeyForPaymentIntent(env, paymentIntentId)) return json({ ok: true, skipped: 'already_issued' });
 
-    // Payment Link の metadata がCheckout Sessionにコピーされてくる。
-    // 既存の Launcher 用Payment Linkには metadata が無いため grid-edit-pro になる
-    const metaProduct = obj?.metadata?.product;
-    const product = PRODUCTS[metaProduct] ? metaProduct : 'grid-edit-pro';
+    // metadata.product か payment_link の対応表で判別。どちらも無い既存の Launcher 用
+    // Payment Link は grid-edit-pro になる
+    const product = resolveCheckoutProduct(obj, env);
     const isKintone = PRODUCTS[product].kind === 'kintone';
 
     const licenseKey = generateLicenseKey();

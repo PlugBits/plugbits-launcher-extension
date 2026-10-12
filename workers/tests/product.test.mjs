@@ -143,3 +143,40 @@ console.log('product.test.mjs: 全部通りました');
   assert.ok(b2.license_key);
   console.log('product.test.mjs: kintone-excel-report OK');
 }
+
+// Payment Link の metadata が Checkout Session に来ない場合(2026-10-12 本番で発生)は
+// session.payment_link(plink_…)の対応表で判別する
+{
+  env.PAYMENT_LINK_PRODUCTS = JSON.stringify({ plink_rule_test: 'kintone-rule-builder', plink_gallery_test: 'kintone-gallery' });
+  const issued = (pi) => {
+    const key = store.get('pi_' + pi);
+    return key ? JSON.parse(store.get('lic_' + key)) : null;
+  };
+
+  // payment_link だけある → 対応表の product
+  let r3 = await webhook(checkout('pi_plink_only', { payment_link: 'plink_rule_test' }));
+  assert.equal(r3.body.action, 'key_issued');
+  assert.equal(issued('pi_plink_only').product, 'kintone-rule-builder');
+
+  // metadata だけある → metadata の product(従来どおり)
+  r3 = await webhook(checkout('pi_meta_only', { metadata: { product: 'kintone-signage' } }));
+  assert.equal(issued('pi_meta_only').product, 'kintone-signage');
+
+  // 両方ある → metadata を優先
+  r3 = await webhook(checkout('pi_both', { metadata: { product: 'kintone-listkit' }, payment_link: 'plink_gallery_test' }));
+  assert.equal(issued('pi_both').product, 'kintone-listkit');
+
+  // 対応表に無い payment_link・どちらも無い → grid-edit-pro(Launcher)
+  r3 = await webhook(checkout('pi_plink_unknown', { payment_link: 'plink_launcher_existing' }));
+  assert.equal(issued('pi_plink_unknown').product, 'grid-edit-pro');
+  r3 = await webhook(checkout('pi_neither'));
+  assert.equal(issued('pi_neither').product, 'grid-edit-pro');
+
+  // 壊れた JSON の上書きは無視して落ちない
+  env.PAYMENT_LINK_PRODUCTS = '{broken';
+  r3 = await webhook(checkout('pi_bad_json', { payment_link: 'plink_rule_test' }));
+  assert.equal(r3.status, 200);
+  assert.equal(issued('pi_bad_json').product, 'grid-edit-pro');
+  delete env.PAYMENT_LINK_PRODUCTS;
+  console.log('product.test.mjs: payment_link → product OK');
+}
