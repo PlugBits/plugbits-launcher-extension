@@ -693,6 +693,29 @@ async function handleWebhook(request, env) {
 
 // ── /verify ─────────────────────────────────────────────────────────────────
 
+// /verify の応答に載せる項目を絞る(KV のレコードをそのまま返さない)。
+// メールアドレスと Stripe の ID(pi_/cus_)はキーを知っていれば誰でも見えてしまうため出さない。
+// kintone 製品: ok・status・reason・kind・product・domain・expiry だけ。
+// Chrome 拡張(grid-edit-pro): 設定画面が使う status・email・expiry・kind・trial_verified・portal_url。
+// email は伏せ字(o***@example.com)にして返す(拡張は「登録メール」の表示にだけ使う)。
+function maskEmail(email) {
+  const s = String(email || '');
+  const at = s.lastIndexOf('@');
+  if (at < 1) return '';
+  return `${s[0]}***${s.slice(at)}`;
+}
+
+function verifyResponseBody(record, status, portalUrl) {
+  const product = productOf(record);
+  const base = { ok: status === 'active', status, reason: status === 'active' ? undefined : status, kind: record.kind };
+  if (PRODUCTS[product]?.kind === 'kintone') {
+    return { ...base, product, domain: record.domain || '', expiry: record.expiry };
+  }
+  const body = { ...base, email: maskEmail(record.email), expiry: record.expiry, portal_url: portalUrl || '' };
+  if (record.kind === 'trial') body.trial_verified = !!record.trial_verified;
+  return body;
+}
+
 async function handleVerify(request, env) {
   const url = new URL(request.url);
   const licenseKey = url.searchParams.get('key')?.trim() || '';
@@ -756,7 +779,7 @@ async function handleVerify(request, env) {
         expiry: cached.expiry
       });
     }
-    return json({ ok: status === 'active', ...cached, status, reason: status === 'active' ? undefined : status, portal_url: '' });
+    return json(verifyResponseBody(cached, status, ''));
   }
 
   // 返金済み(refunded)・解約(canceled)などは ok:false(拡張は status==='active' だけを Pro とみなす)
@@ -775,7 +798,7 @@ async function handleVerify(request, env) {
   const portalUrl = cached.stripe_customer_id
     ? await createPortalSession(env, cached.stripe_customer_id)
     : '';
-  return json({ ok: status === 'active', ...cached, status, reason: status === 'active' ? undefined : status, portal_url: portalUrl });
+  return json(verifyResponseBody(cached, status, portalUrl));
 }
 
 // ── トライアル リマインダー（Cron） ─────────────────────────────────────────

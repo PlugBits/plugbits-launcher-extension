@@ -199,3 +199,39 @@ console.log('product.test.mjs: 全部通りました');
   }
   console.log('product.test.mjs: 本番の payment_link 5本 OK');
 }
+
+// /verify の応答に個人情報(メール・Stripe の ID)を載せない(2026-10-12)
+{
+  const leak = (body) => JSON.stringify(body).match(/@example\.com|pi_|cus_|stripe_/g);
+  // kintone の買い切り: product 付き・product 無しのどちらの問い合わせでも絞った項目だけ
+  const k1 = 'kv-kintone-0000-0000-000000000001';
+  store.set('lic_' + k1, JSON.stringify({ email: 'buyer@example.com', status: 'active', kind: 'lifetime', product: 'kintone-rule-builder', domain: 'acme.cybozu.com', stripe_customer_id: 'cus_x', stripe_payment_intent: 'pi_x', expiry: '' }));
+  for (const params of [{ key: k1, product: 'kintone-rule-builder', domain: 'acme.cybozu.com' }, { key: k1 }]) {
+    const v5 = await verify(params);
+    assert.equal(v5.body.ok, true);
+    assert.deepEqual(Object.keys(v5.body).sort(), ['domain', 'expiry', 'kind', 'ok', 'product', 'status']);
+    assert.equal(leak(v5.body), null, JSON.stringify(params));
+  }
+  // kintone の返金済み: ok:false・status/reason は refunded・個人情報なし
+  store.set('lic_' + k1, JSON.stringify({ ...JSON.parse(store.get('lic_' + k1)), status: 'refunded', refunded_at: '2026-10-12T00:00:00Z' }));
+  const v6 = await verify({ key: k1 });
+  assert.deepEqual([v6.body.ok, v6.body.status, v6.body.reason], [false, 'refunded', 'refunded']);
+  assert.equal(leak(v6.body), null);
+
+  // Chrome 拡張の買い切り: 拡張が使う項目は残し、email は伏せ字・Stripe の ID は出さない
+  const k2 = 'kv-ext-0000-0000-000000000002';
+  store.set('lic_' + k2, JSON.stringify({ email: 'buyer@example.com', status: 'active', kind: 'lifetime', stripe_customer_id: '', stripe_payment_intent: 'pi_y', expiry: '' }));
+  const v7 = await verify({ key: k2 });
+  assert.equal(v7.body.ok, true);
+  assert.equal(v7.body.email, 'b***@example.com');
+  assert.equal(v7.body.product, undefined, '旧クライアント向けに product は増やさない');
+  assert.equal(JSON.stringify(v7.body).match(/pi_|cus_|stripe_/g), null);
+  assert.ok('portal_url' in v7.body);
+
+  // Chrome 拡張の試用: trial_verified を残す
+  const k3 = 'kv-ext-trial-0000-000000000003';
+  store.set('lic_' + k3, JSON.stringify({ email: 'trial@example.com', status: 'active', kind: 'trial', trial_verified: true, expiry: new Date(Date.now() + 864e5).toISOString() }));
+  const v8 = await verify({ key: k3 });
+  assert.deepEqual([v8.body.ok, v8.body.kind, v8.body.trial_verified, v8.body.email], [true, 'trial', true, 't***@example.com']);
+  console.log('product.test.mjs: /verify の応答に個人情報なし OK');
+}
