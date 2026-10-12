@@ -180,3 +180,22 @@ console.log('product.test.mjs: 全部通りました');
   delete env.PAYMENT_LINK_PRODUCTS;
   console.log('product.test.mjs: payment_link → product OK');
 }
+
+// 本番の Payment Link 5本(2026-10-12 決済画面の通信から ID を取得して商品名と突き合わせ)
+{
+  const real = {
+    plink_1UPn9dPGpisACJ9dImrLfbzU: 'kintone-excel-report',
+    plink_1UPnC3PGpisACJ9duHkE6TQZ: 'kintone-signage',
+    plink_1UPnEBPGpisACJ9dykum0J5b: 'kintone-rule-builder',
+    plink_1UPnGHPGpisACJ9dOZbMtypq: 'kintone-listkit',
+    plink_1UPnHjPGpisACJ9d3lk2w77g: 'kintone-gallery'
+  };
+  for (const [plink, product] of Object.entries(real)) {
+    const pi = 'pi_real_' + plink.slice(-6);
+    const r4 = await webhook(checkout(pi, { payment_link: plink }));
+    assert.equal(r4.body.action, 'key_issued');
+    const key = store.get('pi_' + pi);
+    assert.equal(JSON.parse(store.get('lic_' + key)).product, product, plink);
+  }
+  console.log('product.test.mjs: 本番の payment_link 5本 OK');
+}

@@ -59,6 +59,11 @@ const PRODUCTS = {
 // 価格だけでは ¥3,980 が2本あり区別できない。ID は Stripe の管理画面の値(オケオ)。
 // env.PAYMENT_LINK_PRODUCTS(JSON)があれば上書きで足す(テスト・一時的な追加用)。
 const PAYMENT_LINK_PRODUCTS = {
+  plink_1UPn9dPGpisACJ9dImrLfbzU: 'kintone-excel-report',
+  plink_1UPnC3PGpisACJ9duHkE6TQZ: 'kintone-signage',
+  plink_1UPnEBPGpisACJ9dykum0J5b: 'kintone-rule-builder',
+  plink_1UPnGHPGpisACJ9dOZbMtypq: 'kintone-listkit',
+  plink_1UPnHjPGpisACJ9d3lk2w77g: 'kintone-gallery'
 };
 
 function paymentLinkProducts(env) {
