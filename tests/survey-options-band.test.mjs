@@ -69,9 +69,9 @@ export async function run({ browser, origin, check }) {
     });
     check('survey-band: eligibleAt 過去・未dismiss・未doneで表示', await page.locator('#survey_a_band:not([hidden])').count() === 1);
     check('survey-band: 日本語の文言',
-      (await page.locator('#survey_a_band_text').textContent() || '').includes('3つだけ教えてください'));
-    check('survey-band: 「答える」ボタンの文言',
-      (await page.locator('#survey_a_band_answer').textContent() || '').trim() === '答える');
+      (await page.locator('#survey_a_band_title').textContent() || '').includes('3 つだけ教えてください'));
+    check('survey-band: 「回答する」ボタンの文言',
+      (await page.locator('#survey_a_band_answer').textContent() || '').trim() === '回答する');
     await ctx.close();
   }
 
@@ -113,7 +113,7 @@ export async function run({ browser, origin, check }) {
     await ctx.close();
   }
 
-  // 7) 「答える」を押すと新規タブでフォームが開き、done=true が保存される(ja + version)
+  // 7) 「回答する」を押すと新規タブでフォームが開き、done=true が保存される(ja + version)
   {
     const ctx = await browser.newContext();
     const page = await setupPage(ctx, origin, {
@@ -124,7 +124,7 @@ export async function run({ browser, origin, check }) {
     await page.click('#survey_a_band_answer');
     await page.waitForTimeout(300);
     const opened = await page.evaluate(() => window.__opened);
-    check('survey-band: 「答える」で新規タブを1回開く', opened.length === 1);
+    check('survey-band: 「回答する」で新規タブを1回開く', opened.length === 1);
     const url = opened[0]?.url || '';
     check('survey-band: フォームURLのベース',
       url.startsWith('https://docs.google.com/forms/d/e/1FAIpQLSdVQboVqyIhnqa_EgwthxUzkOmbLgld9tg2c04AcxUVBR8ROw/viewform'));
@@ -133,7 +133,7 @@ export async function run({ browser, origin, check }) {
     check('survey-band: 新規タブで開く(_blank)', opened[0]?.target === '_blank');
 
     const saved = await page.evaluate((key) => window.chrome.storage.local.get(key), SURVEY_KEY);
-    check('survey-band: 「答える」で done=true が保存される', saved?.[SURVEY_KEY]?.done === true);
+    check('survey-band: 「回答する」で done=true が保存される', saved?.[SURVEY_KEY]?.done === true);
 
     check('survey-band: 回答後はバナーが消える', await page.locator('#survey_a_band[hidden]').count() === 1);
     await ctx.close();
@@ -148,7 +148,7 @@ export async function run({ browser, origin, check }) {
       version: '3.3.0'
     });
     check('survey-band: en設定時の文言',
-      (await page.locator('#survey_a_band_text').textContent() || '').includes('3 quick questions'));
+      (await page.locator('#survey_a_band_title').textContent() || '').includes('3 quick questions'));
     await page.click('#survey_a_band_answer');
     await page.waitForTimeout(300);
     const opened = await page.evaluate(() => window.__opened);
