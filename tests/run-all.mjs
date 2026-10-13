@@ -24,6 +24,7 @@ const SUITES = [
   ['survey-eligibility', './survey-eligibility.test.mjs'],
   ['survey-options-band', './survey-options-band.test.mjs'],
   ['survey-palette-row', './survey-palette-row.test.mjs'],
+  ['survey-kintone-toast', './survey-kintone-toast.test.mjs'],
   ['survey-manifest', './survey-manifest.test.mjs'],
   // Excel Overlay E2E（chrome-stub + fake bridge + Proライセンス投入でフル起動する系）
   ['overlay-lookup-grid', './overlay-lookup-grid.test.mjs'],

@@ -1558,6 +1558,11 @@
       qnrFieldsNoneSelected: "1つ以上選んでください",
       // 3.3.0 利用者アンケート
       surveyPaletteRow: "3つだけ教えてください（アンケート・1分）",
+      // kintoneページ本体のトースト（options.html の survey-a-band と同じ文言）
+      surveyToastTitle: "3 つだけ教えてください(1 分・匿名)",
+      surveyToastNote: "今後の改善にだけ使います",
+      surveyToastAnswer: "回答する",
+      surveyToastClose: "閉じる",
       btnFieldsViewOnly: "ビュー",
       btnFieldsAll: "全項目",
       titleFieldsViewOnly: "現在のビュー項目のみ表示",
@@ -1892,6 +1897,11 @@
       qnrFieldsNoneSelected: "Choose at least one field",
       // 3.3.0 user survey
       surveyPaletteRow: "3 quick questions (survey, 1 min)",
+      // Kintone page-level toast (same copy as the survey-a-band on options.html)
+      surveyToastTitle: "3 quick questions (1 min, anonymous)",
+      surveyToastNote: "Used only to improve the extension",
+      surveyToastAnswer: "Answer",
+      surveyToastClose: "Close",
       btnFieldsViewOnly: "View",
       btnFieldsAll: "All fields",
       titleFieldsViewOnly: "Show only fields in current view",
@@ -16372,10 +16382,156 @@
 
   // ── End Quick New Record Modal ───────────────────────────────────────────
 
+  // ── 3.3.0 利用者アンケート A: kintoneページ本体のトースト ─────────────────
+  // パレット行(cpBuildSurveyRowCommand)と対象/期間(kfavSurveyA・
+  // SURVEY_A_PALETTE_WINDOW_MS)は共通。bandDismissed(options.htmlのバナー)とは
+  // 独立したtoastDismissedで管理し、1日1回だけ・ページ読み込みから少し経ってから
+  // 出す。自前要素のみ(body直下)で、kintone側のDOMは一切参照しない。
+  const SURVEY_A_TOAST_DELAY_MS = 1500;
+  let surveyToastEl = null;
+
+  function surveyToastTodayKey() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function removeSurveyToast() {
+    if (surveyToastEl) {
+      surveyToastEl.remove();
+      surveyToastEl = null;
+    }
+  }
+
+  async function patchSurveyAState(patch) {
+    try {
+      const stored = await chrome.storage.local.get(SURVEY_A_KEY);
+      const state = (stored?.[SURVEY_A_KEY] && typeof stored[SURVEY_A_KEY] === 'object') ? stored[SURVEY_A_KEY] : {};
+      const next = { ...state, ...patch };
+      await chrome.storage.local.set({ [SURVEY_A_KEY]: next });
+      return next;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // クイックランチャー(pb-quick-dock)が出ていればその左上に少し離して重ね、
+  // 無ければ画面右下に固定する。pageDockElは自前要素なのでこれ自体はDOM依存ではない。
+  function positionSurveyToast(el) {
+    let bottom = 24;
+    let right = 24;
+    try {
+      if (pageDockEl && document.body.contains(pageDockEl)) {
+        const rect = pageDockEl.getBoundingClientRect();
+        bottom = Math.max(24, Math.round(window.innerHeight - rect.top + 12));
+        right = Math.max(24, Math.round(window.innerWidth - rect.right));
+      }
+    } catch (_) {
+      // フォールバックのまま
+    }
+    el.style.setProperty('bottom', `${bottom}px`, 'important');
+    el.style.setProperty('right', `${right}px`, 'important');
+  }
+
+  async function showSurveyToast(language) {
+    if (surveyToastEl && document.body.contains(surveyToastEl)) return;
+
+    const wrap = document.createElement('div');
+    wrap.id = 'pb-survey-toast';
+    wrap.setAttribute('role', 'region');
+    wrap.setAttribute('aria-label', resolveText(language, 'surveyToastTitle'));
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #pb-survey-toast{position:fixed!important;bottom:24px!important;right:24px!important;z-index:2147483646!important;width:320px!important;max-width:calc(100vw - 32px)!important;box-sizing:border-box!important;background:#eff4ff!important;border:1px solid #bfdbfe!important;border-left:5px solid #2563eb!important;border-radius:10px!important;box-shadow:0 12px 32px rgba(15,23,42,.18)!important;padding:14px 14px 14px 16px!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;color:#1f2937!important;display:flex!important;flex-direction:column!important;gap:10px!important}
+      #pb-survey-toast *{box-sizing:border-box!important}
+      #pb-survey-toast .pb-st__head{display:flex!important;align-items:flex-start!important;gap:8px!important}
+      #pb-survey-toast .pb-st__body{flex:1!important;min-width:0!important}
+      #pb-survey-toast .pb-st__title{margin:0!important;font-size:13px!important;font-weight:700!important;color:#111827!important;line-height:1.4!important}
+      #pb-survey-toast .pb-st__note{margin:3px 0 0!important;font-size:11px!important;color:#64748b!important;line-height:1.4!important}
+      #pb-survey-toast .pb-st__close{appearance:none!important;border:none!important;background:transparent!important;color:#94a3b8!important;font-size:14px!important;line-height:1!important;cursor:pointer!important;padding:2px 4px!important;border-radius:6px!important;flex-shrink:0!important}
+      #pb-survey-toast .pb-st__close:hover{background:rgba(37,99,235,.1)!important;color:#1d4ed8!important}
+      #pb-survey-toast .pb-st__answer{appearance:none!important;align-self:flex-end!important;border:1px solid #2563eb!important;border-radius:8px!important;padding:7px 16px!important;background:#2563eb!important;color:#fff!important;font-size:12px!important;font-weight:700!important;cursor:pointer!important;font-family:inherit!important}
+      #pb-survey-toast .pb-st__answer:hover{background:#1d4ed8!important}
+    `;
+
+    const head = document.createElement('div');
+    head.className = 'pb-st__head';
+    const body = document.createElement('div');
+    body.className = 'pb-st__body';
+    const title = document.createElement('p');
+    title.className = 'pb-st__title';
+    title.textContent = resolveText(language, 'surveyToastTitle');
+    const note = document.createElement('p');
+    note.className = 'pb-st__note';
+    note.textContent = resolveText(language, 'surveyToastNote');
+    body.append(title, note);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'pb-st__close';
+    closeBtn.setAttribute('aria-label', resolveText(language, 'surveyToastClose'));
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => {
+      removeSurveyToast();
+      void patchSurveyAState({ toastDismissed: true });
+    });
+
+    head.append(body, closeBtn);
+
+    const answerBtn = document.createElement('button');
+    answerBtn.type = 'button';
+    answerBtn.className = 'pb-st__answer';
+    answerBtn.textContent = resolveText(language, 'surveyToastAnswer');
+    answerBtn.addEventListener('click', () => {
+      window.open(cpBuildSurveyFormUrl(language), '_blank', 'noopener,noreferrer');
+      removeSurveyToast();
+      void patchSurveyAState({ done: true });
+    });
+
+    wrap.append(style, head, answerBtn);
+    (document.body || document.documentElement).appendChild(wrap);
+    surveyToastEl = wrap;
+    positionSurveyToast(wrap);
+  }
+
+  async function maybeShowSurveyToast() {
+    try {
+      const stored = await chrome.storage.local.get(SURVEY_A_KEY);
+      const state = stored?.[SURVEY_A_KEY];
+      if (!state || typeof state !== 'object') return;
+      if (state.done || state.toastDismissed) return;
+      if (typeof state.eligibleAt !== 'number') return;
+      const now = Date.now();
+      if (now < state.eligibleAt || now >= state.eligibleAt + SURVEY_A_PALETTE_WINDOW_MS) return;
+      const todayKey = surveyToastTodayKey();
+      if (state.toastLastShownDate === todayKey) return;
+      const next = await patchSurveyAState({ toastLastShownDate: todayKey });
+      if (!next) return;
+      const uiLanguage = await resolveOverlayUiLanguage();
+      const language = uiLanguage?.language || DEFAULT_OVERLAY_LANGUAGE;
+      await showSurveyToast(language);
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  // トップフレームのみ(manifestのcontent_scriptsにall_framesは無いため通常は
+  // 常にトップだが、念のため明示的にガードする)。
+  function scheduleSurveyToast() {
+    if (window.top !== window) return;
+    setTimeout(() => {
+      void maybeShowSurveyToast();
+    }, SURVEY_A_TOAST_DELAY_MS);
+  }
+
   spaLifecycleReady = true;
   handleSpaLifecycle('boot_ready', location.href);
   if (shouldRetryAppOnlyInitialization()) {
     void waitForAppContextAndInit();
   }
+  scheduleSurveyToast();
 
 })();
