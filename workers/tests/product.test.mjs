@@ -209,7 +209,7 @@ console.log('product.test.mjs: 全部通りました');
   for (const params of [{ key: k1, product: 'kintone-rule-builder', domain: 'acme.cybozu.com' }, { key: k1 }]) {
     const v5 = await verify(params);
     assert.equal(v5.body.ok, true);
-    assert.deepEqual(Object.keys(v5.body).sort(), ['domain', 'expiry', 'kind', 'ok', 'product', 'status']);
+    assert.deepEqual(Object.keys(v5.body).sort(), ['domain', 'expiry', 'kind', 'ok', 'product', 'purchased_at', 'status']);
     assert.equal(leak(v5.body), null, JSON.stringify(params));
   }
   // kintone の返金済み: ok:false・status/reason は refunded・個人情報なし

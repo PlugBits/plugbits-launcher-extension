@@ -22,3 +22,19 @@ ALLOWED_ORIGIN = "*"
 #   BREVO_API_KEY           = xkeysib-...
 #   BREVO_SENDER_EMAIL      = no-reply@plugbits.app
 #   BREVO_SENDER_NAME       = PlugBits Launcher
+
+# ドメイン単位ライセンス機能(/domain-status)の動作確認用ステージング環境。
+# 本番とは別のKV namespace・cronは無し(トライアルリマインダーの誤爆防止)。
+# id は仮置き(オケオ作成待ち)。Stripe/Brevoのsecretsは本番と分けて別途登録する。
+[env.staging]
+name = "plugbits-api-staging"
+
+[env.staging.triggers]
+crons = []
+
+[[env.staging.kv_namespaces]]
+binding = "LICENSES"
+id = "78e41230f0434447b04a8b949e2fc41f"
+
+[env.staging.vars]
+ALLOWED_ORIGIN = "*"
