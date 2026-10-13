@@ -20,6 +20,12 @@ const SUITES = [
   ['options-pro-actions', './options-pro-actions.test.mjs'],
   ['options-api-usage', './options-api-usage.test.mjs'],
   ['api-usage-tracking', './api-usage-tracking.test.mjs'],
+  // 3.3.0: 利用者アンケート A（onInstalled適格化・設定画面バナー・パレット行・manifest不変の確認）
+  ['survey-eligibility', './survey-eligibility.test.mjs'],
+  ['survey-options-band', './survey-options-band.test.mjs'],
+  ['survey-palette-row', './survey-palette-row.test.mjs'],
+  ['survey-kintone-toast', './survey-kintone-toast.test.mjs'],
+  ['survey-manifest', './survey-manifest.test.mjs'],
   // Excel Overlay E2E（chrome-stub + fake bridge + Proライセンス投入でフル起動する系）
   ['overlay-lookup-grid', './overlay-lookup-grid.test.mjs'],
   ['lookup-cache-e2e', './lookup-cache-e2e.test.mjs'],
@@ -35,6 +41,8 @@ const SUITES = [
   ['qnr-lookup-combo', './qnr-lookup-combo.test.mjs'],
   ['qnr-lookup-kbd', './qnr-lookup-kbd.test.mjs'],
   ['qnr-modal-flow', './qnr-modal-flow.test.mjs'],
+  ['qnr-field-picker-flow', './qnr-field-picker-flow.test.mjs'],
+  ['qnr-field-picker-persist', './qnr-field-picker-persist.test.mjs'],
   // 単体（content.js/page-bridge.jsから関数・メソッドを抽出して検証する系）
   ['overlay-lookup-unit', './overlay-lookup-unit.test.mjs'],
   ['lookup-cache-unit', './lookup-cache-unit.test.mjs'],
@@ -49,6 +57,9 @@ const SUITES = [
   // ビュー列連動 E2E（chrome-stub + fake bridge + chrome.runtime.sendMessage
   // のPB_GET_METADATA_BUNDLE応答で実際のビュー列連動を再現する系）
   ['view-column-sync-e2e', './view-column-sync-e2e.test.mjs'],
+  ['view-default-preset-unit', './view-default-preset-unit.test.mjs'],
+  ['view-default-preset-e2e', './view-default-preset-e2e.test.mjs'],
+  ['overlay-open-timing-e2e', './overlay-open-timing-e2e.test.mjs'],
   ['view-sync-after-trial-e2e', './view-sync-after-trial-e2e.test.mjs']
 ];
 

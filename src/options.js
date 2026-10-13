@@ -418,6 +418,10 @@ const I18N_MESSAGES = {
     pro_portal_btn: '領収書',
     pro_clear_btn: 'ライセンス解除',
     pro_portal_hint: '領収書の発行は「領収書」から行えます。',
+    survey_a_band_title: '3 つだけ教えてください(1 分・匿名)',
+    survey_a_band_note: '今後の改善にだけ使います',
+    survey_a_band_answer: '回答する',
+    survey_a_band_close_aria: '閉じる',
   },
   en: {
     settings_title: 'PlugBits Launcher Settings',
@@ -740,6 +744,10 @@ const I18N_MESSAGES = {
     pro_portal_btn: 'Receipts',
     pro_clear_btn: 'Remove license',
     pro_portal_hint: 'Download receipts from "Receipts".',
+    survey_a_band_title: '3 quick questions (1 min, anonymous)',
+    survey_a_band_note: 'Used only to improve the extension',
+    survey_a_band_answer: 'Answer',
+    survey_a_band_close_aria: 'Close',
   }
 };
 
@@ -810,6 +818,66 @@ function applyI18n(root = document) {
     el.setAttribute('aria-label', t(key));
   });
 }
+
+// 3.3.0: 利用者アンケート A ── ページ最上部のバナー。
+// 対象/期間は service_worker が書く kfavSurveyA（eligibleAt を過ぎていれば表示、以後は×か回答まで出続ける）。
+const SURVEY_A_KEY = 'kfavSurveyA';
+const SURVEY_A_FORM_BASE_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdVQboVqyIhnqa_EgwthxUzkOmbLgld9tg2c04AcxUVBR8ROw/viewform';
+const surveyBandEl = document.getElementById('survey_a_band');
+const surveyBandAnswerBtn = document.getElementById('survey_a_band_answer');
+const surveyBandCloseBtn = document.getElementById('survey_a_band_close');
+
+// resolveUninstallLanguage(service_worker.js)と同じロジック: 言語設定がja/enならそれを使い、
+// autoならchrome.i18n.getUILanguage()がjaで始まるかどうかで決める。
+async function resolveSurveyLanguage() {
+  try {
+    const stored = await chrome.storage.local.get(UI_LANGUAGE_KEY);
+    const setting = normalizeUiLanguageSetting(stored?.[UI_LANGUAGE_KEY]);
+    if (setting === 'ja' || setting === 'en') return setting;
+  } catch (_err) {
+    // フォールバックへ
+  }
+  const uiLang = String(chrome.i18n?.getUILanguage?.() || '').toLowerCase();
+  return uiLang.startsWith('ja') ? 'ja' : 'en';
+}
+
+async function buildSurveyFormUrl() {
+  const version = chrome.runtime.getManifest?.()?.version || '';
+  const lang = await resolveSurveyLanguage();
+  return `${SURVEY_A_FORM_BASE_URL}?usp=pp_url&entry.1032001690=${encodeURIComponent(version)}&entry.1077819437=${lang}`;
+}
+
+async function refreshSurveyBand() {
+  if (!surveyBandEl) return;
+  try {
+    const stored = await chrome.storage.local.get(SURVEY_A_KEY);
+    const state = stored?.[SURVEY_A_KEY];
+    const eligible = Boolean(state && typeof state.eligibleAt === 'number' && Date.now() >= state.eligibleAt);
+    surveyBandEl.hidden = !(eligible && !state.bandDismissed && !state.done);
+  } catch (_err) {
+    surveyBandEl.hidden = true;
+  }
+}
+
+surveyBandAnswerBtn?.addEventListener('click', async () => {
+  const url = await buildSurveyFormUrl();
+  window.open(url, '_blank', 'noopener');
+  try {
+    const stored = await chrome.storage.local.get(SURVEY_A_KEY);
+    const state = (stored?.[SURVEY_A_KEY] && typeof stored[SURVEY_A_KEY] === 'object') ? stored[SURVEY_A_KEY] : {};
+    await chrome.storage.local.set({ [SURVEY_A_KEY]: { ...state, done: true } });
+  } catch (_err) { /* ignore */ }
+  await refreshSurveyBand();
+});
+
+surveyBandCloseBtn?.addEventListener('click', async () => {
+  try {
+    const stored = await chrome.storage.local.get(SURVEY_A_KEY);
+    const state = (stored?.[SURVEY_A_KEY] && typeof stored[SURVEY_A_KEY] === 'object') ? stored[SURVEY_A_KEY] : {};
+    await chrome.storage.local.set({ [SURVEY_A_KEY]: { ...state, bandDismissed: true } });
+  } catch (_err) { /* ignore */ }
+  await refreshSurveyBand();
+});
 
 async function initializeI18n() {
   let setting = DEFAULT_UI_LANGUAGE;
@@ -3157,6 +3225,7 @@ addBtn.addEventListener('click', async () => {
 // 初期表示
 (async () => {
   await initializeI18n();
+  await refreshSurveyBand();
   await loadWatchlistLimitSetting();
   const loadedItems = await loadFavorites();
   const migrated = await migrateWatchlistQueriesIfNeeded(loadedItems);
@@ -3591,8 +3660,23 @@ function normalizeOverlayLayoutPresets(raw) {
       appName: String(value.appName || '').trim(),
       activePresetId,
       presets,
+      // 3.3.0: ビューごとの既定(id:<viewId> → presetId | '__view__')。消えたプリセットを指す対応は落とす
+      viewDefaults: normalizeOverlayViewDefaults(value.viewDefaults, presets),
       updatedAt: Number(value.updatedAt || 0)
     };
+  });
+  return next;
+}
+
+function normalizeOverlayViewDefaults(raw, presets) {
+  if (!raw || typeof raw !== 'object') return {};
+  const ids = new Set(presets.map((preset) => preset.id));
+  const next = {};
+  Object.entries(raw).forEach(([viewKey, presetIdRaw]) => {
+    const presetId = String(presetIdRaw || '').trim();
+    if (!String(viewKey).startsWith('id:') || !presetId) return;
+    if (presetId !== '__view__' && !ids.has(presetId)) return;
+    next[viewKey] = presetId;
   });
   return next;
 }
@@ -4146,6 +4230,7 @@ async function deleteLayoutById(layoutId, appKeyHint = '') {
         ...state,
         activePresetId,
         presets: nextPresets,
+        viewDefaults: normalizeOverlayViewDefaults(state.viewDefaults, nextPresets),
         updatedAt: Date.now()
       };
     }

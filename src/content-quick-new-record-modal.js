@@ -36,6 +36,41 @@
     });
   }
 
+  // Quick New専用の項目設定（QUICK_NEW_FIELDS_KEY, host::appId単位）。
+  // 未設定のアプリは常に null を返し、呼び出し側は Excel Overlay の
+  // レイアウトプリセットにフォールバックする。
+  async function qnrLoadFieldsConfig(appKey) {
+    try {
+      const stored = await chrome.storage.local.get(QUICK_NEW_FIELDS_KEY);
+      const map = stored?.[QUICK_NEW_FIELDS_KEY];
+      const entry = map && typeof map === 'object' ? map[appKey] : null;
+      if (entry && Array.isArray(entry.fields) && entry.fields.length) {
+        return { fields: entry.fields.slice(), updatedAt: entry.updatedAt };
+      }
+    } catch (_err) { /* ストレージ失敗時は未設定として扱う */ }
+    return null;
+  }
+
+  async function qnrSaveFieldsConfig(appKey, fields) {
+    try {
+      const stored = await chrome.storage.local.get(QUICK_NEW_FIELDS_KEY);
+      const prevMap = stored?.[QUICK_NEW_FIELDS_KEY];
+      const map = (prevMap && typeof prevMap === 'object') ? { ...prevMap } : {};
+      map[appKey] = { fields: Array.isArray(fields) ? fields.slice() : [], updatedAt: Date.now() };
+      await chrome.storage.local.set({ [QUICK_NEW_FIELDS_KEY]: map });
+    } catch (_err) { /* noop */ }
+  }
+
+  async function qnrRemoveFieldsConfig(appKey) {
+    try {
+      const stored = await chrome.storage.local.get(QUICK_NEW_FIELDS_KEY);
+      const prevMap = stored?.[QUICK_NEW_FIELDS_KEY];
+      const map = (prevMap && typeof prevMap === 'object') ? { ...prevMap } : {};
+      delete map[appKey];
+      await chrome.storage.local.set({ [QUICK_NEW_FIELDS_KEY]: map });
+    } catch (_err) { /* noop */ }
+  }
+
   // 数値フィールド向けの入力正規化。全角数字・全角記号を半角化し、
   // 桁区切りカンマを除去する（"１，０００" → "1000"）。
   function qnrNormalizeNumberText(raw) {
@@ -263,9 +298,12 @@
           activePresetId = 'default';
         }
 
+        // Quick New専用の項目設定（あれば Excel Overlay のプリセットより優先する）
+        const quickNewConfig = await qnrLoadFieldsConfig(appKey);
+
         // Rebuild panel
         panel.innerHTML = '';
-        this._buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName);
+        this._buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName, quickNewConfig, appKey);
       } catch (err) {
         console.error('[kintone-excel-overlay] quick new record load failed', err);
         this.close();
@@ -289,6 +327,13 @@
           if (openPicker) {
             if (typeof openPicker.__pbClose === 'function') openPicker.__pbClose();
             else openPicker.remove();
+            return;
+          }
+          // 項目選択パネルが開いていれば、まずそれだけ閉じる（モーダル自体は閉じない）
+          const openFieldsPicker = layer.querySelector('.pb-newrec__fields-picker');
+          if (openFieldsPicker) {
+            if (typeof openFieldsPicker.__pbClose === 'function') openFieldsPicker.__pbClose();
+            else openFieldsPicker.remove();
             return;
           }
           void this.requestClose();
@@ -364,8 +409,14 @@
       return result;
     }
 
-    _buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName = '') {
+    _buildContent(panel, appId, language, allFieldsMap, presets, activePresetId, listUrl, appName = '', quickNewConfig = null, appKey = '') {
       const t = (key) => resolveText(language, key);
+
+      // Quick New専用の項目設定（あれば Excel Overlay のプリセットより優先）。
+      // 保存/リセットで書き換わるため let で持つ
+      let activeConfigFields = (quickNewConfig && Array.isArray(quickNewConfig.fields) && quickNewConfig.fields.length)
+        ? quickNewConfig.fields.slice()
+        : null;
 
       // Header（アプリ名 + タイトル）
       const head = document.createElement('div');
@@ -396,7 +447,7 @@
       head.appendChild(titleWrap);
       head.appendChild(closeBtn);
 
-      // Preset selector
+      // Preset selector（Quick New専用設定があるときはこの行をラベル表示に切り替える）
       const presetRow = document.createElement('div');
       presetRow.className = 'pb-newrec__preset-row';
       const presetLabelEl = document.createElement('label');
@@ -411,8 +462,24 @@
         opt.selected = p.id === activePresetId;
         presetSelect.appendChild(opt);
       });
+      const customLabelEl = document.createElement('span');
+      customLabelEl.className = 'pb-newrec__fields-custom-label';
+      customLabelEl.textContent = t('qnrFieldsCustomLabel');
+      const fieldsPickBtn = document.createElement('button');
+      fieldsPickBtn.type = 'button';
+      fieldsPickBtn.className = 'pb-overlay__btn pb-newrec__fields-pick-btn';
+      fieldsPickBtn.textContent = t('qnrFieldsPick');
+      const updatePresetRowMode = () => {
+        const custom = Boolean(activeConfigFields);
+        presetLabelEl.style.display = custom ? 'none' : '';
+        presetSelect.style.display = custom ? 'none' : '';
+        customLabelEl.style.display = custom ? '' : 'none';
+      };
+      updatePresetRowMode();
       presetRow.appendChild(presetLabelEl);
       presetRow.appendChild(presetSelect);
+      presetRow.appendChild(customLabelEl);
+      presetRow.appendChild(fieldsPickBtn);
 
       // Body (form fields)
       const body = document.createElement('div');
@@ -440,11 +507,23 @@
       foot.appendChild(saveNextBtn);
       foot.appendChild(saveBtn);
 
+      // 現在表示中の項目コード列（Quick New専用設定があればそれ、なければ
+      // 選択中の Excel Overlay プリセット）。項目選択パネルの初期状態に使う
+      const getCurrentFieldCodesOrdered = () => {
+        if (activeConfigFields) return activeConfigFields.slice();
+        const preset = presets.find((p) => p.id === presetSelect.value) || presets[0];
+        const visible = new Set(Array.isArray(preset.visibleColumns) ? preset.visibleColumns : []);
+        const order = Array.isArray(preset.columnOrder) ? preset.columnOrder : [];
+        return order.filter((c) => visible.size === 0 || visible.has(c));
+      };
+
       let fieldInputMap = new Map();
-      const renderBody = (presetId) => {
+      const renderBody = () => {
         body.innerHTML = '';
         fieldInputMap = new Map();
-        const preset = presets.find((p) => p.id === presetId) || presets[0];
+        const preset = activeConfigFields
+          ? { id: '__qnrCustom__', columnOrder: activeConfigFields, visibleColumns: activeConfigFields }
+          : (presets.find((p) => p.id === presetSelect.value) || presets[0]);
         const fields = this._getFieldsForPreset(preset, allFieldsMap);
         if (!fields.length) {
           const empty = document.createElement('div');
@@ -683,15 +762,187 @@
         });
       };
 
-      renderBody(activePresetId || (presets[0]?.id || ''));
+      renderBody();
 
-      presetSelect.addEventListener('change', () => renderBody(presetSelect.value));
+      presetSelect.addEventListener('change', () => renderBody());
 
       // 「保存して次へ」成功後にフォームを初期状態へ戻す
       const resetForm = () => {
-        renderBody(presetSelect.value || activePresetId || (presets[0]?.id || ''));
+        renderBody();
         focusFirst();
       };
+
+      // 入力中の値をコード単位で退避/復元する（項目選択の保存/リセットで
+      // フォームを再構築しても、残る項目の入力済み値は失わないようにする）
+      const captureFieldValues = () => {
+        const vals = new Map();
+        fieldInputMap.forEach((entry, code) => {
+          try { vals.set(code, entry.getValue()); } catch (_e) { /* noop */ }
+        });
+        return vals;
+      };
+      const restoreFieldValues = (vals) => {
+        if (!vals) return;
+        fieldInputMap.forEach((entry, code) => {
+          if (!vals.has(code) || typeof entry.setValue !== 'function') return;
+          try { entry.setValue(vals.get(code)); } catch (_e) { /* noop */ }
+        });
+      };
+
+      // ── 項目選択パネル（項目を選ぶ） ────────────────────────────────────
+      let fieldsPickerEl = null;
+      const closeFieldsPicker = () => {
+        if (fieldsPickerEl) { fieldsPickerEl.remove(); fieldsPickerEl = null; }
+        try { fieldsPickBtn.focus(); } catch (_e) { /* noop */ }
+      };
+      const openFieldsPicker = () => {
+        if (fieldsPickerEl) return;
+        const pickableFields = Array.from(allFieldsMap.values())
+          .filter((f) => !NON_EDITABLE_QNR_TYPES.has(String(f.type || '').toUpperCase()) && !f.lookupAuto);
+        const pickableCodes = new Set(pickableFields.map((f) => f.code));
+        const currentCodes = getCurrentFieldCodesOrdered().filter((c) => pickableCodes.has(c));
+        const currentSet = new Set(currentCodes);
+        const remaining = pickableFields.map((f) => f.code).filter((c) => !currentSet.has(c));
+        const order = [...currentCodes, ...remaining];
+        const checked = new Set(currentCodes);
+
+        const root = document.createElement('div');
+        root.className = 'pb-newrec__fields-picker';
+        root.setAttribute('role', 'dialog');
+        root.setAttribute('aria-label', t('qnrFieldsPickTitle'));
+
+        const titleEl = document.createElement('div');
+        titleEl.className = 'pb-newrec__fields-picker-title';
+        titleEl.textContent = t('qnrFieldsPickTitle');
+
+        const listEl = document.createElement('div');
+        listEl.className = 'pb-newrec__fields-picker-list';
+
+        const noticeEl = document.createElement('div');
+        noticeEl.className = 'pb-newrec__fields-picker-notice';
+        noticeEl.textContent = t('qnrFieldsNoneSelected');
+        noticeEl.style.display = 'none';
+
+        const footEl = document.createElement('div');
+        footEl.className = 'pb-newrec__fields-picker-foot';
+        const resetConfigBtn = document.createElement('button');
+        resetConfigBtn.type = 'button';
+        resetConfigBtn.className = 'pb-overlay__btn pb-newrec__fields-picker-reset';
+        resetConfigBtn.textContent = t('qnrFieldsReset');
+        resetConfigBtn.style.display = activeConfigFields ? '' : 'none';
+        const cancelPickBtn = document.createElement('button');
+        cancelPickBtn.type = 'button';
+        cancelPickBtn.className = 'pb-overlay__btn';
+        cancelPickBtn.textContent = t('qnrFieldsCancel');
+        const savePickBtn = document.createElement('button');
+        savePickBtn.type = 'button';
+        savePickBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
+        savePickBtn.textContent = t('qnrFieldsSave');
+        footEl.append(resetConfigBtn, cancelPickBtn, savePickBtn);
+
+        const renderList = (focus) => {
+          listEl.innerHTML = '';
+          order.forEach((code, idx) => {
+            const f = allFieldsMap.get(code);
+            if (!f) return;
+            const row = document.createElement('div');
+            row.className = 'pb-newrec__fields-picker-row';
+            const cbId = `pb-newrec-fp-cb-${idx}`;
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.id = cbId;
+            cb.checked = checked.has(code);
+            cb.addEventListener('change', () => {
+              if (cb.checked) checked.add(code); else checked.delete(code);
+            });
+            const label = document.createElement('label');
+            label.setAttribute('for', cbId);
+            label.className = 'pb-newrec__fields-picker-label';
+            label.textContent = f.label || f.code;
+            const moveWrap = document.createElement('div');
+            moveWrap.className = 'pb-newrec__fields-picker-move';
+            const upBtn = document.createElement('button');
+            upBtn.type = 'button';
+            upBtn.className = 'pb-newrec__fields-picker-move-btn pb-newrec__fields-picker-move-btn--up';
+            upBtn.textContent = '▲';
+            upBtn.setAttribute('aria-label', t('qnrFieldsMoveUp'));
+            upBtn.disabled = idx === 0;
+            upBtn.addEventListener('click', () => {
+              if (idx === 0) return;
+              [order[idx - 1], order[idx]] = [order[idx], order[idx - 1]];
+              renderList({ idx: idx - 1, dir: 'up' });
+            });
+            const downBtn = document.createElement('button');
+            downBtn.type = 'button';
+            downBtn.className = 'pb-newrec__fields-picker-move-btn pb-newrec__fields-picker-move-btn--down';
+            downBtn.textContent = '▼';
+            downBtn.setAttribute('aria-label', t('qnrFieldsMoveDown'));
+            downBtn.disabled = idx === order.length - 1;
+            downBtn.addEventListener('click', () => {
+              if (idx === order.length - 1) return;
+              [order[idx], order[idx + 1]] = [order[idx + 1], order[idx]];
+              renderList({ idx: idx + 1, dir: 'down' });
+            });
+            moveWrap.append(upBtn, downBtn);
+            row.append(cb, label, moveWrap);
+            listEl.appendChild(row);
+          });
+          if (focus) {
+            requestAnimationFrame(() => {
+              const rows = listEl.querySelectorAll('.pb-newrec__fields-picker-row');
+              const row = rows[focus.idx];
+              const btn = row?.querySelector(focus.dir === 'up'
+                ? '.pb-newrec__fields-picker-move-btn--up'
+                : '.pb-newrec__fields-picker-move-btn--down');
+              try { btn?.focus(); } catch (_e) { /* noop */ }
+            });
+          }
+        };
+        renderList();
+
+        cancelPickBtn.addEventListener('click', () => closeFieldsPicker());
+        savePickBtn.addEventListener('click', () => {
+          const selected = order.filter((c) => checked.has(c));
+          if (!selected.length) {
+            noticeEl.style.display = '';
+            return;
+          }
+          void (async () => {
+            await qnrSaveFieldsConfig(appKey, selected);
+            const prevValues = captureFieldValues();
+            activeConfigFields = selected;
+            updatePresetRowMode();
+            renderBody();
+            restoreFieldValues(prevValues);
+            closeFieldsPicker();
+          })();
+        });
+        resetConfigBtn.addEventListener('click', () => {
+          void (async () => {
+            await qnrRemoveFieldsConfig(appKey);
+            const prevValues = captureFieldValues();
+            activeConfigFields = null;
+            updatePresetRowMode();
+            renderBody();
+            restoreFieldValues(prevValues);
+            closeFieldsPicker();
+          })();
+        });
+
+        root.append(titleEl, listEl, noticeEl, footEl);
+        root.__pbClose = closeFieldsPicker;
+        // プリセット行とフォーム本体の間にインラインで差し込む（新規ウィンドウではなく
+        // モーダル内パネルとして表示する）
+        panel.insertBefore(root, body);
+        fieldsPickerEl = root;
+        requestAnimationFrame(() => {
+          try { listEl.querySelector('input[type="checkbox"]')?.focus(); } catch (_e) { /* noop */ }
+        });
+      };
+      fieldsPickBtn.addEventListener('click', () => {
+        if (fieldsPickerEl) closeFieldsPicker();
+        else openFieldsPicker();
+      });
 
       const buttons = { saveBtn, saveNextBtn, cancelBtn };
       saveBtn.addEventListener('click', () => {

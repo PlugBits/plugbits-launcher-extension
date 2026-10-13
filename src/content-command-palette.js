@@ -226,6 +226,60 @@
   }
   void cpSyncLanguage();
 
+  // 3.3.0: 利用者アンケート A ── 検索語が空のときだけ一覧の最後に1行出す。
+  // 対象/期間は service_worker が書く kfavSurveyA（eligibleAt から7日間・doneなら出さない）。
+  const SURVEY_A_PALETTE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+  const SURVEY_A_FORM_BASE_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdVQboVqyIhnqa_EgwthxUzkOmbLgld9tg2c04AcxUVBR8ROw/viewform';
+  let cpSurveyState = null;
+  let cpSurveyRowVisible = false;
+  async function cpSyncSurveyState() {
+    try {
+      const stored = await chrome.storage.local.get(SURVEY_A_KEY);
+      const state = stored?.[SURVEY_A_KEY];
+      cpSurveyState = state && typeof state === 'object' ? state : null;
+      const now = Date.now();
+      cpSurveyRowVisible = Boolean(
+        cpSurveyState &&
+        !cpSurveyState.done &&
+        typeof cpSurveyState.eligibleAt === 'number' &&
+        now >= cpSurveyState.eligibleAt &&
+        now < cpSurveyState.eligibleAt + SURVEY_A_PALETTE_WINDOW_MS
+      );
+    } catch (_) {
+      cpSurveyState = null;
+      cpSurveyRowVisible = false;
+    }
+  }
+  function cpBuildSurveyFormUrl(language) {
+    const version = chrome.runtime.getManifest?.()?.version || '';
+    const lang = language === 'en' ? 'en' : 'ja';
+    return `${SURVEY_A_FORM_BASE_URL}?usp=pp_url&entry.1032001690=${encodeURIComponent(version)}&entry.1077819437=${lang}`;
+  }
+  async function cpMarkSurveyDone() {
+    try {
+      const next = { ...(cpSurveyState || {}), done: true };
+      cpSurveyState = next;
+      cpSurveyRowVisible = false;
+      await chrome.storage.local.set({ [SURVEY_A_KEY]: next });
+    } catch (_) { /* ignore */ }
+  }
+  function cpBuildSurveyRowCommand() {
+    return {
+      id: 'survey-a',
+      labelKey: 'surveyPaletteRow',
+      icon: '✎',
+      // 他の候補と見分けがつくよう、行全体を青系にして右にアンケートの札を出す
+      badge: cpLanguage === 'en' ? 'Survey' : 'アンケート',
+      highlight: true,
+      keywords: [],
+      action() {
+        window.open(cpBuildSurveyFormUrl(cpLanguage), '_blank', 'noopener,noreferrer');
+        void cpMarkSurveyDone();
+      }
+    };
+  }
+  void cpSyncSurveyState();
+
   const CP_COMMANDS = [
     // ─ App search ─
     {
@@ -917,6 +971,10 @@
         #pb-command-palette .pb-cp__item--active .pb-cp__item-sub{color:#60a5fa!important}
         #pb-command-palette .pb-cp__item-badge{font-size:10px!important;padding:2px 8px!important;border-radius:9999px!important;background:#f3f4f6!important;color:#6b7280!important;font-weight:600!important;font-family:ui-monospace,monospace!important;flex-shrink:0!important;white-space:nowrap!important;letter-spacing:.02em!important}
         #pb-command-palette .pb-cp__item--active .pb-cp__item-badge{background:#dbeafe!important;color:#3b82f6!important}
+        #pb-command-palette .pb-cp__item--highlight{box-shadow:inset 3px 0 0 #2563eb!important}
+        #pb-command-palette .pb-cp__item--highlight .pb-cp__item-icon{background:#dbeafe!important;color:#2563eb!important}
+        #pb-command-palette .pb-cp__item--highlight .pb-cp__item-label{color:#1d4ed8!important;font-weight:700!important}
+        #pb-command-palette .pb-cp__item--highlight .pb-cp__item-badge{background:#2563eb!important;color:#fff!important;font-family:inherit!important}
         #pb-command-palette .pb-cp__empty{padding:32px 16px!important;text-align:center!important;color:#9ca3af!important;font-size:13px!important;display:block!important}
         #pb-command-palette .pb-cp__shortcut-bar{border-top:1px solid #e5e7eb!important;padding:8px 12px!important;display:flex!important;gap:6px!important;flex-wrap:wrap!important;flex-shrink:0!important;background:#fafafa!important}
         #pb-command-palette .pb-cp__shortcut-bar:empty{display:none!important}
@@ -993,7 +1051,7 @@
         if (cpItemLabel(cmd).toLowerCase().includes(q)) return true;
         return (cmd.keywords || []).some((k) => k.toLowerCase().includes(q));
       });
-      this.filtered = cmds;
+      this.filtered = (!q && cpSurveyRowVisible) ? [...cmds, cpBuildSurveyRowCommand()] : cmds;
       this.activeIndex = 0;
       this.renderFooter();
       this.renderList();
@@ -1053,7 +1111,7 @@
         }
 
         const item = document.createElement('div');
-        item.className = 'pb-cp__item' + (i === this.activeIndex ? ' pb-cp__item--active' : '');
+        item.className = 'pb-cp__item' + (i === this.activeIndex ? ' pb-cp__item--active' : '') + (cmd.highlight ? ' pb-cp__item--highlight' : '');
         item.id = `pb-cp-item-${i}`;
         item.setAttribute('role', 'option');
         item.setAttribute('aria-selected', i === this.activeIndex ? 'true' : 'false');
@@ -1166,6 +1224,7 @@
 
     async open() {
       await cpSyncLanguage();
+      await cpSyncSurveyState();
       if (!this.backdropEl) this.mount();
       await Promise.all([this.fetchContext(), this.fetchShortcutCommands()]);
       this.backdropEl.style.display = 'flex';

@@ -17,8 +17,49 @@ function disableLegacyWatchlistBadgeRefresh() {
   chrome.alarms?.clear?.('kfav-badge-refresh').catch?.(() => {});
 }
 
+// 3.3.0: 利用者アンケート A ── 対象は「3.3.0 未満からの更新」(即時)と「新規導入」(3日後から)。
+// 両者とも既にキーがあれば何もしない(=2回目以降の更新では作り直さない)。
+const SURVEY_A_KEY = 'kfavSurveyA';
+const SURVEY_A_TARGET_VERSION = '3.3.0';
+const SURVEY_A_INSTALL_DELAY_MS = 3 * 24 * 60 * 60 * 1000;
+
+// a, b を "x.y.z" 形式の文字列として比較する（欠けた桁は0扱い）。a<b なら負、等しければ0、a>b なら正。
+function compareVersions(a, b) {
+  const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+async function initializeSurveyAEligibility(details) {
+  const reason = details?.reason;
+  let eligibleAt = null;
+  if (reason === 'install') {
+    eligibleAt = Date.now() + SURVEY_A_INSTALL_DELAY_MS;
+  } else if (reason === 'update') {
+    const previousVersion = String(details?.previousVersion || '');
+    if (previousVersion && compareVersions(previousVersion, SURVEY_A_TARGET_VERSION) < 0) {
+      eligibleAt = Date.now();
+    }
+  }
+  if (eligibleAt === null) return;
+  try {
+    const stored = await chrome.storage.local.get(SURVEY_A_KEY);
+    if (stored && Object.prototype.hasOwnProperty.call(stored, SURVEY_A_KEY)) return;
+    await chrome.storage.local.set({
+      [SURVEY_A_KEY]: { eligibleAt, bandDismissed: false, done: false }
+    });
+  } catch (error) {
+    console.error('[kfav] failed to initialize survey A state', error);
+  }
+}
+
 // MV3 起動時セットアップ
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   disableLegacyWatchlistBadgeRefresh();
   ensureThresholdAlarm();
  // Edge/Chrome: サイドパネルを有効化 & アイコンクリックで開く挙動を設定
@@ -37,6 +78,9 @@ chrome.runtime.onInstalled.addListener(() => {
 
   setupContextMenus();
   migrateShortcutsFillIconFieldsOnce().catch(() => {});
+  initializeSurveyAEligibility(details).catch((error) => {
+    console.error('[kfav] survey A eligibility init failed', error);
+  });
 });
 
 // 起動時に自動でコネクタタブを作成しない
