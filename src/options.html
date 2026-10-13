@@ -8,11 +8,6 @@
   <link rel="stylesheet" href="options.css" />
 </head>
 <body>
-  <div id="survey_a_band" class="survey-a-band" hidden>
-    <span id="survey_a_band_text" class="survey-a-band__text" data-i18n="survey_a_band_text">3つだけ教えてください（1分・匿名）。今後の改善にだけ使います。</span>
-    <button type="button" id="survey_a_band_answer" class="survey-a-band__answer" data-i18n="survey_a_band_answer">答える</button>
-    <button type="button" id="survey_a_band_close" class="survey-a-band__close" aria-label="閉じる" data-i18n-aria-label="survey_a_band_close_aria">×</button>
-  </div>
   <div class="layout">
     <aside class="sidebar">
       <h1 data-i18n="settings_title">PlugBits Launcher 設定</h1>
@@ -27,6 +22,14 @@
       </nav>
     </aside>
     <main class="content" id="content">
+    <div id="survey_a_band" class="survey-a-band" role="region" aria-labelledby="survey_a_band_title" hidden>
+      <div class="survey-a-band__body">
+        <p id="survey_a_band_title" class="survey-a-band__title" data-i18n="survey_a_band_title">3 つだけ教えてください(1 分・匿名)</p>
+        <p class="survey-a-band__note" data-i18n="survey_a_band_note">今後の改善にだけ使います</p>
+      </div>
+      <button type="button" id="survey_a_band_answer" class="survey-a-band__answer" data-i18n="survey_a_band_answer">回答する</button>
+      <button type="button" id="survey_a_band_close" class="survey-a-band__close" aria-label="閉じる" data-i18n-aria-label="survey_a_band_close_aria">✕</button>
+    </div>
       <section class="pane is-active" data-pane="general" aria-labelledby="pane-general-title">
         <section class="card">
           <h2 id="pane-general-title" data-i18n="general_section_title">全般</h2>

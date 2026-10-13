@@ -418,8 +418,9 @@ const I18N_MESSAGES = {
     pro_portal_btn: '領収書',
     pro_clear_btn: 'ライセンス解除',
     pro_portal_hint: '領収書の発行は「領収書」から行えます。',
-    survey_a_band_text: '3つだけ教えてください（1分・匿名）。今後の改善にだけ使います。',
-    survey_a_band_answer: '答える',
+    survey_a_band_title: '3 つだけ教えてください(1 分・匿名)',
+    survey_a_band_note: '今後の改善にだけ使います',
+    survey_a_band_answer: '回答する',
     survey_a_band_close_aria: '閉じる',
   },
   en: {
@@ -743,7 +744,8 @@ const I18N_MESSAGES = {
     pro_portal_btn: 'Receipts',
     pro_clear_btn: 'Remove license',
     pro_portal_hint: 'Download receipts from "Receipts".',
-    survey_a_band_text: '3 quick questions (1 min, anonymous). Used only to improve the extension.',
+    survey_a_band_title: '3 quick questions (1 min, anonymous)',
+    survey_a_band_note: 'Used only to improve the extension',
     survey_a_band_answer: 'Answer',
     survey_a_band_close_aria: 'Close',
   }

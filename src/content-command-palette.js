@@ -268,7 +268,9 @@
       id: 'survey-a',
       labelKey: 'surveyPaletteRow',
       icon: '✎',
-      badge: '',
+      // 他の候補と見分けがつくよう、行全体を青系にして右にアンケートの札を出す
+      badge: cpLanguage === 'en' ? 'Survey' : 'アンケート',
+      highlight: true,
       keywords: [],
       action() {
         window.open(cpBuildSurveyFormUrl(cpLanguage), '_blank', 'noopener,noreferrer');
@@ -969,6 +971,10 @@
         #pb-command-palette .pb-cp__item--active .pb-cp__item-sub{color:#60a5fa!important}
         #pb-command-palette .pb-cp__item-badge{font-size:10px!important;padding:2px 8px!important;border-radius:9999px!important;background:#f3f4f6!important;color:#6b7280!important;font-weight:600!important;font-family:ui-monospace,monospace!important;flex-shrink:0!important;white-space:nowrap!important;letter-spacing:.02em!important}
         #pb-command-palette .pb-cp__item--active .pb-cp__item-badge{background:#dbeafe!important;color:#3b82f6!important}
+        #pb-command-palette .pb-cp__item--highlight{box-shadow:inset 3px 0 0 #2563eb!important}
+        #pb-command-palette .pb-cp__item--highlight .pb-cp__item-icon{background:#dbeafe!important;color:#2563eb!important}
+        #pb-command-palette .pb-cp__item--highlight .pb-cp__item-label{color:#1d4ed8!important;font-weight:700!important}
+        #pb-command-palette .pb-cp__item--highlight .pb-cp__item-badge{background:#2563eb!important;color:#fff!important;font-family:inherit!important}
         #pb-command-palette .pb-cp__empty{padding:32px 16px!important;text-align:center!important;color:#9ca3af!important;font-size:13px!important;display:block!important}
         #pb-command-palette .pb-cp__shortcut-bar{border-top:1px solid #e5e7eb!important;padding:8px 12px!important;display:flex!important;gap:6px!important;flex-wrap:wrap!important;flex-shrink:0!important;background:#fafafa!important}
         #pb-command-palette .pb-cp__shortcut-bar:empty{display:none!important}
@@ -1105,7 +1111,7 @@
         }
 
         const item = document.createElement('div');
-        item.className = 'pb-cp__item' + (i === this.activeIndex ? ' pb-cp__item--active' : '');
+        item.className = 'pb-cp__item' + (i === this.activeIndex ? ' pb-cp__item--active' : '') + (cmd.highlight ? ' pb-cp__item--highlight' : '');
         item.id = `pb-cp-item-${i}`;
         item.setAttribute('role', 'option');
         item.setAttribute('aria-selected', i === this.activeIndex ? 'true' : 'false');
