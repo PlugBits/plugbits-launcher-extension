@@ -1555,6 +1555,7 @@
       // 3.3.0 利用者アンケート
       surveyPaletteRow: "3つだけ教えてください（アンケート・1分）",
       // kintoneページ本体のトースト（options.html の survey-a-band と同じ文言）
+      surveyToastFrom: "PlugBits Launcher からのお願い",
       surveyToastTitle: "3 つだけ教えてください(1 分・匿名)",
       surveyToastNote: "今後の改善にだけ使います",
       surveyToastAnswer: "回答する",
@@ -1894,6 +1895,7 @@
       // 3.3.0 user survey
       surveyPaletteRow: "3 quick questions (survey, 1 min)",
       // Kintone page-level toast (same copy as the survey-a-band on options.html)
+      surveyToastFrom: "From PlugBits Launcher",
       surveyToastTitle: "3 quick questions (1 min, anonymous)",
       surveyToastNote: "Used only to improve the extension",
       surveyToastAnswer: "Answer",
@@ -3335,6 +3337,10 @@
     el.style.setProperty('right', `${right}px`, 'important');
   }
 
+  // 差出人の行のアイコン(拡張の icon16.png)。web_accessible_resources を増やさない
+  // ために data URI で持つ。
+  const SURVEY_TOAST_ICON_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAL6UExURRFPrBJQrwA9picqv0hGx0ZExxNRrQBCojU0wQIZNxAZehMmPxYfcQ8jPRIlPwIYMwwWbBYedBQdchlWwRdTwxdQxBpOxR5LxCNIxStGxTNExj1GyEZKyRpYsApKsglJtwxKvBBJvhRIwBhHwB1EwSRBwio9wjI8wzg9xD4/xVBLyghHogREqDc5wT88wi1amgVBlzg2v1ZQyBhJkQU8jDIyuUA9vRtHhgU3fysusjQ0thxCegUzcictrjAysxw/cgUuZyMqqiwvrh09awUrXiAopSktqh06YwUnVR0moSYrphw2WwUkTRsjmiMnoBcvUQUhRBkhkikunUxcdQYePhYeh1ZVuwgeOwMaNw8YdBMbfDpFVAYbNQQZMwQYNAQYNgQZOgUZPgUZQwYYSAgYTwoYVgsXYA0YaiwsdSUzRw4hOgsfOQsfPAseQAseQwweSA4eThEfVh8rVwVErQdFsQtEtAxBtQ8/tRQ9txs6uCxKvzJIvzI9vwI/mgNAnwQ/oxFGqFJ1wIKZ0oqd1IOT0VN7xT5rwztlyzE4uQI7jgI6kQ9DmJar0vT3+vX3+e7z+Pr8/LC62T9wySxGsyoxsAI2gQAzgVd4rPX4+sTL2E5qnztx0pCr3+7x9Z2q1DxKyisztAExcwAuc4abu1ltlQEqewZKwjplu+ru8sPO6ilCtSErpAIsaAAqZ4icuO7y9kVeiwgzhhpg3ICi5PL295yx5RtAvx0poAIoXQAmXYeZs+vw9U5ki4qdvsjZ9Ovx+dDc8EBZqBMmkRsnnQAkUxk5ZbvG1IuZsIaUra281o+fwzxXohErkRUjjRklmgAfSS9JbN7l7PH3+665yA0oXws3lAouiQodbBAhfhQiixcikwEdQhUuUKCsurC5xXWEnQUeUgYhYgohaQ0fbg8feBIegRQeiwIbPAIbO0VXb0ZXby5CZAIaSgYcUwgcWwodZA0cbQ8bdxEbgAIZNgQZNwQaOQQaPwQaRQUaSgcZUAgZVwoZXwwYav///2FioPwAAABzdFJOUwAAAAAAAAAAAAAAAAAAAAAAAAASKCwsLCssLCkTBGHH4+bm5eXl5uPJZAVU9PZZBKmtBQzBww0OxcQODsTEDg7FxA4OxcQODsXEDg7ExA4LwMEMAqCfAkPo6EABRKPCxMTExMTEwaNDAQMMDg4ODg4ODAOUEaZHAAAAAWJLR0T9SwmT6QAAAAlwSFlzAAAOwwAADsMBx2+oZAAAAAd0SU1FB+oDDRAFHyKYaokAAAEbSURBVBjTARAB7/4AAAECExQVFhcYGRobHAMEBQAGHR4fICEiIyQlJicoKSoEAAcrLHN0dXZ3eHl6e3wtLggALzB9fn+AgYKDhIWGh4gxMgAzNImKi4yNjo+QkZKTlDU2ADc4lZaXmJmam5ydnp+gOToAOzyhoqOYpKWmp6ipqqs9PgA/QKytrq+wsbKztLW2t0FCAENEuLm6u7y9vr/AwcLDRUYAR0jExcaPx8jJysvMzc5JSgBLTM/Q0dLT1NXW19jZ2k1OAE9Q29zd3t/g4eLj5OXmUVIAU1Tn6Onq6+zt7u/w8fJVVgAJV1jz9PX29/j5+vv8WVoKAAtbXF1eX2BhYmNkZWZnaAwADQ4PaWprbG1ub3BxchAREgSFfbJqY0EbAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDI2LTAzLTEzVDE2OjA1OjEzKzAwOjAwVdQqhgAAACV0RVh0ZGF0ZTptb2RpZnkAMjAyNi0wMy0xM1QxNjowNToxMyswMDowMCSJkjoAAAAodEVYdGRhdGU6dGltZXN0YW1wADIwMjYtMDMtMTNUMTY6MDU6MzErMDA6MDCmJqWxAAAAAElFTkSuQmCC';
+
   async function showSurveyToast(language) {
     if (surveyToastEl && document.body.contains(surveyToastEl)) return;
 
@@ -3349,6 +3355,8 @@
       #pb-survey-toast *{box-sizing:border-box!important}
       #pb-survey-toast .pb-st__head{display:flex!important;align-items:flex-start!important;gap:8px!important}
       #pb-survey-toast .pb-st__body{flex:1!important;min-width:0!important}
+      #pb-survey-toast .pb-st__from{display:flex!important;align-items:center!important;gap:6px!important;margin:0 0 4px!important;font-size:11px!important;font-weight:400!important;color:#475569!important;line-height:1.3!important}
+      #pb-survey-toast .pb-st__icon{width:16px!important;height:16px!important;flex-shrink:0!important;display:block!important;margin:0!important;border:0!important}
       #pb-survey-toast .pb-st__title{margin:0!important;font-size:13px!important;font-weight:700!important;color:#111827!important;line-height:1.4!important}
       #pb-survey-toast .pb-st__note{margin:3px 0 0!important;font-size:11px!important;color:#64748b!important;line-height:1.4!important}
       #pb-survey-toast .pb-st__close{appearance:none!important;border:none!important;background:transparent!important;color:#94a3b8!important;font-size:14px!important;line-height:1!important;cursor:pointer!important;padding:2px 4px!important;border-radius:6px!important;flex-shrink:0!important}
@@ -3367,7 +3375,18 @@
     const note = document.createElement('p');
     note.className = 'pb-st__note';
     note.textContent = resolveText(language, 'surveyToastNote');
-    body.append(title, note);
+    const from = document.createElement('p');
+    from.className = 'pb-st__from';
+    const icon = document.createElement('img');
+    icon.className = 'pb-st__icon';
+    icon.src = SURVEY_TOAST_ICON_DATA_URI;
+    icon.alt = '';
+    icon.width = 16;
+    icon.height = 16;
+    const fromText = document.createElement('span');
+    fromText.textContent = resolveText(language, 'surveyToastFrom');
+    from.append(icon, fromText);
+    body.append(from, title, note);
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';

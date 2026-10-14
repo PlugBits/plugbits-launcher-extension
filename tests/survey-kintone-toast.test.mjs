@@ -77,6 +77,21 @@ export async function run({ browser, check }) {
     });
     try {
       check('toast: 対象ユーザーに表示される', await page.locator('#pb-survey-toast').count() === 1);
+      check('toast: 差出人の行(日本語)',
+        (await page.locator('#pb-survey-toast .pb-st__from').textContent() || '').trim() === 'PlugBits Launcher からのお願い');
+      check('toast: 差出人の行は見出しの上',
+        await page.evaluate(() => {
+          const from = document.querySelector('#pb-survey-toast .pb-st__from');
+          const title = document.querySelector('#pb-survey-toast .pb-st__title');
+          return !!(from && title && (from.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING));
+        }));
+      check('toast: 差出人の行の左に拡張のアイコン(16px・data URI)',
+        await page.evaluate(() => {
+          const img = document.querySelector('#pb-survey-toast .pb-st__from img.pb-st__icon');
+          if (!img || !img.src.startsWith('data:image/png;base64,')) return false;
+          const r = img.getBoundingClientRect();
+          return img.complete && img.naturalWidth > 0 && r.width === 16 && r.height === 16;
+        }));
       check('toast: 日本語タイトル(バナーと同じ文言)',
         (await page.locator('#pb-survey-toast .pb-st__title').textContent() || '').includes('3 つだけ教えてください'));
       check('toast: 日本語の注記(バナーと同じ文言)',
@@ -228,6 +243,8 @@ export async function run({ browser, check }) {
       version: '3.3.0'
     });
     try {
+      check('toast: en設定時の差出人の行',
+        (await page.locator('#pb-survey-toast .pb-st__from').textContent() || '').trim() === 'From PlugBits Launcher');
       check('toast: en設定時の英語タイトル',
         (await page.locator('#pb-survey-toast .pb-st__title').textContent() || '').includes('3 quick questions'));
       check('toast: en設定時の「Answer」ボタン',
