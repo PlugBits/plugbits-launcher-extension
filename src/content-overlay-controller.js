@@ -7190,6 +7190,13 @@
       }
       if (layer?.parentElement) layer.remove();
       this.subtableEditor = null;
+      // 保険: 想定外の経路で複数のサブテーブルlayerが積み重なった場合でも、
+      // 「閉じる」操作では必ずすべて取り除く（上のlayerはthis.subtableEditor経由で
+      // 既に処理済みのはずだが、取り残しがあればここで一括除去して「閉じない」ように見える
+      // 状態を防ぐ）。
+      if (this.root) {
+        this.root.querySelectorAll('.pb-overlay__subtable-layer').forEach((node) => node.remove());
+      }
       if (focusInput && anchorInput) {
         try {
           anchorInput.focus();
@@ -9557,6 +9564,17 @@
       // handleOverlayKeydown と同じガード。documentのcaptureはthis.rootのcaptureより
       // さらに先に走るため、こちらでも同様に通しておかないとpicker側に届かない
       if (this.handleGridLookupPickerCapture(event)) return;
+      // Escapeでサブテーブル編集モーダル等の最前面レイヤーを閉じる処理は、
+      // handleOverlayKeydown内(this.root契機・targetがthis.root配下にある場合のみ発火)
+      // でも呼んでいるが、それだけだとフォーカスがthis.root配下に無い状態
+      // （例: モーダルを開いた操作がpreventDefaultでフォーカス移動を伴わなかった場合）
+      // でEscapeがここを素通りし、後段のOverlay全体を閉じる処理まで落ちてしまう。
+      // documentのcapture段階はtargetの位置に関係なく必ず先に走るため、ここで
+      // フォーカス位置に関わらず最優先に処理する（サブテーブルが開いている間は
+      // Escapeで必ずサブテーブルだけを閉じる。他の最前面レイヤーが開いていれば
+      // handleEscapeForFrontLayer内の既存の優先順位(confirm/upsell/column/filter/
+      // multiline/multiChoice/radio/subtable)がそのまま適用される）。
+      if (this.handleEscapeForFrontLayer(event)) return;
       if (event.defaultPrevented) return;
       const input = event.target instanceof HTMLInputElement ? event.target : null;
       this.handleOverlayArrowNavigation(event, input);

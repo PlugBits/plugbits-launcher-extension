@@ -65,7 +65,9 @@ const SUITES = [
   ['parse-clipboard-matrix-unit', './parse-clipboard-matrix-unit.test.mjs'],
   ['subtable-paste-e2e', './subtable-paste-e2e.test.mjs'],
   // サブテーブルセルのダブルクリックでopenSubtableEditorが3重発火していたバグの回帰テスト
-  ['subtable-dblclick-e2e', './subtable-dblclick-e2e.test.mjs']
+  ['subtable-dblclick-e2e', './subtable-dblclick-e2e.test.mjs'],
+  // サブテーブル編集モーダルのキャンセル/×/Escが閉じない・Escがoverlay全体を閉じるバグの回帰テスト
+  ['subtable-modal-close-e2e', './subtable-modal-close-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];

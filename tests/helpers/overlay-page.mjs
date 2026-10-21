@@ -35,7 +35,7 @@ async function routeSrcFiles(ctx, bridgeScript, { withPro }) {
 // として扱うProライセンスキャッシュ(24h以内のcachedAt・status:'active')を事前投入し、
 // manifest.jsonのcontent_scriptsと同じ順序でpermission-service.js/pro-service.js/
 // content.jsを読み込む。
-export async function openOverlayContext({ browser, bridgeScript, viewport = { width: 1400, height: 900 }, deviceScaleFactor }) {
+export async function openOverlayContext({ browser, bridgeScript, viewport = { width: 1400, height: 900 }, deviceScaleFactor, url }) {
   const ctx = await browser.newContext({ viewport, ...(deviceScaleFactor ? { deviceScaleFactor } : {}) });
   await ctx.addInitScript(buildChromeStub({ empty: true }));
   await ctx.addInitScript(() => {
@@ -50,13 +50,24 @@ export async function openOverlayContext({ browser, bridgeScript, viewport = { w
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e?.message || e).slice(0, 200)));
 
-  await page.goto(`${ORIGIN}/k/12/?view=20`);
+  await page.goto(url || `${ORIGIN}/k/12/?view=20`);
   await page.addScriptTag({ url: `${ORIGIN}/permission-service.js` });
   await page.addScriptTag({ url: `${ORIGIN}/pro-service.js` });
   await page.addScriptTag({ url: `${ORIGIN}/content.js` });
   await page.waitForTimeout(400);
 
   return { ctx, page, errors };
+}
+
+// detail-single-row(フォームレイアウト)用: /k/<app>/show#record=<id> を開いてから
+// Ctrl+Shift+E で起動する。runtimeMode=detail-single-row になり、
+// overlayLayoutMode は自動的に 'form' になる(isDetailFormLayoutMode()がtrue)。
+export async function openDetailFormOverlay({ browser, bridgeScript, appId = '12', recordId = '301', viewport, deviceScaleFactor }) {
+  const url = `${ORIGIN}/k/${appId}/show#record=${recordId}`;
+  const result = await openOverlayContext({ browser, bridgeScript, viewport, deviceScaleFactor, url });
+  await result.page.keyboard.press('Control+Shift+KeyE');
+  await result.page.waitForTimeout(1200);
+  return result;
 }
 
 // openOverlayContext に続けて Ctrl+Shift+E で Excel Overlay グリッドを起動する
