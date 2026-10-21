@@ -60,7 +60,10 @@ const SUITES = [
   ['view-default-preset-unit', './view-default-preset-unit.test.mjs'],
   ['view-default-preset-e2e', './view-default-preset-e2e.test.mjs'],
   ['overlay-open-timing-e2e', './overlay-open-timing-e2e.test.mjs'],
-  ['view-sync-after-trial-e2e', './view-sync-after-trial-e2e.test.mjs']
+  ['view-sync-after-trial-e2e', './view-sync-after-trial-e2e.test.mjs'],
+  // 3.3.0: サブテーブル編集モーダルへのExcel範囲貼り付け + 引用符囲みセル(改行入り)のTSV解析
+  ['parse-clipboard-matrix-unit', './parse-clipboard-matrix-unit.test.mjs'],
+  ['subtable-paste-e2e', './subtable-paste-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];

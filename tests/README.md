@@ -46,6 +46,7 @@ pro-service.js/content.jsをmanifest順に注入 + Ctrl+Shift+Eで起動、と�
 | `paste-verify-e2e.test.mjs` | 貼り付けルックアップ照合・タイプ先行時のAPI削減 |
 | `verify-all-paths.test.mjs` | ルックアップ照合の全経路（ピッカー/頻出/手打ち/貼り付け）・赤/緑表示 |
 | `type-replace-firstchar.test.mjs` | type-to-replaceの1文字目消失バグの回帰 |
+| `subtable-paste-e2e.test.mjs` | サブテーブル編集モーダルへのExcel範囲貼り付け(行追加/列ドロップ/非対応列スキップ/単一・複数選択の一致判定/500行超確認/キャンセル破棄/view-onlyブロック)・メイングリッドの引用符改行セル貼り付け回帰 |
 
 ### Quick New Record (QNR) E2E
 
@@ -72,6 +73,7 @@ content.js / page-bridge.js から対象の関数・メソッドを文字列と�
 | `newrow-defaults-unit.test.mjs` | resolveFieldDefaultValue（新規行初期値）のマトリクス |
 | `paste-verify-unit.test.mjs` | verifyLookupValuesExist・in句クエリ組み立て |
 | `overlay-quality-unit.test.mjs` | validate()のNUMBER正規化・collectSaveErrorTargets() |
+| `parse-clipboard-matrix-unit.test.mjs` | parseClipboardMatrix(引用符囲みセルのTSV解析: 改行/タブ/""エスケープ/CRLF) |
 
 ## 注意
 

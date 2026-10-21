@@ -1493,6 +1493,9 @@
       subtableActionsAria: "操作",
       toastSubtableLayoutReloaded: "レイアウトを再取得しました",
       toastSubtableLayoutReloadFailed: "レイアウトの再取得に失敗しました",
+      subtablePasteRowLimitConfirm: (n) => `貼り付け後の行数が${n}行になり、上限の500行を超えます。続けますか？`,
+      toastSubtablePasteDone: (n) => `${n} 件を貼り付けました`,
+      toastSubtablePasteSummary: (n, m) => `${n} 件を貼り付けました(${m} 件は貼り付けできない列のため飛ばしました)`,
       multilineTitle: "複数行テキスト編集",
       multilineSave: "保存",
       multilineCancel: "キャンセル",
@@ -1833,6 +1836,9 @@
       subtableActionsAria: "Actions",
       toastSubtableLayoutReloaded: "Layout reloaded",
       toastSubtableLayoutReloadFailed: "Failed to reload layout",
+      subtablePasteRowLimitConfirm: (n) => `Pasting would result in ${n} rows, exceeding the 500-row limit. Continue?`,
+      toastSubtablePasteDone: (n) => `Pasted ${n} cell${n === 1 ? '' : 's'}`,
+      toastSubtablePasteSummary: (n, m) => `Pasted ${n} cell${n === 1 ? '' : 's'} (skipped ${m} cell${m === 1 ? '' : 's'} in non-pasteable columns)`,
       multilineTitle: "Edit multi-line text",
       multilineSave: "Save",
       multilineCancel: "Cancel",
@@ -8874,6 +8880,130 @@
         };
       };
 
+      // 「＋ 行追加」と貼り付けでの行追加が同じ初期値になるよう共通化
+      const createDefaultEditorRow = () => {
+        const value = {};
+        childFields.forEach((child) => {
+          value[child.code] = { value: this.createSubtableDefaultValue(child.type) };
+        });
+        return {
+          localId: `row:new:${Date.now()}:${Math.random().toString(16).slice(2)}`,
+          id: '',
+          value
+        };
+      };
+
+      // 保存時のバリデーション対象(subtable_save_click付近)と同じ4種類を「貼り付け可能」とする。
+      // calc/lookup自動転記/権限なしはgetChildPermissionの結果を通じて既に'readonly'等へ
+      // 落ちているのでここでは意識しなくてよい
+      const isSubtablePasteableInteraction = (interaction) => (
+        interaction === 'inline-edit'
+        || interaction === 'inline-choice-single'
+        || interaction === 'inline-choice-multi'
+        || interaction === 'modal-edit'
+      );
+
+      // Excelの範囲貼り付けをサブテーブル編集モーダルへ適用する。startRowIndex/startColIndexは
+      // editorRows/childFields上のインデックス。行は必要なら「＋ 行追加」と同じ初期値で
+      // 追加し、列は末尾を超えた分を捨てる。列ごとの編集可否はgetChildPermission+
+      // resolveFieldInteractionで判定し、非対応列・単一選択の不一致・複数選択の不一致は
+      // 値を変更せず飛ばす(スキップ件数としてトーストに出す)
+      const applySubtablePaste = async (startRowIndex, startColIndex, matrix) => {
+        if (readOnlyMode) {
+          this.notifyViewOnlyBlocked();
+          return;
+        }
+        const matrixRows = Array.isArray(matrix) ? matrix.length : 0;
+        const matrixCols = Array.isArray(matrix) ? matrix.reduce((max, r) => Math.max(max, Array.isArray(r) ? r.length : 0), 0) : 0;
+        if (!matrixRows || !matrixCols) return;
+
+        const neededRowCount = startRowIndex + matrixRows;
+        const resultingRowCount = Math.max(editorRows.length, neededRowCount);
+        if (resultingRowCount > 500) {
+          const proceed = await this.overlayConfirm(resolveText(this.language, 'subtablePasteRowLimitConfirm', resultingRowCount));
+          if (!proceed) return;
+        }
+        while (editorRows.length < neededRowCount) {
+          editorRows.push(createDefaultEditorRow());
+        }
+
+        const availableCols = Math.max(0, childFields.length - startColIndex);
+        const effectiveCols = Math.min(matrixCols, availableCols);
+        let appliedCount = 0;
+        let skippedCount = 0;
+        for (let r = 0; r < matrixRows; r += 1) {
+          const item = editorRows[startRowIndex + r];
+          if (!item) continue;
+          const rowValues = Array.isArray(matrix[r]) ? matrix[r] : [];
+          for (let c = 0; c < effectiveCols; c += 1) {
+            const child = childFields[startColIndex + c];
+            if (!child) continue;
+            const permission = getChildPermission(child);
+            const interaction = this.resolveFieldInteraction(child, permission, { viewOnly: true });
+            const cellValue = rowValues[c] ?? '';
+            if (!isSubtablePasteableInteraction(interaction)) {
+              skippedCount += 1;
+              continue;
+            }
+            if (interaction === 'inline-choice-single') {
+              const trimmed = String(cellValue).trim();
+              const matched = (Array.isArray(child.choices) ? child.choices : []).find((choice) => String(choice || '').trim() === trimmed);
+              if (matched === undefined) {
+                skippedCount += 1;
+                continue;
+              }
+              setSubtableCellValue(item, child, matched);
+              appliedCount += 1;
+            } else if (interaction === 'inline-choice-multi') {
+              const choiceSet = new Set((Array.isArray(child.choices) ? child.choices : []).map((choice) => String(choice || '').trim()));
+              const matchedValues = String(cellValue)
+                .split(/[,、\n]/)
+                .map((part) => part.trim())
+                .filter((part) => part && choiceSet.has(part));
+              if (!matchedValues.length) {
+                skippedCount += 1;
+                continue;
+              }
+              setSubtableCellValue(item, child, matchedValues);
+              appliedCount += 1;
+            } else {
+              // inline-edit / modal-edit(複数行テキスト等): 生の文字列をそのまま設定する。
+              // 数値/日付の形式チェックは保存時の既存validate()に任せる(ここでは追加しない)
+              setSubtableCellValue(item, child, cellValue);
+              appliedCount += 1;
+            }
+          }
+        }
+
+        renderRows();
+        if (skippedCount > 0) {
+          this.notify(resolveText(this.language, 'toastSubtablePasteSummary', appliedCount, skippedCount));
+        } else if (appliedCount > 0) {
+          this.notify(resolveText(this.language, 'toastSubtablePasteDone', appliedCount));
+        }
+      };
+
+      // セル操作要素(select/選択ボタン/input)にpasteイベントを張る。単一値の貼り付けは
+      // ブラウザ標準動作に任せ、タブまたは改行を含む(=複数セル分、または引用符内に改行を
+      // 持つ1セルの複数行値)ときだけpreventDefaultしてapplySubtablePasteへ回す。
+      // 判定は生のクリップボード文字列で行う(parseClipboardMatrix後のrowCount/colCountだと
+      // 引用符で囲まれた1セル内改行がrowCount=1・colCount=1になってしまい判定できないため)
+      const attachSubtablePasteHandler = (control, item, child) => {
+        control.addEventListener('paste', (event) => {
+          if (!event.clipboardData) return;
+          const text = event.clipboardData.getData('text');
+          if (!text) return;
+          if (!/[\t\n]/.test(text)) return;
+          const { matrix, rowCount, colCount } = this.parseClipboardMatrix(text);
+          if (!rowCount || !colCount) return;
+          event.preventDefault();
+          const rowIdx = editorRows.indexOf(item);
+          const colIdx = childFields.indexOf(child);
+          if (rowIdx < 0 || colIdx < 0) return;
+          void applySubtablePaste(rowIdx, colIdx, matrix);
+        });
+      };
+
       const renderSubtableColumns = () => {
         colgroup.textContent = '';
         theadRow.textContent = '';
@@ -8961,6 +9091,7 @@
               select.addEventListener('change', () => {
                 setSubtableCellValue(item, child, select.value);
               });
+              attachSubtablePasteHandler(select, item, child);
               cell.appendChild(select);
             } else if (interaction === 'inline-choice-multi') {
               const trigger = document.createElement('button');
@@ -8975,6 +9106,7 @@
                   renderRows();
                 });
               });
+              attachSubtablePasteHandler(trigger, item, child);
               cell.appendChild(trigger);
             } else {
               const input = document.createElement('input');
@@ -9054,6 +9186,7 @@
                   input.title = resolveText(this.language, 'lookupAutoReadonly');
                 }
               }
+              attachSubtablePasteHandler(input, item, child);
               cell.appendChild(input);
               if (isDateField && interaction === 'inline-edit' && permission.editable) {
                 const pickerLabel = document.createElement('label');
@@ -9129,15 +9262,7 @@
 
       addBtn.addEventListener('click', () => {
         if (readOnlyMode) return;
-        const value = {};
-        childFields.forEach((child) => {
-          value[child.code] = { value: this.createSubtableDefaultValue(child.type) };
-        });
-        editorRows.push({
-          localId: `row:new:${Date.now()}:${Math.random().toString(16).slice(2)}`,
-          id: '',
-          value
-        });
+        editorRows.push(createDefaultEditorRow());
         renderRows();
       });
 
@@ -9517,16 +9642,62 @@
       this.applyPastedMatrixAt(matrix, startRow, startCol);
     }
 
+    // Excel/Google Sheetsのコピー範囲をTSVとして解析する。改行/タブ/二重引用符を
+    // 含むセルは二重引用符で囲まれ、セル内の""は""(エスケープされた")として入ってくる
+    // ため、単純な改行→タブの分割では壊れる。ここでは1文字ずつ読み、引用符の開始
+    // (フィールド先頭の")から、直後に""が続かない閉じ"までを1つの引用フィールドとして
+    // 扱い、その中の改行・タブ・""→"はすべてリテラルとして取り込む。引用符で始まって
+    // いないフィールド中の"はそのままリテラル文字として扱う(Excelの実際の挙動に合わせる)。
     parseClipboardMatrix(text) {
       const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      const lines = normalized.split('\n');
-      if (lines.length && lines[lines.length - 1] === '') {
-        lines.pop();
+      const matrix = [];
+      let row = [];
+      let field = '';
+      let inQuotes = false;
+      const len = normalized.length;
+      for (let i = 0; i < len; i += 1) {
+        const ch = normalized[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            if (normalized[i + 1] === '"') {
+              field += '"';
+              i += 1;
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            field += ch;
+          }
+          continue;
+        }
+        if (ch === '"' && field === '') {
+          inQuotes = true;
+          continue;
+        }
+        if (ch === '\t') {
+          row.push(field);
+          field = '';
+          continue;
+        }
+        if (ch === '\n') {
+          row.push(field);
+          matrix.push(row);
+          row = [];
+          field = '';
+          continue;
+        }
+        field += ch;
       }
-      if (!lines.length) return { matrix: [], rowCount: 0, colCount: 0 };
-      const matrix = lines.map((line) => line.split('\t'));
+      row.push(field);
+      matrix.push(row);
+      // 末尾が改行で終わっていた場合の空行を1つだけ落とす(従来の挙動を維持)
+      const lastRow = matrix[matrix.length - 1];
+      if (lastRow && lastRow.length === 1 && lastRow[0] === '') {
+        matrix.pop();
+      }
+      if (!matrix.length) return { matrix: [], rowCount: 0, colCount: 0 };
       const rowCount = matrix.length;
-      const colCount = matrix.reduce((max, row) => Math.max(max, row.length), 0);
+      const colCount = matrix.reduce((max, r) => Math.max(max, r.length), 0);
       return { matrix, rowCount, colCount };
     }
 
