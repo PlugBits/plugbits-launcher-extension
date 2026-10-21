@@ -67,7 +67,10 @@ const SUITES = [
   // サブテーブルセルのダブルクリックでopenSubtableEditorが3重発火していたバグの回帰テスト
   ['subtable-dblclick-e2e', './subtable-dblclick-e2e.test.mjs'],
   // サブテーブル編集モーダルのキャンセル/×/Escが閉じない・Escがoverlay全体を閉じるバグの回帰テスト
-  ['subtable-modal-close-e2e', './subtable-modal-close-e2e.test.mjs']
+  ['subtable-modal-close-e2e', './subtable-modal-close-e2e.test.mjs'],
+  // 3.4.0: サブテーブル編集モーダルをメイングリッドの選択UIのように振る舞わせる
+  // (選択/アクティブ/編集中・行番号列・矢印/Tab/Enter/F2/Esc/Delete/Ctrl+C/V/Ctrl+Enter)
+  ['subtable-grid-e2e', './subtable-grid-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];

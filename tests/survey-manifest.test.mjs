@@ -21,7 +21,10 @@ export async function run({ check }) {
   const head = readHeadManifest();
   const current = readWorkingManifest();
 
-  check('survey-manifest: version は 3.3.0 に上がっている', current.version === '3.3.0');
+  // 3.4.0: サブテーブル編集モーダルのスプレッドシート風選択機能でバージョンを更新。
+  // HEAD(3.3.0)からは上がっているが、permissions等は変わっていないことは後続のcheckで検証する
+  check('survey-manifest: version は HEADより上がっている', current.version !== head.version);
+  check('survey-manifest: version は 3.4.0 に上がっている', current.version === '3.4.0');
 
   const permissionKeys = [
     'permissions',

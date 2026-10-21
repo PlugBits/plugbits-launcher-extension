@@ -101,7 +101,9 @@ export async function run({ browser, check }) {
     const mainCell = (rowIndex, fieldCode) => page.locator(`.pb-overlay__cell input[data-field-code="${fieldCode}"][data-row-index="${rowIndex}"]`);
     const subtableRow = (idx) => page.locator('.pb-subtable__body .pb-subtable__row').nth(idx);
     const subtableRowCount = () => page.locator('.pb-subtable__body .pb-subtable__row').count();
-    const subtableControl = (rowIdx, colIdx) => subtableRow(rowIdx).locator('.pb-subtable__cell').nth(colIdx).locator('input, select, button.pb-overlay__subtable-choice-trigger');
+    // 3.4.0: 左端に行番号列が増えたため、列はnth位置ではなくdata-col-index属性で選ぶ
+    // (行番号セルにはdata-col-indexが付かないので、この属性セレクタだけでデータ列に絞れる)
+    const subtableControl = (rowIdx, colIdx) => subtableRow(rowIdx).locator(`.pb-subtable__cell[data-col-index="${colIdx}"]`).locator('input, select, button.pb-overlay__subtable-choice-trigger');
     const toastTexts = () => page.locator('.pb-overlay__toast').allTextContents();
 
     // clipboardData経由の合成pasteイベントを対象要素へ直接dispatchする
