@@ -10,6 +10,8 @@
  *   GET  /trial/verify  – トライアルのメール確認（48時間以内・後追い検証。kintone系は対象外）
  *   GET  /domain-status – kintoneプラグイン専用: キーを持たずにドメインの有効性だけを確認する
  *                          （同一ドメインの2本目以降のアプリが、キー入力無しで自動的に有効化するための照会）
+ *   POST /recover       – ライセンスキーの再送(メール単位)。見つかっても見つからなくても
+ *                          応答は常に {ok:true}（メールアドレスの列挙・在不在の推測を防ぐ）
  *
  * 2026-09-29 買い切り(¥1,980)に切り替え: Payment Link は mode=payment(サブスクリプション無し)。
  * checkout.session.completed の mode=payment でライセンスを発行(kind:'lifetime'・expiry 空)、
@@ -26,6 +28,12 @@
  * 2本目以降のアプリは、1本目で束縛された購入ライセンスを自動検出して有効化できるようにする。
  *   licdom_{product}_{domain} … kintone系: ドメイン単位の購入ライセンス逆引きindex → key
  *                                （/domain-status の照会・自己修復・購入発行の両方で使う）
+ *
+ * 2026-10-21 ライセンスキーの再送(POST /recover)を追加: 購入時のメールアドレスを
+ * 覚えていればキーを失っても自分で再送できるようにする（サポート対応の削減）。
+ *   licemail_{email} … メール単位の購入ライセンス逆引きindex(値はキーのJSON配列) → キー一覧
+ *                        （発行時に書き込み、/recover はまずこのindexを見る。index未整備の
+ *                        旧レコードはlic_全件走査でフォールバックする。トライアルは対象外）
  */
 
 const CORS_HEADERS = {
@@ -196,6 +204,28 @@ async function updateRecordsForSubscription(env, subscriptionId, patch) {
     if (record) await kvSet(env, licenseKey, { ...record, ...patch });
   }
   return keys.length;
+}
+
+// ── email → licenseKey[] 逆引きindex(ライセンス再送 POST /recover 用・2026-10-21) ────────
+// 発行の都度このindexへ追記する(read-modify-write + 重複排除)。index自体への書き込み失敗で
+// webhook本体(ライセンス発行)が失敗してはいけないため、必ずtry/catchで囲む。トライアルは
+// 対象外(呼び出し側で呼ばない)。
+const EMAIL_INDEX_PREFIX = 'licemail_';
+
+async function addKeyToEmailIndex(env, email, licenseKey) {
+  try {
+    const normalized = normalizeTrialEmail(email);
+    if (!normalized) return; // メール無し・不正なメールはindex化しない
+    const indexKey = EMAIL_INDEX_PREFIX + normalized;
+    let keys = [];
+    const raw = await env.LICENSES.get(indexKey);
+    if (raw) keys = JSON.parse(raw);
+    if (!Array.isArray(keys)) keys = [];
+    if (!keys.includes(licenseKey)) keys.push(licenseKey);
+    await env.LICENSES.put(indexKey, JSON.stringify(keys));
+  } catch (_err) {
+    // indexへの書き込み失敗でライセンス発行自体は止めない
+  }
 }
 
 // ── Stripe ──────────────────────────────────────────────────────────────────
@@ -641,6 +671,7 @@ async function handleWebhook(request, env) {
       record.domain = normalizeKintoneDomain(domainField?.text?.value) || '';
     }
     await kvSet(env, licenseKey, record);
+    await addKeyToEmailIndex(env, email, licenseKey); // /recover 用の逆引きindex(トライアルは対象外なのでここだけ)
     await env.LICENSES.put(PI_INDEX_PREFIX + paymentIntentId, licenseKey);
     if (isKintone && record.domain) {
       // カスタムフィールドでドメインが分かっている場合は、最初の /verify を待たずに
@@ -685,6 +716,7 @@ async function handleWebhook(request, env) {
       expiry
     };
     await kvSet(env, licenseKey, record);
+    await addKeyToEmailIndex(env, email, licenseKey); // /recover 用の逆引きindex
     await addKeyToSubscriptionIndex(env, subscriptionId, licenseKey);
     await sendLicenseEmail(env, { email, licenseKey });
     return json({ ok: true, action: 'key_issued' });
@@ -912,6 +944,146 @@ async function handleDomainStatus(request, env) {
   return json({ ok: false, status: 'no_license', reason: 'no_license', product, domain });
 }
 
+// ── /recover ────────────────────────────────────────────────────────────────
+//
+// ライセンスキーを失くした人向けに、購入時のメールアドレスで再送する。メールの
+// 在不在・ライセンスの有無を外部から推測できないように、応答は見つかっても
+// 見つからなくても・不正な入力でも常に {ok:true}(列挙攻撃対策)。
+//
+// 1. IP単位 → メール単位の順にレート制限(いずれかに引っかかれば送らない)。
+// 2. licemail_{email} index(無ければ lic_ 全件走査でフォールバック。index化はしない)。
+// 3. トライアルは除外・status が active/past_due のものだけ対象(refunded/canceled等は除く)。
+// 4. product を指定された場合はそれだけに絞る(未知のproductは自然に0件になる)。
+// 5. 1件以上あれば1通のメールに全キーをまとめて送る(宛先はレコードに登録されたメール
+//    アドレス。リクエストの生入力ではない・大文字小文字や+エイリアスの揺れを戻すため)。
+
+const RECOVER_IP_RATE_LIMIT_PER_HOUR = 5;
+
+async function isRecoverIpRateLimited(request, env) {
+  try {
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const key = `ratelimit_recover_${ip}`;
+    const current = Number(await env.LICENSES.get(key)) || 0;
+    if (current >= RECOVER_IP_RATE_LIMIT_PER_HOUR) return true;
+    await env.LICENSES.put(key, String(current + 1), { expirationTtl: 3600 });
+    return false;
+  } catch (_err) {
+    return false; // 制限機構の障害で再送自体を止めない
+  }
+}
+
+// IP単位より厳しくする: 同じメールへの繰り返し再送依頼(本人の操作ミスも含む)を絞る。
+const RECOVER_EMAIL_RATE_LIMIT_PER_HOUR = 3;
+
+async function isRecoverEmailRateLimited(env, normalizedEmail) {
+  try {
+    const key = `ratelimit_recover_email_${normalizedEmail}`;
+    const current = Number(await env.LICENSES.get(key)) || 0;
+    if (current >= RECOVER_EMAIL_RATE_LIMIT_PER_HOUR) return true;
+    await env.LICENSES.put(key, String(current + 1), { expirationTtl: 3600 });
+    return false;
+  } catch (_err) {
+    return false; // 制限機構の障害で再送自体を止めない
+  }
+}
+
+// licemail_ indexを見る。無ければ lic_ を全件走査してメール一致で探す
+// (フォールバックはindexへ書き込まない。書き込みはライセンス発行時のaddKeyToEmailIndexのみ)。
+async function getLicenseKeysForEmail(env, normalizedEmail) {
+  try {
+    const raw = await env.LICENSES.get(EMAIL_INDEX_PREFIX + normalizedEmail);
+    if (raw) {
+      const keys = JSON.parse(raw);
+      if (Array.isArray(keys)) return keys;
+    }
+  } catch (_err) { /* fall through */ }
+
+  const found = [];
+  let cursor;
+  do {
+    const page = await env.LICENSES.list({ prefix: KV_PREFIX, cursor });
+    cursor = page.list_complete ? undefined : page.cursor;
+    for (const key of page.keys) {
+      const licenseKey = key.name.slice(KV_PREFIX.length);
+      const record = await kvGet(env, licenseKey);
+      if (record && normalizeTrialEmail(record.email) === normalizedEmail) found.push(licenseKey);
+    }
+  } while (cursor);
+  return found;
+}
+
+// 再送メール本体。1通に複数プロダクトのキーをまとめて載せる(kintone系だけなら送信者名を
+// PlugBits名義にする。sendLicenseEmail と同じ判断基準)。
+async function sendRecoverEmail(env, { email, matches }) {
+  if (!env.BREVO_API_KEY) return; // 未設定時はスキップ
+  const allKintone = matches.every((m) => PRODUCTS[m.product]?.kind === 'kintone');
+  const listHtml = matches.map((m) => `
+        <p style="font-family:monospace;font-size:16px;background:#f3f4f6;padding:12px;border-radius:6px;">
+          ${PRODUCTS[m.product]?.name || m.product}: ${m.licenseKey}
+        </p>`).join('');
+  await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': env.BREVO_API_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      sender: {
+        email: env.BREVO_SENDER_EMAIL || 'no-reply@plugbits.app',
+        name: allKintone ? 'PlugBits' : (env.BREVO_SENDER_NAME || 'PlugBits Launcher')
+      },
+      to: [{ email }],
+      subject: 'ライセンスキーの再送のご案内',
+      htmlContent: `
+        <h2>ライセンスキーの再送のご依頼を受け付けました</h2>
+        <p>お使いのキーは次のとおりです。</p>
+        ${listHtml}
+        <p style="font-size:12px;color:#6b7280;">
+          お心当たりがない場合はこのメールを破棄してください。ご不明な点は <a href="mailto:support@plugbits.app">support@plugbits.app</a> まで。
+        </p>
+      `
+    })
+  });
+}
+
+async function handleRecover(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (_err) {
+    return json({ ok: true }); // 壊れたリクエストでも在不在を教えない
+  }
+
+  const normalized = normalizeTrialEmail(body?.email);
+  if (!normalized) return json({ ok: true }); // 無効なメールには何もしない
+
+  if (await isRecoverIpRateLimited(request, env)) return json({ ok: true });
+  if (await isRecoverEmailRateLimited(env, normalized)) return json({ ok: true });
+
+  // product はkintoneプラグインなど特定の製品だけに絞りたいときに送ってくる。
+  // PRODUCTSに無い値は下のproductOf比較で自然に0件(=未マッチ)になる
+  const requestedProduct = typeof body?.product === 'string' ? body.product : '';
+
+  const keys = await getLicenseKeysForEmail(env, normalized);
+  const matches = [];
+  for (const licenseKey of keys) {
+    const record = await kvGet(env, licenseKey);
+    if (!record || record.kind === 'trial') continue; // トライアルは対象外
+    const status = record.status || 'active';
+    if (status !== 'active' && status !== 'past_due') continue; // refunded/canceled等は除く
+    const product = productOf(record);
+    if (requestedProduct && product !== requestedProduct) continue;
+    matches.push({ licenseKey, product, email: record.email });
+  }
+
+  if (matches.length) {
+    // 宛先はレコードに登録されたメール(最初にマッチしたもの)。リクエストの生入力は使わない
+    await sendRecoverEmail(env, { email: matches[0].email, matches });
+  }
+
+  return json({ ok: true });
+}
+
 // ── トライアル リマインダー（Cron） ─────────────────────────────────────────
 //
 // 毎日1回、トライアルレコードを走査して転換メールを送る:
@@ -1040,6 +1212,8 @@ export default {
       response = await handleTrialStart(request, env);
     } else if (request.method === 'GET' && url.pathname === '/trial/verify') {
       response = await handleTrialVerify(request, env);
+    } else if (request.method === 'POST' && url.pathname === '/recover') {
+      response = await handleRecover(request, env);
     } else {
       response = json({ ok: false, error: 'Not found' }, 404);
     }
