@@ -252,16 +252,17 @@ export async function run({ browser, check }) {
     // (9) メイングリッド本体: 引用符囲みの改行入り1セルの貼り付け(備考列)
     //     旧実装(改行で単純split)では「"gridline1」「gridline2"」の2行として誤認し、
     //     row0だけでなくrow1(別レコード)にまで値が溢れてしまっていた回帰の確認。
-    //     備考はメイングリッド上は<input type="text">(複数行編集は別モーダル)なので
-    //     改行文字そのものはブラウザのinput.value代入で失われる(既存の挙動・本機能の
-    //     対象外)が、1セルとして扱われ他行に溢れないことがparseClipboardMatrixの
-    //     引用符対応の要点
+    //     3.4.0より前は、備考はメイングリッド上は<input type="text">経由でinput.valueへ
+    //     直接代入していたため、改行文字そのものはブラウザのvalue sanitization
+    //     algorithmで失われていた(el.value = 'a\nb' → 'ab')。3.4.0でapplyPastedValueが
+    //     MULTI_LINE_TEXTのときだけinput.value代入を経由せず直接値を確定するようになり、
+    //     改行が保たれたまま保存されるようになった(画面表示は従来通り" / "のプレビュー)
     // ============================================================
     await pasteInto(mainCell(0, '備考'), '"gridline1\ngridline2"');
     await page.waitForTimeout(300);
     check(
-      name('(9) 引用符内の改行で2行に分裂せず、1セル分の値が備考(row0)に入る'),
-      (await mainCell(0, '備考').inputValue()) === 'gridline1gridline2'
+      name('(9) 引用符内の改行で2行に分裂せず、1セル分の値が備考(row0)に入る(画面表示はプレビュー" / "結合)'),
+      (await mainCell(0, '備考').inputValue()) === 'gridline1 / gridline2'
     );
     check(
       name('(9) 引用符内の改行がrow1(別レコード)の備考へ溢れない(回帰確認)'),
@@ -273,8 +274,8 @@ export async function run({ browser, check }) {
     const putCalls2 = await page.evaluate(() => window.__putCalls);
     const rec2 = putCalls2[0]?.records?.find((r) => String(r.id) === '301');
     check(
-      name('(9) 保存payloadにも1セル分の値がそのまま残る(他行を汚染しない)'),
-      rec2?.record?.['備考']?.value === 'gridline1gridline2'
+      name('(9) 保存payloadには改行つきの値がそのまま残る(他行を汚染しない・3.4.0で改行消失バグが直った)'),
+      rec2?.record?.['備考']?.value === 'gridline1\ngridline2'
     );
     check(
       name('(9) record302のpayloadは送られない(変更なし)'),

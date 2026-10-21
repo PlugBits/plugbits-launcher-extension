@@ -13,13 +13,17 @@ const FIELDS = [
       { code: '品目', label: '品目', type: 'SINGLE_LINE_TEXT', required: false, choices: [] },
       { code: '数量', label: '数量', type: 'NUMBER', required: false, choices: [] },
       // ルックアップの自動転記先: 常に編集不可(Delete時にスキップされることの確認用)
-      { code: '単価', label: '単価', type: 'SINGLE_LINE_TEXT', required: false, choices: [], lookupAuto: true }
+      { code: '単価', label: '単価', type: 'SINGLE_LINE_TEXT', required: false, choices: [], lookupAuto: true },
+      // 3.4.0: 本物のMULTI_LINE_TEXT(列3)。「コピー時は複数行フィールドを元の改行のまま
+      // 出す」のサブテーブル側(formatSubtableCellCopyValue/copyEditorSelectionToClipboard)
+      // のE2E検証用
+      { code: 'メモ', label: 'メモ', type: 'MULTI_LINE_TEXT', required: false, choices: [] }
     ] }
   }
 ];
 
-function subtableItem(id, 品目, 数量, 単価) {
-  return { id: String(id), value: { 品目: { value: 品目 }, 数量: { value: 数量 }, 単価: { value: 単価 } } };
+function subtableItem(id, 品目, 数量, 単価, メモ = '') {
+  return { id: String(id), value: { 品目: { value: 品目 }, 数量: { value: 数量 }, 単価: { value: 単価 }, メモ: { value: メモ } } };
 }
 
 const RECORDS = [
@@ -28,7 +32,7 @@ const RECORDS = [
     案件名: { value: '案件A' },
     明細: {
       value: [
-        subtableItem('1', 'A', '1', '100'),
+        subtableItem('1', 'A', '1', '100', '1行目\n2行目'),
         subtableItem('2', 'B', '2', '200'),
         subtableItem('3', 'C', '3', '300'),
         subtableItem('4', 'D', '4', '400')
@@ -155,6 +159,31 @@ export async function run({ browser, check }) {
     check(name('(7) Ctrl+Vで品目(0,0)がP9になる'), (await subtableControl(0, 0).inputValue()) === 'P9');
     check(name('(7) Ctrl+Vで数量(0,1)が77になる'), (await subtableControl(0, 1).inputValue()) === '77');
 
+    // ── (ML1) 本物のMULTI_LINE_TEXT(メモ・列3)のコピーは元の改行のまま出る(3.4.0) ──
+    // メモ(modal-edit)セルは.click()すると値モーダル(openFieldValueModal)が開く仕様のため、
+    // 選択はクリックではなくmousedown+mouseupの直接dispatchで行う(他の範囲選択チェックと同じ手法)
+    await subtableCellEl(0, 3).dispatchEvent('mousedown', { button: 0 });
+    await page.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
+    await page.waitForTimeout(80);
+    await page.keyboard.press('Control+c');
+    await page.waitForTimeout(80);
+    const copiedMemo = await page.evaluate(() => navigator.clipboard.__get());
+    check(name('(ML1) メモのCtrl+Cは元の改行のままクォートされて出る("1行目\\n2行目")'),
+      copiedMemo === '"1行目\n2行目"');
+    check(name('(ML1) コピー後も画面表示はプレビュー"1行目 / 2行目"のまま(改行表示には変わらない)'),
+      (await subtableControl(0, 3).inputValue()) === '1行目 / 2行目');
+
+    // ── (ML2) 往復: コピーしたメモを別の行(row1)へCtrl+Vで貼り付け ─────────────
+    // 貼り付け後の画面表示はプレビューのまま(保存payloadでの改行保持はsubtable-paste-e2e.
+    // test.mjsの(5)が同じコード経路(parseClipboardMatrix→setSubtableCellValue→保存)で検証済み)
+    await subtableCellEl(1, 3).dispatchEvent('mousedown', { button: 0 });
+    await page.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
+    await page.waitForTimeout(80);
+    await page.keyboard.press('Control+v');
+    await page.waitForTimeout(150);
+    check(name('(ML2) 貼り付け先(row1・メモ)の画面表示がプレビュー"1行目 / 2行目"になる'),
+      (await subtableControl(1, 3).inputValue()) === '1行目 / 2行目');
+
     // ── (8) Delete: 選択範囲をクリア(編集不可の単価列はスキップされる) ─
     await subtableCellEl(0, 0).dispatchEvent('mousedown', { button: 0 });
     await page.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
@@ -176,10 +205,14 @@ export async function run({ browser, check }) {
     check(name('(9) ArrowDownで(2,1)に移る'), await hasClass(subtableCellEl(2, 1), 'pb-overlay__subtable-cell--active'));
     await page.keyboard.press('Tab');
     check(name('(9) Tabで(2,2)に移る(右へ)'), await hasClass(subtableCellEl(2, 2), 'pb-overlay__subtable-cell--active'));
+    // 3.4.0でメモ(列3=MULTI_LINE_TEXT)が追加され列末は列3になったため、列末到達には
+    // もう1回Tabが必要になった((2,2)→(2,3))
+    await page.keyboard.press('Tab');
+    check(name('(9) Tabで(2,3)に移る(列末=メモ列)'), await hasClass(subtableCellEl(2, 3), 'pb-overlay__subtable-cell--active'));
     await page.keyboard.press('Tab');
     check(name('(9) 列末からのTabで次行の先頭(3,0)へ折り返す'), await hasClass(subtableCellEl(3, 0), 'pb-overlay__subtable-cell--active'));
     await page.keyboard.press('Shift+Tab');
-    check(name('(9) Shift+Tabで前の行末(2,2)へ戻る'), await hasClass(subtableCellEl(2, 2), 'pb-overlay__subtable-cell--active'));
+    check(name('(9) Shift+Tabで前の行末(2,3)へ戻る'), await hasClass(subtableCellEl(2, 3), 'pb-overlay__subtable-cell--active'));
     await subtableControl(0, 1).click();
     await page.waitForTimeout(80);
     await page.keyboard.press('Enter');

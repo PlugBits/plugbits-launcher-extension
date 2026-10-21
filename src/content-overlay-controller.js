@@ -4012,6 +4012,16 @@
       return value === undefined || value === null ? '' : String(value);
     }
 
+    // 3.4.0: サブテーブルモーダルのコピー(Ctrl+C)専用。画面表示(" / "結合)と違い、
+    // 複数行テキストはコピー時だけ元の改行をそのまま出す(Excelへ貼ると1セル内改行になる。
+    // CRLF/CRはLFへ正規化する)。他の型はformatSubtableCellDisplayValueと同じ整形を使う
+    formatSubtableCellCopyValue(field, value) {
+      if (this.isMultiLineField(field)) {
+        return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      }
+      return this.formatSubtableCellDisplayValue(field, value);
+    }
+
     buildFieldValueModalText(field, value) {
       if (this.isRichTextField(field)) {
         return this.extractReadableTextFromRichText(value);
@@ -4290,6 +4300,17 @@
         return utcToLocalDisplay(value, this.kintoneTimezone);
       }
       return value === undefined || value === null ? '' : String(value);
+    }
+
+    // 3.4.0: メイングリッド(一覧)のコピー(Ctrl+C)専用。画面表示(" / "結合)と違い、
+    // 複数行テキストはコピー時だけ元の改行をそのまま出す(CRLF/CRはLFへ正規化する)。
+    // 他の型はformatCellDisplayValueと同じ整形を使う(detail-form側のgetFormClipboardLinesFromSelection
+    // は意図的にこの関数へ切り替えていない)
+    formatCellCopyValue(field, value) {
+      if (this.isMultiLineField(field)) {
+        return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      }
+      return this.formatCellDisplayValue(field, value);
     }
 
     async loadColumnPrefMap(force = false) {
@@ -6947,7 +6968,7 @@
           for (let c = editorSelection.startCol; c <= editorSelection.endCol; c += 1) {
             const child = childFields[c];
             const rawCell = item?.value?.[child?.code]?.value;
-            rowOut.push(child ? this.formatSubtableCellDisplayValue(child, rawCell) : '');
+            rowOut.push(child ? this.formatSubtableCellCopyValue(child, rawCell) : '');
           }
           matrix.push(rowOut);
         }
@@ -8542,7 +8563,12 @@
       if (!this.isOverlayEditable() || !cellPermission.editable) return null;
       const beforeValue = this.deepClone(row.values[field.code]);
       const input = this.getInput(rowIndex, colIndex);
-      if (input) {
+      // 複数行テキストは<input type="text">のvalueセッターを経由すると、HTML仕様の
+      // value sanitization algorithmで改行(\r\n)が取り除かれてしまう(実機確認済み:
+      // el.value = 'a\nb' → el.value は 'ab' になる)。そのためinputが存在しても
+      // input.valueへ代入せず、下のDOM非依存の確定パスへ素通しする(表示だけ後で
+      // applyCellVisualStateのプレビュー整形で更新する)
+      if (input && !this.isMultiLineField(field)) {
         input.value = rawValue;
         this.onInputChanged(input);
         const afterValue = this.deepClone(row.values[field.code]);
@@ -8564,6 +8590,7 @@
         this.markDirtyState(recordId, fieldCode, row.original[fieldCode], null);
         this.updateDirtyBadge();
         this.updateStats();
+        if (input) this.applyCellVisualState(input, row, fieldCode);
         return null;
       }
       this.invalidCells.delete(key);
@@ -8577,6 +8604,7 @@
       }
       this.updateDirtyBadge();
       this.updateStats();
+      if (input) this.applyCellVisualState(input, row, fieldCode);
       const afterValue = this.deepClone(row.values[fieldCode]);
       if (this.valuesEqual(beforeValue, afterValue)) return null;
       return {
@@ -9071,7 +9099,7 @@
             for (let c = sel.startCol; c <= sel.endCol; c += 1) {
               const field = this.fields[c];
               const value = rowData && field ? rowData.values[field.code] : '';
-              rowVals.push(field ? this.formatCellDisplayValue(field, value) : '');
+              rowVals.push(field ? this.formatCellCopyValue(field, value) : '');
             }
             rowsOut.push(rowVals);
           }

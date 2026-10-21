@@ -21,25 +21,29 @@ const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'sr
 const contentJsSrc = fs.readFileSync(path.join(srcDir, 'content.js'), 'utf8');
 
 // 列順: 案件名(0・プレーン/row1は"を含む) / 備考(1・row0は改行を含む) / 数量(2・NUMBER/プレーン) /
-// 担当(3・プレーン)。チェック1は列0-2(2x3)、チェック2は列2-3(プレーンのみの2x2)、
-// チェック3は列0単体(改行なしのクォート往復)で使う
+// 担当(3・プレーン) / メモ(4・MULTI_LINE_TEXT本物・row0は改行を含む)。チェック1は列0-2(2x3)、
+// チェック2は列2-3(プレーンのみの2x2)、チェック3は列0単体(改行なしのクォート往復)で使う。
+// メモ(4)は3.4.0の「コピー時は複数行フィールドを元の改行のまま出す」の実フィールド検証用
+// (備考はSINGLE_LINE_TEXTに改行を直接仕込んだ従来からの回帰確認用で、役割が異なる)
 const FIELDS = [
   { code: '案件名', label: '案件名', type: 'SINGLE_LINE_TEXT', required: false, choices: [] },
   { code: '備考', label: '備考', type: 'SINGLE_LINE_TEXT', required: false, choices: [] },
   { code: '数量', label: '数量', type: 'NUMBER', required: false, choices: [] },
-  { code: '担当', label: '担当', type: 'SINGLE_LINE_TEXT', required: false, choices: [] }
+  { code: '担当', label: '担当', type: 'SINGLE_LINE_TEXT', required: false, choices: [] },
+  { code: 'メモ', label: 'メモ', type: 'MULTI_LINE_TEXT', required: false, choices: [] }
 ];
 
 const RECORDS = [
-  { $id: { value: '301' }, $revision: { value: '1' }, 案件名: { value: '案件A' }, 備考: { value: '1行目\n2行目' }, 数量: { value: '10' }, 担当: { value: '田中' } },
-  { $id: { value: '302' }, $revision: { value: '1' }, 案件名: { value: '5" パイプ' }, 備考: { value: 'メモB' }, 数量: { value: '20' }, 担当: { value: '鈴木' } },
+  { $id: { value: '301' }, $revision: { value: '1' }, 案件名: { value: '案件A' }, 備考: { value: '1行目\n2行目' }, 数量: { value: '10' }, 担当: { value: '田中' }, メモ: { value: '1行目\n2行目' } },
+  { $id: { value: '302' }, $revision: { value: '1' }, 案件名: { value: '5" パイプ' }, 備考: { value: 'メモB' }, 数量: { value: '20' }, 担当: { value: '鈴木' }, メモ: { value: '' } },
   // 貼り付け先(空の行)
-  { $id: { value: '303' }, $revision: { value: '1' }, 案件名: { value: '' }, 備考: { value: '' }, 数量: { value: '' }, 担当: { value: '' } },
-  { $id: { value: '304' }, $revision: { value: '1' }, 案件名: { value: '' }, 備考: { value: '' }, 数量: { value: '' }, 担当: { value: '' } }
+  { $id: { value: '303' }, $revision: { value: '1' }, 案件名: { value: '' }, 備考: { value: '' }, 数量: { value: '' }, 担当: { value: '' }, メモ: { value: '' } },
+  { $id: { value: '304' }, $revision: { value: '1' }, 案件名: { value: '' }, 備考: { value: '' }, 数量: { value: '' }, 担当: { value: '' }, メモ: { value: '' } }
 ];
 
 function buildBridge() {
   return `
+window.__putCalls = [];
 const RECORDS = ${JSON.stringify(RECORDS)};
 window.addEventListener('message', (ev) => {
   const d = ev.data || {};
@@ -52,6 +56,11 @@ window.addEventListener('message', (ev) => {
   if (type === 'EXCEL_EVALUATE_RECORD_ACL') {
     const ids = Array.isArray(d.payload?.ids) ? d.payload.ids : [];
     return reply({ ok: true, rights: ids.map((id) => ({ id, editable: true, deletable: true, viewable: true })) });
+  }
+  if (type === 'EXCEL_PUT_RECORDS') {
+    const records = Array.isArray(d.payload?.records) ? d.payload.records : [];
+    window.__putCalls.push({ records, __pbTrigger: d.payload?.__pbTrigger });
+    return reply({ ok: true, result: { records: records.map(() => ({ revision: '2' })) } });
   }
   if (type === 'EXCEL_GET_LOGIN_USER') return reply({ ok: true, user: { timezone: 'Asia/Tokyo' } });
   if (type === 'GET_APP_NAME') return reply({ ok: true, name: '受注管理' });
@@ -158,6 +167,41 @@ export async function run({ browser, check }) {
     eq('(3b) 改行セル往復: 行列が元の値(改行・"エスケープとも)に一致',
       parsed.matrix,
       [['案件A', '1行目\n2行目', '10'], ['5" パイプ', 'メモB', '20']]);
+
+    // ── (ML1) 本物のMULTI_LINE_TEXT(メモ)のコピーは元の改行のまま出る(表示は" / "のまま) ──
+    await dragSelect(page, c(0, 'メモ'), c(0, 'メモ'));
+    await page.keyboard.press('Control+c');
+    await page.waitForTimeout(80);
+    const copiedMemo = await page.evaluate(() => navigator.clipboard.__get());
+    check(name('(ML1) MULTI_LINE_TEXTのCtrl+Cは元の改行のままクォートされて出る("1行目\\n2行目")'),
+      copiedMemo === '"1行目\n2行目"');
+    check(name('(ML1) コピー後もセルの画面表示は" / "結合のプレビューのまま(改行には変わらない)'),
+      (await c(0, 'メモ').inputValue()) === '1行目 / 2行目');
+
+    // ── (ML2) 往復: コピーしたメモを別の空行(row2=303)へCtrl+Vで貼り付け ──────────
+    // 貼り付け後の画面表示は(他の型と同じく)プレビュー(" / ")のまま。元の改行が保たれて
+    // いることは保存ペイロード(ML3)で確認する(applyPastedValueがinput.value経由だと
+    // ブラウザのvalue sanitizationで改行が失われるため、直接確定パスへ回す3.4.0の修正対象)。
+    // 選択は.click()ではなくdragSelect(単一セル)を使う: MULTI_LINE_TEXTセルのclickは
+    // handleChoiceInputClickがopenMultilineEditor(モーダル)を開く仕様のため、.click()では
+    // セル選択にならずフォーカスがモーダル側へ移ってしまい、Ctrl+Vが拾えない
+    await dragSelect(page, c(2, 'メモ'), c(2, 'メモ'));
+    await page.waitForTimeout(80);
+    await page.keyboard.press('Control+v');
+    await page.waitForTimeout(150);
+    check(name('(ML2) 貼り付け先(row2・メモ)の画面表示がプレビュー"1行目 / 2行目"になる'),
+      (await c(2, 'メモ').inputValue()) === '1行目 / 2行目');
+
+    // ── (ML3) 保存ペイロードでメモの改行(\n)がそのまま残っていることを確認する ────────
+    await page.evaluate(() => { window.__putCalls.length = 0; });
+    const saveBtn = page.locator('.pb-overlay__btn--primary', { hasText: /保存|Save/ });
+    await saveBtn.click();
+    await page.waitForTimeout(300);
+    const putCalls = await page.evaluate(() => window.__putCalls);
+    check(name('(ML3) 保存でEXCEL_PUT_RECORDSが送られる'), putCalls.length > 0);
+    const savedRow2 = putCalls[0]?.records?.find((r) => String(r.id) === '303');
+    check(name('(ML3) row2(303)のメモが改行つきの元の値"1行目\\n2行目"のまま保存ペイロードに入る(貼り付けでの改行消失バグが直っている)'),
+      savedRow2?.record?.メモ?.value === '1行目\n2行目');
   } finally {
     await ctx.close();
   }
@@ -180,6 +224,14 @@ export async function run({ browser, check }) {
       const freeCopied = await freePage.evaluate(() => navigator.clipboard.__get());
       check(freeName('(4) 無料ユーザーでもCtrl+Cは同じExcel互換のクォート付きTSVを出す'),
         freeCopied === '案件A\t"1行目\n2行目"\t10\n"5"" パイプ"\tメモB\t20');
+
+      // ── (ML-free) 無料ユーザーでも本物のMULTI_LINE_TEXTのコピーは元の改行のまま出る ──
+      await dragSelect(freePage, fc(0, 'メモ'), fc(0, 'メモ'));
+      await freePage.keyboard.press('Control+c');
+      await freePage.waitForTimeout(80);
+      const freeCopiedMemo = await freePage.evaluate(() => navigator.clipboard.__get());
+      check(freeName('(ML-free) 無料ユーザーでもMULTI_LINE_TEXTのCtrl+Cは元の改行のままクォートされて出る'),
+        freeCopiedMemo === '"1行目\n2行目"');
     } finally {
       await freeCtx.close();
     }
