@@ -1681,7 +1681,7 @@
   font-size: 12px;
 }
 
-/* 3.4.1: メイングリッドの列ヘッダー(.pb-overlay__col-header/.pb-overlay__grid-head)に
+/* 3.4.0: メイングリッドの列ヘッダー(.pb-overlay__col-header/.pb-overlay__grid-head)に
    見た目を合わせる(背景・罫線色・文字色をそのまま流用。kintone標準の色・ブランド無し) */
 .pb-subtable__head {
   position: sticky;
@@ -1707,7 +1707,7 @@
   min-width: 44px;
 }
 
-/* 3.4.1: メイングリッドの.pb-overlay__cell/.pb-overlay__rowと同じ罫線色(#eef1f6)で
+/* 3.4.0: メイングリッドの.pb-overlay__cell/.pb-overlay__rowと同じ罫線色(#eef1f6)で
    縦横とも罫線を引く(以前は下線のみで縦線が無かった) */
 .pb-subtable__cell {
   padding: 0 8px;
@@ -1764,7 +1764,7 @@
   min-width: 40px;
 }
 
-/* 3.4.1: メイングリッドの行番号列(.pb-overlay__row-header/.pb-overlay__row-index)に
+/* 3.4.0: メイングリッドの行番号列(.pb-overlay__row-header/.pb-overlay__row-index)に
    見た目を合わせる(背景・文字色・サイズ) */
 .pb-subtable__rownum {
   width: 40px;
@@ -1806,7 +1806,7 @@
   box-shadow: inset 0 0 0 2px #2563eb;
 }
 
-/* 3.4.1: フィルハンドルのドラッグ中プレビュー。メイングリッドの
+/* 3.4.0: フィルハンドルのドラッグ中プレビュー。メイングリッドの
    .pb-overlay__cell--fill-previewと同じ色・枠線(クラス名はモーダル側の命名に揃える) */
 .pb-overlay__subtable-cell--fill-preview {
   background: rgba(29, 78, 216, 0.08) !important;
@@ -1823,7 +1823,7 @@
   padding-right: 14px;
 }
 
-/* 3.4.1: メイングリッドの.pb-overlay__input/.pb-overlay__input--editingと同じく、
+/* 3.4.0: メイングリッドの.pb-overlay__input/.pb-overlay__input--editingと同じく、
    編集中でなければ枠線も背景も付けず「文字だけ」に見せる(角丸input風の見た目を廃止)。
    枠線・背景が付くのは--editing(実際に入力できる状態)の時だけ */
 .pb-overlay__subtable-input {
@@ -2448,7 +2448,7 @@
     background: #111a2d;
   }
 
-  /* 3.4.1: メイングリッドの列ヘッダー/行番号列のダーク配色(.pb-overlay__grid-head/
+  /* 3.4.0: メイングリッドの列ヘッダー/行番号列のダーク配色(.pb-overlay__grid-head/
      .pb-overlay__row-header)に合わせる */
   #pb-excel-overlay .pb-subtable__head {
     background: #182338;

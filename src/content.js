@@ -8968,10 +8968,10 @@
       let editorEditingCell = null; // {row, col, beforeValue}
       let editorIsDragging = false;
       let editorRowIsDragging = false;
-      // 3.4.1: 選択肢(DROP_DOWN/RADIO_BUTTON)セルの編集中だけ開く、メイングリッドの
+      // 3.4.0: 選択肢(DROP_DOWN/RADIO_BUTTON)セルの編集中だけ開く、メイングリッドの
       // openRadioPicker相当のモーダルローカルなフローティングピッカー
       let editorChoicePicker = null; // {panel}
-      // 3.4.1: フィルハンドルのドラッグ状態。メイングリッドのthis.fillDragと同じ形
+      // 3.4.0: フィルハンドルのドラッグ状態。メイングリッドのthis.fillDragと同じ形
       // ({srcStartRow, srcEndRow, srcStartCol, srcEndCol, fillStartRow, fillEndRow,
       //   fillStartCol, fillEndCol, direction})だが、行・列ともeditorRows/childFields
       // 上のインデックス
@@ -9005,7 +9005,7 @@
         && editorActiveCell.row === rowIdx && editorActiveCell.col === colIdx;
       const isEditorCellEditing = (rowIdx, colIdx) => Boolean(editorEditingCell)
         && editorEditingCell.row === rowIdx && editorEditingCell.col === colIdx;
-      // 3.4.1: フィルハンドルのドラッグ中プレビュー対象セル(メイングリッドのisFillPreviewCell相当)
+      // 3.4.0: フィルハンドルのドラッグ中プレビュー対象セル(メイングリッドのisFillPreviewCell相当)
       const isEditorFillPreviewCell = (rowIdx, colIdx) => {
         const drag = editorFillDrag;
         if (!drag || drag.fillStartRow === null) return false;
@@ -9015,7 +9015,7 @@
 
       // renderRows()がtbodyを丸ごと再構築した直後、または選択のみ変わったときに呼び、
       // 現在のeditorSelection/editorActiveCell/editorEditingCellをDOMのクラスへ反映する。
-      // 3.4.1: フィルハンドル(メイングリッドのrepaintSelection相当)もここで管理する
+      // 3.4.0: フィルハンドル(メイングリッドのrepaintSelection相当)もここで管理する
       const repaintEditorSelection = () => {
         const rowEls = tbody.querySelectorAll('tr.pb-subtable__row');
         rowEls.forEach((rowEl, rowIdx) => {
@@ -9300,7 +9300,7 @@
 
       // 対象セルがinline-edit(通常の文字入力)かつ編集可能な場合のみ編集状態へ入る。
       // initialChar指定時は既存値を置き換えて1文字目を入れる(メイングリッドのtype-to-replaceと同じ)
-      // 3.4.1: 選択肢(DROP_DOWN/RADIO_BUTTON)1セル分のフローティングピッカー。
+      // 3.4.0: 選択肢(DROP_DOWN/RADIO_BUTTON)1セル分のフローティングピッカー。
       // メイングリッドのopenRadioPicker(this.fields/this.handleRadioChoiceSelectという
       // メイングリッド専用のインデックス・適用経路に結びついている)はそのまま再利用できない
       // ため、同じ見た目(.pb-overlay__choice-panel/.pb-overlay__choice-list/
@@ -9363,7 +9363,7 @@
         document.removeEventListener('mousedown', onEditorChoicePickerOutsideClick, true);
       };
 
-      // 3.4.1: 複数選択セル用。メイングリッドのopenMultiChoicePicker(this.fields/row経由)
+      // 3.4.0: 複数選択セル用。メイングリッドのopenMultiChoicePicker(this.fields/row経由)
       // ではなく、汎用のopenMultiChoicePickerForValuesをモーダルの行/列・
       // setSubtableCellValueに結びつけて直接呼ぶ(メイングリッドと同じ見た目のピッカーを再利用)
       const openEditorMultiChoicePicker = (rowIdx, colIdx, input) => {
@@ -9377,7 +9377,7 @@
         });
       };
 
-      // 3.4.1: メイングリッドと同じく「表示は文字だけ、dblclick/F2/Enter/タイプで初めて
+      // 3.4.0: メイングリッドと同じく「表示は文字だけ、dblclick/F2/Enter/タイプで初めて
       // 入力欄/ピッカーが開く」を型ごとに振り分ける共通入口。inline-edit系はbeginEditorCellEdit
       // (readOnlyを外して入力状態へ)、選択肢/複数行テキストは対応するピッカー/モーダルを開く
       const activateEditorCellForEntry = (rowIdx, colIdx, { selectAll = true } = {}) => {
@@ -9909,7 +9909,7 @@
           childFields.forEach((child, colIdx) => {
             const cell = document.createElement('td');
             cell.className = 'pb-subtable__cell';
-            // 3.4.1: フィルハンドルのドラッグ中、マウス位置から行を特定するためのインデックス
+            // 3.4.0: フィルハンドルのドラッグ中、マウス位置から行を特定するためのインデックス
             // (メイングリッドはinputのdata-row-indexを見るが、モーダルはセル自身に持たせる)
             cell.dataset.rowIndex = String(rowIdx);
             cell.dataset.colIndex = String(colIdx);
@@ -9924,7 +9924,7 @@
             const permission = getChildPermission(child);
             const interaction = this.resolveFieldInteraction(child, permission, { viewOnly: true });
             const isEditingThisCell = isEditorCellEditing(rowIdx, colIdx);
-            // 3.4.1: 選択肢/日付等の全列がメイングリッドと同じ「常に1つのinput・
+            // 3.4.0: 選択肢/日付等の全列がメイングリッドと同じ「常に1つのinput・
             // 表示はテキストだけ・枠線や角丸は編集中にしか出ない」という1枚のつくりに揃える
             // (以前はinline-choice-single/inline-choice-multiだけ別にnative select/buttonを
             // 常時表示していたため、角丸input/ボタン風の見た目が残っていた)
@@ -10234,7 +10234,7 @@
         get editingCell() { return editorEditingCell; },
         revertEditingCell: () => revertEditorCellEdit(),
         handleKeydown: (event) => handleSubtableEditorKeydown(event),
-        // 3.4.1: handleEscapeForFrontLayerからフィルハンドルのドラッグ中Escを最優先で
+        // 3.4.0: handleEscapeForFrontLayerからフィルハンドルのドラッグ中Escを最優先で
         // ルーティングするための窓口(メイングリッドのthis.fillDrag/cancelFillDragに相当)
         isFillDragging: () => Boolean(editorFillDrag),
         cancelFillDrag: () => cancelEditorFillDrag(),
@@ -10599,7 +10599,7 @@
       }
     }
 
-    // 3.4.1: フィルハンドルで埋める行の対応表(メイングリッド・サブテーブル編集モーダル共通)。
+    // 3.4.0: フィルハンドルで埋める行の対応表(メイングリッド・サブテーブル編集モーダル共通)。
     // targetStart/targetEndはプレビューされている範囲そのもの(それより多くも少なくも書かない。
     // ソース行数の倍数でなくてもタイル展開のバグでずれない)。directionが'down'なら
     // ソースに隣接する行(targetStart)がソース先頭行、'up'なら隣接する行(targetEnd)が
@@ -11013,7 +11013,7 @@
       this.repaintSelection();
     }
 
-    // 3.4.1: ドラッグ中にEscでキャンセルする(プレビューを消すだけで何も書かない)。
+    // 3.4.0: ドラッグ中にEscでキャンセルする(プレビューを消すだけで何も書かない)。
     // trueを返したらキャンセルするドラッグが実際にあったことを示す(Esc優先順位の判定用)
     cancelFillDrag() {
       if (!this.fillDrag) return false;
@@ -11026,7 +11026,7 @@
       return true;
     }
 
-    // 3.4.1: フィルはプレビューされた範囲(fillStartRow..fillEndRow)だけに書く。
+    // 3.4.0: フィルはプレビューされた範囲(fillStartRow..fillEndRow)だけに書く。
     // 以前はapplyPastedMatrixAt(選択範囲がソースの整数倍の時だけタイル展開する、
     // 貼り付け専用のロジック)を流用していたため、倍数でない範囲へのドラッグで
     // 書き過ぎ/書き漏らしが起きていた(非整数倍だとソース行数分しか書かない等)。
@@ -11169,7 +11169,7 @@
       };
     }
 
-    // 3.4.1: フィルハンドル専用。applyPastedValueはクリップボードの「文字列」貼り付け前提
+    // 3.4.0: フィルハンドル専用。applyPastedValueはクリップボードの「文字列」貼り付け前提
     // (input.valueへ代入してからonInputChangedで再解釈する分岐を持つ)だが、フィルは
     // 既に型の合った生の値(CHECK_BOX/MULTI_SELECTの配列・複数行テキストの実改行等)を
     // 別セルからそのまま複製するだけなので、文字列化を経由せずvalidate()にそのまま渡す
@@ -12720,7 +12720,7 @@
 
     handleEscapeForFrontLayer(event) {
       if (!event || event.key !== 'Escape') return false;
-      // 3.4.1: フィルハンドルのドラッグ中は何よりも先にEscで中断する
+      // 3.4.0: フィルハンドルのドラッグ中は何よりも先にEscで中断する
       // (プレビューを消すだけで何も書かない。オーバーレイやモーダルは閉じない)
       if (this.fillDrag) {
         event.preventDefault();
