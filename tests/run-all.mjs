@@ -70,7 +70,10 @@ const SUITES = [
   ['subtable-modal-close-e2e', './subtable-modal-close-e2e.test.mjs'],
   // 3.4.0: サブテーブル編集モーダルをメイングリッドの選択UIのように振る舞わせる
   // (選択/アクティブ/編集中・行番号列・矢印/Tab/Enter/F2/Esc/Delete/Ctrl+C/V/Ctrl+Enter)
-  ['subtable-grid-e2e', './subtable-grid-e2e.test.mjs']
+  ['subtable-grid-e2e', './subtable-grid-e2e.test.mjs'],
+  // 3.4.0: メイングリッド(一覧)のCtrl+Cもサブテーブルと同じExcel互換TSV(改行・タブ・"を
+  // 含むセルを"…"で囲む)になったことの確認(クォートなしのプレーン範囲・クォート往復・無料モード)
+  ['grid-copy-tsv-e2e', './grid-copy-tsv-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];

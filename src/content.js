@@ -10328,7 +10328,7 @@
       if (!Array.isArray(matrix)) return '';
       const escapeCell = (value) => {
         const text = value === undefined || value === null ? '' : String(value);
-        if (/[\t\n"]/.test(text)) {
+        if (/[\t\r\n"]/.test(text)) {
           return `"${text.replace(/"/g, '""')}"`;
         }
         return text;
@@ -11303,6 +11303,8 @@
       const text = this.isDetailFormLayoutMode()
         ? this.getFormClipboardLinesFromSelection(sel).join('\n')
         : (() => {
+          // 3.4.0: サブテーブルのモーダルと同じ Excel 互換の TSV にそろえる(改行・タブ・" を
+          // 含むセルは "…" で囲む)。囲まないと、改行を含むセルを Excel に貼ったとき行がずれる
           const rowsOut = [];
           for (let r = sel.startRow; r <= sel.endRow; r += 1) {
             const rowVals = [];
@@ -11312,9 +11314,9 @@
               const value = rowData && field ? rowData.values[field.code] : '';
               rowVals.push(field ? this.formatCellDisplayValue(field, value) : '');
             }
-            rowsOut.push(rowVals.join('\t'));
+            rowsOut.push(rowVals);
           }
-          return rowsOut.join('\n');
+          return ExcelOverlayController.matrixToTsv(rowsOut);
         })();
       try {
         if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
