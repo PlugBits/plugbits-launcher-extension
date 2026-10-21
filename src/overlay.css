@@ -1735,6 +1735,58 @@
   text-align: center;
 }
 
+/* 3.4.0: サブテーブル編集モーダルのスプレッドシート風選択(行番号列・選択/アクティブ/編集中)。
+   色はメイングリッドの .pb-overlay__cell--selected/--active/--editing に合わせる
+   (kintone標準の見た目・ブランド色は使わない) */
+.pb-subtable__col-rownum {
+  width: 40px;
+  min-width: 40px;
+}
+
+.pb-subtable__head-rownum {
+  width: 40px;
+  min-width: 40px;
+}
+
+.pb-subtable__rownum {
+  width: 40px;
+  min-width: 40px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pb-subtable__rownum--active {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.pb-subtable__rownum--selected {
+  background: #eaf3ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.pb-overlay__subtable-cell--selected {
+  position: relative;
+  background: #eaf3ff;
+}
+
+.pb-overlay__subtable-cell--active {
+  position: relative;
+  z-index: 2;
+  box-shadow: inset 0 0 0 2px #1d4ed8;
+}
+
+.pb-overlay__subtable-cell--editing {
+  position: relative;
+  z-index: 3;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 2px #2563eb;
+}
+
 .pb-overlay__subtable-input {
   width: 100%;
   min-width: 0;
@@ -2397,6 +2449,35 @@
   #pb-excel-overlay .pb-overlay__subtable-choice-trigger:disabled {
     background: #162136;
     color: #b7c6da;
+  }
+
+  /* 3.4.0: サブテーブル編集モーダルのスプレッドシート風選択(行番号/選択/アクティブ/編集中)。
+     メイングリッドのダークモード選択色(#pb-excel-overlay .pb-overlay__cell--selected等)に合わせる */
+  #pb-excel-overlay .pb-subtable__rownum {
+    color: #9fb0c7;
+  }
+
+  #pb-excel-overlay .pb-subtable__rownum--active {
+    color: #93c5fd;
+  }
+
+  #pb-excel-overlay .pb-subtable__rownum--selected {
+    background: rgba(59, 130, 246, 0.14);
+    color: #93c5fd;
+  }
+
+  #pb-excel-overlay .pb-overlay__subtable-cell--selected {
+    background: rgba(59, 130, 246, 0.14);
+  }
+
+  #pb-excel-overlay .pb-overlay__subtable-cell--active {
+    background: rgba(30, 64, 175, 0.18);
+    box-shadow: inset 0 0 0 2px #60a5fa;
+  }
+
+  #pb-excel-overlay .pb-overlay__subtable-cell--editing {
+    background: #0d223d;
+    box-shadow: inset 0 0 0 2px #60a5fa;
   }
 
   /* choice panel */
