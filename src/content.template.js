@@ -1495,6 +1495,11 @@
       toastSubtablePasteSummary: (n, m) => `${n} 件を貼り付けました(${m} 件は貼り付けできない列のため飛ばしました)`,
       // 3.4.0: サブテーブル編集モーダルのスプレッドシート風選択(行番号列からの行削除確認)
       subtableDeleteRowsConfirm: (n) => `選択した ${n} 行を削除しますか？`,
+      // 3.4.0: サブテーブル編集モーダル内専用のUndo/Redo(メイングリッドのbtnUndo/btnRedoとは別物)
+      subtableUndo: "元に戻す",
+      subtableRedo: "やり直す",
+      titleSubtableUndo: "元に戻す (Ctrl+Z)",
+      titleSubtableRedo: "やり直す (Ctrl+Y)",
       multilineTitle: "複数行テキスト編集",
       multilineSave: "保存",
       multilineCancel: "キャンセル",
@@ -1841,6 +1846,11 @@
       toastSubtablePasteSummary: (n, m) => `Pasted ${n} cell${n === 1 ? '' : 's'} (skipped ${m} cell${m === 1 ? '' : 's'} in non-pasteable columns)`,
       // 3.4.0: spreadsheet-like selection in the subtable editor modal (row-delete confirm from the row-number column)
       subtableDeleteRowsConfirm: (n) => (n === 1 ? 'Delete the selected row?' : `Delete ${n} selected rows?`),
+      // 3.4.0: undo/redo local to the subtable editor modal (separate from btnUndo/btnRedo)
+      subtableUndo: "Undo",
+      subtableRedo: "Redo",
+      titleSubtableUndo: "Undo (Ctrl+Z)",
+      titleSubtableRedo: "Redo (Ctrl+Y)",
       multilineTitle: "Edit multi-line text",
       multilineSave: "Save",
       multilineCancel: "Cancel",

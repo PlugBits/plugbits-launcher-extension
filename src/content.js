@@ -1499,6 +1499,11 @@
       toastSubtablePasteSummary: (n, m) => `${n} 件を貼り付けました(${m} 件は貼り付けできない列のため飛ばしました)`,
       // 3.4.0: サブテーブル編集モーダルのスプレッドシート風選択(行番号列からの行削除確認)
       subtableDeleteRowsConfirm: (n) => `選択した ${n} 行を削除しますか？`,
+      // 3.4.0: サブテーブル編集モーダル内専用のUndo/Redo(メイングリッドのbtnUndo/btnRedoとは別物)
+      subtableUndo: "元に戻す",
+      subtableRedo: "やり直す",
+      titleSubtableUndo: "元に戻す (Ctrl+Z)",
+      titleSubtableRedo: "やり直す (Ctrl+Y)",
       multilineTitle: "複数行テキスト編集",
       multilineSave: "保存",
       multilineCancel: "キャンセル",
@@ -1845,6 +1850,11 @@
       toastSubtablePasteSummary: (n, m) => `Pasted ${n} cell${n === 1 ? '' : 's'} (skipped ${m} cell${m === 1 ? '' : 's'} in non-pasteable columns)`,
       // 3.4.0: spreadsheet-like selection in the subtable editor modal (row-delete confirm from the row-number column)
       subtableDeleteRowsConfirm: (n) => (n === 1 ? 'Delete the selected row?' : `Delete ${n} selected rows?`),
+      // 3.4.0: undo/redo local to the subtable editor modal (separate from btnUndo/btnRedo)
+      subtableUndo: "Undo",
+      subtableRedo: "Redo",
+      titleSubtableUndo: "Undo (Ctrl+Z)",
+      titleSubtableRedo: "Redo (Ctrl+Y)",
       multilineTitle: "Edit multi-line text",
       multilineSave: "Save",
       multilineCancel: "Cancel",
@@ -4437,6 +4447,16 @@
       }
       const addBtn = panel.querySelector('[data-subtable-action="add"]');
       if (addBtn) addBtn.textContent = resolveText(this.language, 'subtableAddRow');
+      const undoBtn = panel.querySelector('[data-subtable-action="undo"]');
+      if (undoBtn) {
+        undoBtn.textContent = resolveText(this.language, 'subtableUndo');
+        undoBtn.title = resolveText(this.language, 'titleSubtableUndo');
+      }
+      const redoBtn = panel.querySelector('[data-subtable-action="redo"]');
+      if (redoBtn) {
+        redoBtn.textContent = resolveText(this.language, 'subtableRedo');
+        redoBtn.title = resolveText(this.language, 'titleSubtableRedo');
+      }
       const autoBtn = panel.querySelector('[data-subtable-action="autowidth"]');
       if (autoBtn) autoBtn.textContent = resolveText(this.language, 'subtableAutoWidth');
       const reloadBtn = panel.querySelector('[data-subtable-action="reload-layout"]');
@@ -8883,6 +8903,11 @@
       table.appendChild(tbody);
       tableWrap.appendChild(table);
 
+      // 3.4.0: モーダル専用Undo/Redoボタンへの参照。実体(editorUndoStack等)は後段で定義するが、
+      // ボタン自体はこの下のfooter構築で先に作るため、参照用のletをここで宣言しておく
+      let editorUndoBtn = null;
+      let editorRedoBtn = null;
+
       const footer = document.createElement('div');
       footer.className = 'pb-overlay__subtable-foot';
       const footerLeft = document.createElement('div');
@@ -8894,6 +8919,23 @@
       addBtn.className = 'pb-overlay__btn';
       addBtn.dataset.subtableAction = 'add';
       addBtn.textContent = resolveText(this.language, 'subtableAddRow');
+      // 3.4.0: モーダル専用Undo/Redo(メイングリッドのthis.undoButton/this.redoButtonとは別物の
+      // ローカルボタン。open〜closeの間だけ有効で、このクロージャを抜けると(=モーダルを閉じると)
+      // 一緒に消える)
+      const subtableUndoBtn = document.createElement('button');
+      subtableUndoBtn.type = 'button';
+      subtableUndoBtn.className = 'pb-overlay__btn';
+      subtableUndoBtn.dataset.subtableAction = 'undo';
+      subtableUndoBtn.textContent = resolveText(this.language, 'subtableUndo');
+      subtableUndoBtn.title = resolveText(this.language, 'titleSubtableUndo');
+      subtableUndoBtn.disabled = true;
+      const subtableRedoBtn = document.createElement('button');
+      subtableRedoBtn.type = 'button';
+      subtableRedoBtn.className = 'pb-overlay__btn';
+      subtableRedoBtn.dataset.subtableAction = 'redo';
+      subtableRedoBtn.textContent = resolveText(this.language, 'subtableRedo');
+      subtableRedoBtn.title = resolveText(this.language, 'titleSubtableRedo');
+      subtableRedoBtn.disabled = true;
       const autoBtn = document.createElement('button');
       autoBtn.type = 'button';
       autoBtn.className = 'pb-overlay__btn';
@@ -8914,6 +8956,8 @@
       saveBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
       saveBtn.dataset.subtableAction = 'save';
       saveBtn.textContent = resolveText(this.language, 'subtableSave');
+      footerLeft.appendChild(subtableUndoBtn);
+      footerLeft.appendChild(subtableRedoBtn);
       footerLeft.appendChild(autoBtn);
       footerLeft.appendChild(reloadBtn);
       footerRight.appendChild(addBtn);
@@ -8921,6 +8965,10 @@
       footerRight.appendChild(saveBtn);
       footer.appendChild(footerLeft);
       footer.appendChild(footerRight);
+      editorUndoBtn = subtableUndoBtn;
+      editorRedoBtn = subtableRedoBtn;
+      subtableUndoBtn.addEventListener('click', () => performEditorUndo());
+      subtableRedoBtn.addEventListener('click', () => performEditorRedo());
 
       const setSubtableCellValue = (item, child, nextValue) => {
         if (!item.value || typeof item.value !== 'object') item.value = {};
@@ -8979,6 +9027,15 @@
       let boundEditorFillDragMove = null;
       let boundEditorFillDragUp = null;
       let editorFillHandleEl = null;
+      // 3.4.0: モーダル専用のUndo/Redo。メイングリッドのthis.undoStack/this.redoStack
+      // (pushHistory/undo/redo)とは完全に別物で、モーダルを開いている間だけ生き、
+      // 保存/キャンセル/×/Escで閉じると同時に消える(closeSubtableEditor側では何もせず、
+      // 単にこのクロージャ自体がgcされることで消える)。各要素はeditorRows全体の
+      // スナップショット({rows, selection, activeCell})で、1回のUndo/Redoが
+      // 「1操作」に対応するようにする(個々のキー入力/setSubtableCellValue呼び出し単位ではない)
+      let editorUndoStack = [];
+      let editorRedoStack = [];
+      const EDITOR_UNDO_LIMIT = 100;
 
       const getEditorMaxRow = () => Math.max(0, editorRows.length - 1);
       const getEditorMaxCol = () => Math.max(0, childFields.length - 1);
@@ -9084,6 +9141,66 @@
         }
       };
 
+      // ── モーダル専用Undo/Redo(3.4.0) ──────────────────────────────
+      // editorRows全体+selection/activeCellをまとめて1スナップショットとして保存する方式。
+      // 各ミューテーション操作は「操作前にcaptureEditorStateSnapshot()で退避→実際の変更を行う→
+      // recordEditorUndoStepForMutation(beforeSnapshot)で変化があった時だけ積む」という形に揃える
+      // (個々のsetSubtableCellValue呼び出し単位ではなく、1回のユーザー操作=1ステップにする)
+      const captureEditorStateSnapshot = () => ({
+        rows: this.deepClone(editorRows),
+        selection: editorSelection ? { ...editorSelection } : null,
+        activeCell: editorActiveCell ? { ...editorActiveCell } : null
+      });
+
+      const updateEditorUndoRedoButtons = () => {
+        if (editorUndoBtn) editorUndoBtn.disabled = readOnlyMode || editorUndoStack.length === 0;
+        if (editorRedoBtn) editorRedoBtn.disabled = readOnlyMode || editorRedoStack.length === 0;
+      };
+
+      // beforeSnapshotはミューテーション操作の直前にcaptureEditorStateSnapshot()で取っておいた
+      // もの。実際にeditorRowsの内容(値)が変わっていなければ(権限なし/無料モードでno-op等)
+      // 何も積まない
+      const recordEditorUndoStepForMutation = (beforeSnapshot) => {
+        if (!beforeSnapshot || readOnlyMode) return;
+        if (JSON.stringify(beforeSnapshot.rows) === JSON.stringify(editorRows)) return;
+        editorUndoStack.push(beforeSnapshot);
+        if (editorUndoStack.length > EDITOR_UNDO_LIMIT) editorUndoStack.shift();
+        editorRedoStack = [];
+        updateEditorUndoRedoButtons();
+      };
+
+      // スナップショットをeditorRows(同一参照を保ったまま内容を入れ替える。push/spliceで
+      // 直接操作している他のクロージャ変数との整合を保つため、配列自体を再代入しない)/
+      // selection/activeCellへ反映して再描画する
+      const applyEditorStateSnapshot = (snapshot) => {
+        editorRows.length = 0;
+        (snapshot.rows || []).forEach((item) => editorRows.push(this.deepClone(item)));
+        editorEditingCell = null;
+        editorActiveCell = snapshot.activeCell ? { ...snapshot.activeCell } : null;
+        editorSelection = snapshot.selection ? { ...snapshot.selection } : null;
+        closeEditorChoicePicker();
+        renderRows();
+        if (editorActiveCell) focusEditorDisplayCell(editorActiveCell.row, editorActiveCell.col);
+      };
+
+      const performEditorUndo = () => {
+        if (readOnlyMode || !editorUndoStack.length) return;
+        const prevSnapshot = editorUndoStack.pop();
+        const currentSnapshot = captureEditorStateSnapshot();
+        applyEditorStateSnapshot(prevSnapshot);
+        editorRedoStack.push(currentSnapshot);
+        updateEditorUndoRedoButtons();
+      };
+
+      const performEditorRedo = () => {
+        if (readOnlyMode || !editorRedoStack.length) return;
+        const nextSnapshot = editorRedoStack.pop();
+        const currentSnapshot = captureEditorStateSnapshot();
+        applyEditorStateSnapshot(nextSnapshot);
+        editorUndoStack.push(currentSnapshot);
+        updateEditorUndoRedoButtons();
+      };
+
       // ── フィルハンドル(3.4.0・owner差し戻しで復活) ──────────────────────
       // メイングリッドのstartFillDrag/onFillDragMove/updateFillDrag/commitFillDragと
       // 同じ流儀(垂直方向のみ・列は選択範囲と同じ・系列増加なし=常にコピー)をモーダル
@@ -9179,6 +9296,7 @@
           srcStartRow, srcEndRow, fillStartRow, fillEndRow, direction
         );
 
+        const __undoSnapshot = captureEditorStateSnapshot();
         let appliedCount = 0;
         let skippedCount = 0;
         mapping.forEach(({ targetIndex, sourceIndex }) => {
@@ -9199,6 +9317,7 @@
           }
         });
 
+        recordEditorUndoStepForMutation(__undoSnapshot);
         renderRows();
         if (appliedCount > 0) {
           this.notify(resolveText(this.language, 'toastSubtablePasteDone', appliedCount));
@@ -9217,6 +9336,10 @@
         };
         editorActiveCell = { row: srcStartRow, col: srcStartCol };
         repaintEditorSelection();
+        // renderRows()がtbodyを丸ごと再構築し、直前までフォーカスされていたinputを破棄して
+        // いるため、ここで明示的にフォーカスを戻す(戻さないとキーボード操作がthis.root外の
+        // documentへ漏れ、直後のCtrl+Z等がモーダルに届かなくなる)
+        focusEditorDisplayCell(srcStartRow, srcStartCol);
       };
 
       const setEditorSelectionSingle = (rowIdx, colIdx) => {
@@ -9372,7 +9495,9 @@
         if (!item || !child) return;
         const rawCell = item.value?.[child.code]?.value;
         this.openMultiChoicePickerForValues(child, input, rawCell, (nextValues) => {
+          const __undoSnapshot = captureEditorStateSnapshot();
           setSubtableCellValue(item, child, nextValues);
+          recordEditorUndoStepForMutation(__undoSnapshot);
           renderRows();
         });
       };
@@ -9416,7 +9541,10 @@
         const interaction = this.resolveFieldInteraction(child, permission, { viewOnly: true });
         if (interaction !== 'inline-edit' && interaction !== 'inline-choice-single') return false;
         const rawCell = item.value?.[child.code]?.value;
-        editorEditingCell = { row: rowIdx, col: colIdx, beforeValue: this.deepClone(rawCell) };
+        // undoSnapshotはこの編集セッション全体(開始〜commitEditorCellEdit)の「前」状態。
+        // セッション中の個々のキー入力/ピッカー選択はすべてこの1スナップショットに対する
+        // 1回のUndoステップにまとめる(commitEditorCellEdit側でrecordEditorUndoStepForMutationへ渡す)
+        editorEditingCell = { row: rowIdx, col: colIdx, beforeValue: this.deepClone(rawCell), undoSnapshot: captureEditorStateSnapshot() };
         editorActiveCell = { row: rowIdx, col: colIdx };
         renderRows();
         const input = getDataInputEl(rowIdx, colIdx);
@@ -9442,12 +9570,18 @@
       // 編集中セルを確定して表示モードへ戻す(値はinputのinputイベントで既に反映済み)
       const commitEditorCellEdit = () => {
         if (!editorEditingCell) return;
+        const undoSnapshot = editorEditingCell.undoSnapshot;
         editorEditingCell = null;
         closeEditorChoicePicker();
         renderRows();
+        // このセッション中に実際に値が変わっていた時だけ1ステップ積む(開いて何も
+        // 変えずに確定した場合はno-op=積まない)
+        recordEditorUndoStepForMutation(undoSnapshot);
       };
 
-      // Escでの取り消し: 編集開始前の値へ戻し、表示モードへ戻す(モーダルは閉じない)
+      // Escでの取り消し: 編集開始前の値へ戻し、表示モードへ戻す(モーダルは閉じない)。
+      // 値をbeforeValueへ戻すだけ=結果としてeditorRowsはundoSnapshot取得時点と同じに
+      // なるので、Undoステップは積まない(recordEditorUndoStepForMutationは呼ばない)
       const revertEditorCellEdit = () => {
         if (!editorEditingCell) return;
         const { row, col, beforeValue } = editorEditingCell;
@@ -9533,12 +9667,22 @@
             { danger: true, confirmLabel: resolveText(this.language, 'confirmDelete') }
           );
           if (!proceed) return;
+          const __undoSnapshotRows = captureEditorStateSnapshot();
+          const __deletedAtRow = editorSelection.startRow;
           editorRows.splice(editorSelection.startRow, count);
           editorSelection = null;
-          editorActiveCell = null;
+          // 削除位置に残っている行(無ければ最終行)へアクティブセルを移す。null固定だと
+          // renderRows()後にフォーカスを戻す先が無くなり、直後のCtrl+Z等がthis.root外へ
+          // 漏れてモーダルに届かなくなる
+          editorActiveCell = editorRows.length
+            ? { row: Math.min(__deletedAtRow, editorRows.length - 1), col: 0 }
+            : null;
+          recordEditorUndoStepForMutation(__undoSnapshotRows);
           renderRows();
+          if (editorActiveCell) focusEditorDisplayCell(editorActiveCell.row, editorActiveCell.col);
           return;
         }
+        const __undoSnapshotClear = captureEditorStateSnapshot();
         for (let r = editorSelection.startRow; r <= editorSelection.endRow; r += 1) {
           const item = editorRows[r];
           if (!item) continue;
@@ -9551,7 +9695,11 @@
             setSubtableCellValue(item, child, interaction === 'inline-choice-multi' ? [] : '');
           }
         }
+        recordEditorUndoStepForMutation(__undoSnapshotClear);
         renderRows();
+        // renderRows()でtbodyが再構築されフォーカスが外れるため、直後のCtrl+Z等を
+        // モーダルに届かせるためアクティブセルへフォーカスを戻す
+        if (editorActiveCell) focusEditorDisplayCell(editorActiveCell.row, editorActiveCell.col);
       };
 
       // Ctrl+Enter: 編集中セルの現在値を、選択範囲内の貼り付け可能な列すべてへ適用する
@@ -9559,7 +9707,7 @@
       const fillEditorSelectionWithEditingValue = () => {
         if (readOnlyMode) { this.notifyViewOnlyBlocked(); return; }
         if (!editorEditingCell) return;
-        const { row, col } = editorEditingCell;
+        const { row, col, undoSnapshot } = editorEditingCell;
         const item = editorRows[row];
         const child = childFields[col];
         if (!item || !child) { commitEditorCellEdit(); return; }
@@ -9595,7 +9743,13 @@
           }
         }
         editorEditingCell = null;
+        // 編集開始(F2/dblclick等)時点のスナップショットと比較する=このセッション中に
+        // タイプした分とCtrl+Enterで埋めた分をまとめて1つのUndoステップにする
+        recordEditorUndoStepForMutation(undoSnapshot);
         renderRows();
+        // renderRows()でtbodyが再構築され編集中だったinputも破棄されるため、元のセルへ
+        // フォーカスを戻す(直後のCtrl+Z等をモーダルに届かせるため)
+        focusEditorDisplayCell(row, col);
         if (appliedCount > 0) {
           this.notify(resolveText(this.language, 'toastSubtablePasteDone', appliedCount));
         }
@@ -9677,7 +9831,24 @@
           if (ctrlOrMeta && key === 'Enter') { consume(); fillEditorSelectionWithEditingValue(); return true; }
           if (key === 'Enter') { consume(); commitEditorCellEdit(); moveEditorActiveCell(1, 0); return true; }
           if (key === 'Tab') { consume(); commitEditorCellEdit(); moveEditorActiveCellTab(event.shiftKey); return true; }
-          return false; // 矢印キー・通常の文字入力・Ctrl+C/V等はネイティブ入力動作に任せる
+          return false; // 矢印キー・通常の文字入力・Ctrl+C/V等はネイティブ入力動作に任せる(Ctrl+Zもここで
+          // 止まる=ネイティブinputの編集中Undoに任せる。editorEditingCellがある間はここに来ない下の
+          // モーダルUndo/Redoへは絶対に到達しない)
+        }
+
+        // 3.4.0: モーダル専用のUndo/Redo(メイングリッドのthis.undoStack/this.redoStackとは
+        // 完全に別物)。セル編集中(上のeditorEditingCell分岐)でもIME変換中(関数先頭)でもない
+        // ときだけ処理する
+        if (ctrlOrMeta && !event.altKey) {
+          const keyLower = String(key || '').toLowerCase();
+          const wantsUndo = keyLower === 'z' && !event.shiftKey;
+          const wantsRedo = keyLower === 'y' || (keyLower === 'z' && event.shiftKey);
+          if (wantsUndo || wantsRedo) {
+            consume();
+            if (wantsUndo) performEditorUndo();
+            else performEditorRedo();
+            return true;
+          }
         }
 
         const arrowDelta = ExcelOverlayController.arrowKeyToDelta(key);
@@ -9743,6 +9914,7 @@
           const proceed = await this.overlayConfirm(resolveText(this.language, 'subtablePasteRowLimitConfirm', resultingRowCount));
           if (!proceed) return;
         }
+        const __undoSnapshotPaste = captureEditorStateSnapshot();
         while (editorRows.length < neededRowCount) {
           editorRows.push(createDefaultEditorRow());
         }
@@ -9795,7 +9967,14 @@
           }
         }
 
+        recordEditorUndoStepForMutation(__undoSnapshotPaste);
+        editorActiveCell = ExcelOverlayController.clampCell(
+          { row: startRowIndex, col: startColIndex }, getEditorMaxRow(), getEditorMaxCol()
+        );
         renderRows();
+        // renderRows()でtbodyが再構築されフォーカスが外れるため、貼り付け開始位置の
+        // セルへフォーカスを戻す(直後のCtrl+Z/Ctrl+C等をモーダルに届かせるため)
+        focusEditorDisplayCell(editorActiveCell.row, editorActiveCell.col);
         if (skippedCount > 0) {
           this.notify(resolveText(this.language, 'toastSubtablePasteSummary', appliedCount, skippedCount));
         } else if (appliedCount > 0) {
@@ -10009,7 +10188,9 @@
                       viewerMode: this.isRichTextField(child),
                       anchorInput: input,
                       onSave: (nextValue) => {
+                        const __undoSnapshot = captureEditorStateSnapshot();
                         setSubtableCellValue(item, child, nextValue);
+                        recordEditorUndoStepForMutation(__undoSnapshot);
                         renderRows();
                       }
                     });
@@ -10037,8 +10218,13 @@
                 nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
                 nativePicker.addEventListener('change', () => {
                   if (nativePicker.value) {
+                    // 編集中(F2/dblclick)でこのセルを開いている間は、session全体を
+                    // commitEditorCellEdit側で1ステップにまとめるのでここでは積まない
+                    const inOwnEditSession = Boolean(isEditingThisCell);
+                    const __undoSnapshot = inOwnEditSession ? null : captureEditorStateSnapshot();
                     input.value = nativePicker.value;
                     setSubtableCellValue(item, child, nativePicker.value);
+                    if (!inOwnEditSession) recordEditorUndoStepForMutation(__undoSnapshot);
                   }
                 });
                 cell.appendChild(pickerLabel);
@@ -10059,9 +10245,12 @@
                 nativePicker.addEventListener('mousedown', (e) => e.stopPropagation());
                 nativePicker.addEventListener('change', () => {
                   if (nativePicker.value) {
+                    const inOwnEditSession = Boolean(isEditingThisCell);
+                    const __undoSnapshot = inOwnEditSession ? null : captureEditorStateSnapshot();
                     const display = nativePicker.value.replace('T', ' ');
                     input.value = display;
                     setSubtableCellValue(item, child, display);
+                    if (!inOwnEditSession) recordEditorUndoStepForMutation(__undoSnapshot);
                   }
                 });
                 cell.appendChild(pickerLabel);
@@ -10083,8 +10272,14 @@
             if (readOnlyMode) return;
             const idx = editorRows.indexOf(item);
             if (idx >= 0) {
+              const __undoSnapshot = captureEditorStateSnapshot();
               editorRows.splice(idx, 1);
+              editorActiveCell = editorRows.length
+                ? { row: Math.min(idx, editorRows.length - 1), col: 0 }
+                : null;
+              recordEditorUndoStepForMutation(__undoSnapshot);
               renderRows();
+              if (editorActiveCell) focusEditorDisplayCell(editorActiveCell.row, editorActiveCell.col);
             }
           });
           opCell.appendChild(removeBtn);
@@ -10099,7 +10294,9 @@
 
       addBtn.addEventListener('click', () => {
         if (readOnlyMode) return;
+        const __undoSnapshot = captureEditorStateSnapshot();
         editorRows.push(createDefaultEditorRow());
+        recordEditorUndoStepForMutation(__undoSnapshot);
         renderRows();
       });
 
@@ -10203,6 +10400,7 @@
       autoBtn.disabled = false;
       reloadBtn.disabled = false;
       saveBtn.disabled = readOnlyMode;
+      updateEditorUndoRedoButtons();
 
       layer.addEventListener('click', () => this.closeSubtableEditor(true));
       layer.appendChild(panel);
@@ -12362,7 +12560,11 @@
         }
         return;
       }
-      if (!this.isComposing && (event.ctrlKey || event.metaKey) && !event.altKey) {
+      // 3.4.0: サブテーブル編集モーダルが開いている間は、このCtrl+Z/Yをメイングリッドの
+      // undo/redoへ渡さない(モーダル自身のUndo/Redoはこの下のsubtableEditor.handleKeydown
+      // 経路に委譲する。メイングリッドのthis.undoStack/this.redoStackには一切触れない)。
+      const isSubtableEditorTarget = Boolean(this.subtableEditor?.panel && this.subtableEditor.panel.contains(target));
+      if (!isSubtableEditorTarget && !this.isComposing && (event.ctrlKey || event.metaKey) && !event.altKey) {
         const key = String(event.key || '').toLowerCase();
         const wantsUndo = key === 'z' && !event.shiftKey;
         const wantsRedo = key === 'y' || (key === 'z' && event.shiftKey);

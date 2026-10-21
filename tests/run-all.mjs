@@ -76,7 +76,11 @@ const SUITES = [
   ['grid-copy-tsv-e2e', './grid-copy-tsv-e2e.test.mjs'],
   // 3.4.1: メイングリッドのフィルハンドル(ソース行数の倍数でない範囲への書き過ぎ/書き漏らし・
   // 表示整形経由での値破損のバグ修正・Excelの上方向周期順・Esc中断・Undo1回まとめ)
-  ['grid-fill-e2e', './grid-fill-e2e.test.mjs']
+  ['grid-fill-e2e', './grid-fill-e2e.test.mjs'],
+  // 3.4.0: サブテーブル編集モーダル専用のUndo/Redo(メイングリッドのthis.undoStack/
+  // this.redoStackとは別物。Ctrl+Z/Ctrl+Y/Ctrl+Shift+Z・フッターボタン・編集中は
+  // ネイティブ入力へ任せる・IME無視・モーダルを開いている間は本体のUndo/Redoに触れない)
+  ['subtable-undo-e2e', './subtable-undo-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];
