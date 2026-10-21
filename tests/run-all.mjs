@@ -73,7 +73,10 @@ const SUITES = [
   ['subtable-grid-e2e', './subtable-grid-e2e.test.mjs'],
   // 3.4.0: メイングリッド(一覧)のCtrl+Cもサブテーブルと同じExcel互換TSV(改行・タブ・"を
   // 含むセルを"…"で囲む)になったことの確認(クォートなしのプレーン範囲・クォート往復・無料モード)
-  ['grid-copy-tsv-e2e', './grid-copy-tsv-e2e.test.mjs']
+  ['grid-copy-tsv-e2e', './grid-copy-tsv-e2e.test.mjs'],
+  // 3.4.1: メイングリッドのフィルハンドル(ソース行数の倍数でない範囲への書き過ぎ/書き漏らし・
+  // 表示整形経由での値破損のバグ修正・Excelの上方向周期順・Esc中断・Undo1回まとめ)
+  ['grid-fill-e2e', './grid-fill-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];

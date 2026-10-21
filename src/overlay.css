@@ -1681,17 +1681,25 @@
   font-size: 12px;
 }
 
+/* 3.4.1: メイングリッドの列ヘッダー(.pb-overlay__col-header/.pb-overlay__grid-head)に
+   見た目を合わせる(背景・罫線色・文字色をそのまま流用。kintone標準の色・ブランド無し) */
 .pb-subtable__head {
   position: sticky;
   top: 0;
   z-index: 1;
   text-align: left;
-  padding: 8px 10px;
-  background: #f8fafc;
-  color: #334155;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 6px 10px;
+  background: #f3f4f6;
+  color: #4b5563;
+  border-right: 1px solid #d6dae3;
+  border-bottom: 1px solid #d6dae3;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.pb-subtable__head:last-child {
+  border-right: none;
 }
 
 .pb-subtable__head.pb-subtable__op {
@@ -1699,12 +1707,20 @@
   min-width: 44px;
 }
 
+/* 3.4.1: メイングリッドの.pb-overlay__cell/.pb-overlay__rowと同じ罫線色(#eef1f6)で
+   縦横とも罫線を引く(以前は下線のみで縦線が無かった) */
 .pb-subtable__cell {
-  padding: 6px 8px;
-  border-bottom: 1px solid #eef2f7;
+  padding: 0 8px;
+  height: 32px;
+  border-right: 1px solid #eef1f6;
+  border-bottom: 1px solid #eef1f6;
   vertical-align: middle;
   min-width: 140px;
   cursor: default;
+}
+
+.pb-subtable__cell:last-child {
+  border-right: none;
 }
 
 .pb-subtable__cell:hover .pb-overlay__date-pick-btn--subtable,
@@ -1748,12 +1764,15 @@
   min-width: 40px;
 }
 
+/* 3.4.1: メイングリッドの行番号列(.pb-overlay__row-header/.pb-overlay__row-index)に
+   見た目を合わせる(背景・文字色・サイズ) */
 .pb-subtable__rownum {
   width: 40px;
   min-width: 40px;
   text-align: center;
-  color: #94a3b8;
-  font-size: 11px;
+  background: #f9fafb;
+  color: #4b5563;
+  font-size: 12px;
   cursor: pointer;
   user-select: none;
 }
@@ -1787,45 +1806,53 @@
   box-shadow: inset 0 0 0 2px #2563eb;
 }
 
+/* 3.4.1: フィルハンドルのドラッグ中プレビュー。メイングリッドの
+   .pb-overlay__cell--fill-previewと同じ色・枠線(クラス名はモーダル側の命名に揃える) */
+.pb-overlay__subtable-cell--fill-preview {
+  background: rgba(29, 78, 216, 0.08) !important;
+  outline: 1px dashed #2563eb;
+  outline-offset: -1px;
+}
+
+/* 選択肢/ルックアップ列の矢印アイコン(.pb-overlay__cell--dropdown等)はメイングリッドの
+   ::after定義(非スコープ)をそのまま流用する。ここではinput側の右余白だけ追加する */
+.pb-overlay__cell--dropdown .pb-overlay__subtable-input,
+.pb-overlay__cell--radio .pb-overlay__subtable-input,
+.pb-overlay__cell--multichoice .pb-overlay__subtable-input,
+.pb-overlay__cell--lookup .pb-overlay__subtable-input {
+  padding-right: 14px;
+}
+
+/* 3.4.1: メイングリッドの.pb-overlay__input/.pb-overlay__input--editingと同じく、
+   編集中でなければ枠線も背景も付けず「文字だけ」に見せる(角丸input風の見た目を廃止)。
+   枠線・背景が付くのは--editing(実際に入力できる状態)の時だけ */
 .pb-overlay__subtable-input {
   width: 100%;
   min-width: 0;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
   font-size: 12px;
-  cursor: text;
+  color: #111827;
+  cursor: default;
+  background: transparent;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.pb-overlay__subtable-input--editing {
+  border-color: #2563eb;
   background: #fff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+  cursor: text;
 }
 
 .pb-overlay__subtable-input--readonly {
-  background: #f8fafc;
-  color: #334155;
-  cursor: default;
+  color: #4b5563;
 }
 
 .pb-overlay__subtable-input--modal {
   cursor: pointer;
-}
-
-.pb-overlay__subtable-choice-trigger {
-  width: 100%;
-  min-height: 28px;
-  padding: 4px 8px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 12px;
-  color: #111827;
-  text-align: left;
-  white-space: normal;
-}
-
-.pb-overlay__subtable-choice-trigger:disabled {
-  background: #f8fafc;
-  color: #64748b;
-  cursor: default;
 }
 
 .pb-subtable .pb-overlay__subtable-input:disabled {
@@ -2421,13 +2448,17 @@
     background: #111a2d;
   }
 
+  /* 3.4.1: メイングリッドの列ヘッダー/行番号列のダーク配色(.pb-overlay__grid-head/
+     .pb-overlay__row-header)に合わせる */
   #pb-excel-overlay .pb-subtable__head {
     background: #182338;
-    color: #c6d3e3;
+    color: #b7c6da;
+    border-right-color: #243248;
     border-bottom-color: #243248;
   }
 
   #pb-excel-overlay .pb-subtable__cell {
+    border-right-color: #1d2a40;
     border-bottom-color: #1d2a40;
     color: #e5edf8;
   }
@@ -2436,8 +2467,6 @@
     color: #9fb0c7;
   }
 
-  #pb-excel-overlay .pb-overlay__subtable-input,
-  #pb-excel-overlay .pb-overlay__subtable-choice-trigger,
   #pb-excel-overlay .pb-overlay__multiline-input,
   #pb-excel-overlay .pb-overlay__multiline-viewer {
     background: #0f1726;
@@ -2445,15 +2474,31 @@
     border-color: #334155;
   }
 
-  #pb-excel-overlay .pb-overlay__subtable-input--readonly,
-  #pb-excel-overlay .pb-overlay__subtable-choice-trigger:disabled {
-    background: #162136;
+  /* セル内input本体はメイングリッドの.pb-overlay__input同様、編集中以外は枠線・背景無し */
+  #pb-excel-overlay .pb-overlay__subtable-input {
+    color: #f8fbff;
+    background: transparent;
+  }
+
+  #pb-excel-overlay .pb-overlay__subtable-input--editing {
+    border-color: #60a5fa;
+    background: #0f1726;
+    box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.24);
+  }
+
+  #pb-excel-overlay .pb-overlay__subtable-input--readonly {
     color: #b7c6da;
+  }
+
+  #pb-excel-overlay .pb-overlay__subtable-cell--fill-preview {
+    background: rgba(59, 130, 246, 0.14) !important;
+    outline-color: #60a5fa;
   }
 
   /* 3.4.0: サブテーブル編集モーダルのスプレッドシート風選択(行番号/選択/アクティブ/編集中)。
      メイングリッドのダークモード選択色(#pb-excel-overlay .pb-overlay__cell--selected等)に合わせる */
   #pb-excel-overlay .pb-subtable__rownum {
+    background: #162136;
     color: #9fb0c7;
   }
 

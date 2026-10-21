@@ -464,4 +464,204 @@ window.addEventListener('message', (ev) => {
       await freeCtx.close();
     }
   }
+
+  // ================================================================
+  // 3.4.1: モーダルの見た目をメイングリッド風の罫線グリッドに揃えたこと
+  // (非編集セルは文字だけ・編集中だけ枠線/背景が付く)と、フィルハンドルの
+  // E2E検証(owner差し戻しで復活。owner指摘のバグ修正を踏まえた新ロジック)。
+  // 既存の長いシーケンス(行削除等で行数が変わる)から独立させるため、専用の
+  // フィールド/レコードで新しいoverlayセッションを開く。
+  // ================================================================
+  {
+    const lookName = (n) => `subtable-grid-e2e[look/fill]: ${n}`;
+    const LOOK_FIELDS = [
+      { code: '案件名', label: '案件名', type: 'SINGLE_LINE_TEXT', required: false, choices: [] },
+      {
+        code: '明細', label: '明細', type: 'SUBTABLE', required: false, choices: [],
+        subtable: { fields: [
+          { code: '品目', label: '品目', type: 'SINGLE_LINE_TEXT', required: false, choices: [] },
+          // ルックアップの自動転記先: 常に編集不可(フィルでスキップされることの確認用)
+          { code: '単価', label: '単価', type: 'SINGLE_LINE_TEXT', required: false, choices: [], lookupAuto: true }
+        ] }
+      }
+    ];
+    const lookSubtableItem = (id, 品目, 単価) => ({ id: String(id), value: { 品目: { value: 品目 }, 単価: { value: 単価 } } });
+    const LOOK_RECORDS = [
+      {
+        $id: { value: '301' }, $revision: { value: '1' }, 案件名: { value: '案件A' },
+        明細: {
+          value: [
+            lookSubtableItem('1', 'SRC', 'P0'),
+            lookSubtableItem('2', 'B1', 'P1'),
+            lookSubtableItem('3', 'B2', 'P2'),
+            lookSubtableItem('4', 'B3', 'P3'),
+            lookSubtableItem('5', 'B4', 'P4')
+          ]
+        }
+      }
+    ];
+    const buildLookBridge = () => `
+const RECORDS = ${JSON.stringify(LOOK_RECORDS)};
+window.addEventListener('message', (ev) => {
+  const d = ev.data || {};
+  if (!d || d.__kfav__ !== true || !d.id || d.replyTo) return;
+  const reply = (extra) => window.postMessage({ __kfav__: true, replyTo: d.id, ...extra }, location.origin);
+  const type = d.type;
+  if (type === 'EXCEL_GET_APP_CONTEXT') return reply({ ok: true, appId: '12', appName: '受注管理', query: '', timezone: 'Asia/Tokyo' });
+  if (type === 'EXCEL_GET_FIELDS_META') return reply({ ok: true, fieldsMeta: ${JSON.stringify(LOOK_FIELDS)} });
+  if (type === 'EXCEL_GET_RECORDS') return reply({ ok: true, records: RECORDS, totalCount: RECORDS.length });
+  if (type === 'EXCEL_EVALUATE_RECORD_ACL') {
+    const ids = Array.isArray(d.payload?.ids) ? d.payload.ids : [];
+    return reply({ ok: true, rights: ids.map((id) => ({ id, editable: true, deletable: true, viewable: true })) });
+  }
+  if (type === 'EXCEL_GET_LOGIN_USER') return reply({ ok: true, user: { timezone: 'Asia/Tokyo' } });
+  if (type === 'GET_APP_NAME') return reply({ ok: true, name: '受注管理' });
+  if (type === 'EXCEL_GET_APP_ACL' || type === 'EXCEL_GET_RECORD_ACL' || type === 'EXCEL_GET_FIELD_ACL' || type === 'EXCEL_GET_VIEWS') return reply({ ok: true, result: {} });
+  reply({ ok: false });
+});`;
+
+    const { ctx: lookCtx, page: lookPage } = await openOverlay({ browser, bridgeScript: buildLookBridge() });
+    try {
+      await mainGridCell(lookPage, 0, '明細').click();
+      await lookPage.waitForTimeout(300);
+      check(lookName('前提: モーダルが開く・5行'), (await lookPage.locator('.pb-overlay__subtable-panel').count()) === 1
+        && (await lookPage.locator('.pb-subtable__body .pb-subtable__row').count()) === 5);
+
+      const lRow = (idx) => lookPage.locator('.pb-subtable__body .pb-subtable__row').nth(idx);
+      const lCellEl = (r, c) => lRow(r).locator(`.pb-subtable__cell[data-col-index="${c}"]`);
+      const lInput = (r, c) => lCellEl(r, c).locator('input');
+      const lHasClass = async (locator, cls) => Boolean(await locator.evaluate((el, cl) => el.classList.contains(cl), cls));
+      const computedStyle = (locator, prop) => locator.evaluate((el, p) => getComputedStyle(el)[p], prop);
+
+      // ── (look-1) 非編集セル: 入力欄(input)自体はDOMにあるが、枠線/背景は無く
+      //            文字だけに見える(角丸input風の見た目が無い) ─────────────
+      const bg0 = await computedStyle(lInput(0, 0), 'backgroundColor');
+      const borderColor0 = await computedStyle(lInput(0, 0), 'borderColor');
+      check(lookName('(look-1) 非編集セルのinputは背景が透明(箱に見えない)'), bg0 === 'rgba(0, 0, 0, 0)');
+      check(lookName('(look-1) 非編集セルのinputは枠線も透明'), borderColor0 === 'rgba(0, 0, 0, 0)');
+      check(lookName('(look-1) 非編集セルに--editingクラスは付かない'), !(await lHasClass(lInput(0, 0), 'pb-overlay__subtable-input--editing')));
+
+      // ── (look-2) 罫線グリッド: セルに右側/下側の実線境界がある(メイングリッドと同じ) ──
+      const cellBorderRight = await computedStyle(lCellEl(0, 0), 'borderRightStyle');
+      const cellBorderRightWidth = await computedStyle(lCellEl(0, 0), 'borderRightWidth');
+      check(lookName('(look-2) データセルに縦の罫線(border-right: solid)がある'),
+        cellBorderRight === 'solid' && cellBorderRightWidth !== '0px');
+      const headBorderRight = await computedStyle(lookPage.locator('.pb-subtable__head').first(), 'borderRightStyle');
+      check(lookName('(look-2) ヘッダーセルにも縦の罫線がある'), headBorderRight === 'solid');
+
+      // ── (look-3) 編集中は枠線/背景が出る(入力欄として見える)・離れると消える ──
+      await lCellEl(0, 0).dblclick();
+      await lookPage.waitForTimeout(80);
+      check(lookName('(look-3) ダブルクリックで--editingクラスが付く'), await lHasClass(lInput(0, 0), 'pb-overlay__subtable-input--editing'));
+      const bgEditing = await computedStyle(lInput(0, 0), 'backgroundColor');
+      const borderEditing = await computedStyle(lInput(0, 0), 'borderColor');
+      check(lookName('(look-3) 編集中は背景が白になる(箱が見える)'), bgEditing === 'rgb(255, 255, 255)');
+      check(lookName('(look-3) 編集中は枠線の色が付く(透明ではない)'), borderEditing !== 'rgba(0, 0, 0, 0)');
+      await lookPage.keyboard.press('Escape');
+      await lookPage.waitForTimeout(100);
+      check(lookName('(look-3) Escで編集を抜けると--editingクラスが外れる'), !(await lHasClass(lInput(0, 0), 'pb-overlay__subtable-input--editing')));
+      const bgAfter = await computedStyle(lInput(0, 0), 'backgroundColor');
+      check(lookName('(look-3) 編集を抜けると背景もまた透明に戻る'), bgAfter === 'rgba(0, 0, 0, 0)');
+
+      // ── (fill-1) 単一セル選択でフィルハンドルが選択範囲の角に表示される ──────
+      const fillHandle = lookPage.locator('.pb-overlay__subtable-panel .pb-overlay__fill-handle');
+      await lCellEl(0, 0).dispatchEvent('mousedown', { button: 0 });
+      await lookPage.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
+      await lookPage.waitForTimeout(80);
+      check(lookName('(fill-1) 選択するとフィルハンドルが表示される'), (await fillHandle.boundingBox()) !== null);
+
+      // ── (fill-2) ハンドルを3行下へドラッグ: プレビュー表示→テキストがコピーされる ──
+      const dragHandleTo = async (targetLocator) => {
+        const hbox = await fillHandle.boundingBox();
+        await lookPage.mouse.move(hbox.x + hbox.width / 2, hbox.y + hbox.height / 2);
+        await lookPage.mouse.down();
+        const tbox = await targetLocator.boundingBox();
+        await lookPage.mouse.move(tbox.x + tbox.width / 2, tbox.y + tbox.height / 2, { steps: 6 });
+        await lookPage.waitForTimeout(80);
+      };
+      await dragHandleTo(lCellEl(3, 0));
+      check(lookName('(fill-2) ドラッグ中はプレビュー(fill-previewクラス)が出る'),
+        (await Promise.all([1, 2, 3].map((r) => lHasClass(lCellEl(r, 0), 'pb-overlay__subtable-cell--fill-preview')))).every(Boolean));
+      await lookPage.mouse.up();
+      await lookPage.waitForTimeout(150);
+      check(lookName('(fill-2) row1の品目がソース"SRC"になる'), (await lInput(1, 0).inputValue()) === 'SRC');
+      check(lookName('(fill-2) row2の品目も"SRC"になる'), (await lInput(2, 0).inputValue()) === 'SRC');
+      check(lookName('(fill-2) row3の品目も"SRC"になる'), (await lInput(3, 0).inputValue()) === 'SRC');
+      check(lookName('(fill-2) プレビュー範囲外のrow4は変わらない("B4"のまま)'), (await lInput(4, 0).inputValue()) === 'B4');
+      check(lookName('(fill-2) フィル後はプレビュークラスが消える'), !(await lHasClass(lCellEl(1, 0), 'pb-overlay__subtable-cell--fill-preview')));
+
+      // ── (fill-3) 編集不可列(単価)を含めて選択しても、その列はフィルされない ──
+      await lCellEl(0, 0).dispatchEvent('mousedown', { button: 0 });
+      await lookPage.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
+      await lCellEl(0, 1).dispatchEvent('mousedown', { button: 0, shiftKey: true });
+      await lookPage.waitForTimeout(80);
+      const before単価 = await lInput(1, 1).inputValue();
+      const fillHandle2 = lookPage.locator('.pb-overlay__subtable-panel .pb-overlay__fill-handle');
+      {
+        const hbox = await fillHandle2.boundingBox();
+        await lookPage.mouse.move(hbox.x + hbox.width / 2, hbox.y + hbox.height / 2);
+        await lookPage.mouse.down();
+        const tbox = await lCellEl(1, 1).boundingBox();
+        await lookPage.mouse.move(tbox.x + tbox.width / 2, tbox.y + tbox.height / 2, { steps: 6 });
+        await lookPage.mouse.up();
+      }
+      await lookPage.waitForTimeout(150);
+      check(lookName('(fill-3) 編集可能列(品目)はフィルされる("SRC")'), (await lInput(1, 0).inputValue()) === 'SRC');
+      check(lookName('(fill-3) 編集不可列(単価=ルックアップ自動転記)はフィルされない'), (await lInput(1, 1).inputValue()) === before単価);
+
+      // ── (fill-4) ドラッグ中にEscでキャンセル: 何も書かず、モーダルも閉じない ──
+      await lCellEl(2, 0).dispatchEvent('mousedown', { button: 0 });
+      await lookPage.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
+      await lookPage.waitForTimeout(80);
+      const before4 = await lInput(3, 0).inputValue();
+      const fillHandle3 = lookPage.locator('.pb-overlay__subtable-panel .pb-overlay__fill-handle');
+      {
+        const hbox = await fillHandle3.boundingBox();
+        await lookPage.mouse.move(hbox.x + hbox.width / 2, hbox.y + hbox.height / 2);
+        await lookPage.mouse.down();
+        const tbox = await lCellEl(4, 0).boundingBox();
+        await lookPage.mouse.move(tbox.x + tbox.width / 2, tbox.y + tbox.height / 2, { steps: 6 });
+      }
+      await lookPage.waitForTimeout(80);
+      await lookPage.keyboard.press('Escape');
+      await lookPage.waitForTimeout(100);
+      await lookPage.mouse.up();
+      await lookPage.waitForTimeout(100);
+      check(lookName('(fill-4) Escでキャンセルすると値は変わらない'), (await lInput(3, 0).inputValue()) === before4);
+      check(lookName('(fill-4) Escでキャンセルしてもモーダルは開いたまま'), (await lookPage.locator('.pb-overlay__subtable-panel').count()) === 1);
+      check(lookName('(fill-4) プレビュークラスも残らない'), !(await lHasClass(lCellEl(4, 0), 'pb-overlay__subtable-cell--fill-preview')));
+    } finally {
+      await lookCtx.close();
+    }
+
+    // ── (fill-free) 無料/view-onlyではフィルハンドルのドラッグはno-op(値が変わらない) ──
+    {
+      const { ctx: freeLookCtx, page: freeLookPage } = await openOverlay({ browser, bridgeScript: buildLookBridge(), pro: false });
+      try {
+        await mainGridCell(freeLookPage, 0, '明細').click();
+        await freeLookPage.waitForTimeout(300);
+        const fRow2 = (idx) => freeLookPage.locator('.pb-subtable__body .pb-subtable__row').nth(idx);
+        const fCellEl2 = (r, c) => fRow2(r).locator(`.pb-subtable__cell[data-col-index="${c}"]`);
+        const fInput2 = (r, c) => fCellEl2(r, c).locator('input');
+        await fCellEl2(0, 0).dispatchEvent('mousedown', { button: 0 });
+        await freeLookPage.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
+        await freeLookPage.waitForTimeout(80);
+        const beforeFree = await fInput2(1, 0).inputValue();
+        const freeHandle = freeLookPage.locator('.pb-overlay__subtable-panel .pb-overlay__fill-handle');
+        const hbox = await freeHandle.boundingBox();
+        if (hbox) {
+          await freeLookPage.mouse.move(hbox.x + hbox.width / 2, hbox.y + hbox.height / 2);
+          await freeLookPage.mouse.down();
+          const tbox = await fCellEl2(1, 0).boundingBox();
+          await freeLookPage.mouse.move(tbox.x + tbox.width / 2, tbox.y + tbox.height / 2, { steps: 6 });
+          await freeLookPage.mouse.up();
+          await freeLookPage.waitForTimeout(120);
+        }
+        check(lookName('(fill-free) 無料/view-onlyではドラッグしても値が変わらない(no-op)'),
+          (await fInput2(1, 0).inputValue()) === beforeFree);
+      } finally {
+        await freeLookCtx.close();
+      }
+    }
+  }
 }

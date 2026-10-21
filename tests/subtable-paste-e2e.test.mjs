@@ -103,7 +103,9 @@ export async function run({ browser, check }) {
     const subtableRowCount = () => page.locator('.pb-subtable__body .pb-subtable__row').count();
     // 3.4.0: 左端に行番号列が増えたため、列はnth位置ではなくdata-col-index属性で選ぶ
     // (行番号セルにはdata-col-indexが付かないので、この属性セレクタだけでデータ列に絞れる)
-    const subtableControl = (rowIdx, colIdx) => subtableRow(rowIdx).locator(`.pb-subtable__cell[data-col-index="${colIdx}"]`).locator('input, select, button.pb-overlay__subtable-choice-trigger');
+    // 3.4.1: 選択肢列もメイングリッドと同じ常時1つの<input>表示になったため、
+    // select/button.pb-overlay__subtable-choice-triggerは廃止(inputだけで足りる)
+    const subtableControl = (rowIdx, colIdx) => subtableRow(rowIdx).locator(`.pb-subtable__cell[data-col-index="${colIdx}"]`).locator('input');
     const toastTexts = () => page.locator('.pb-overlay__toast').allTextContents();
 
     // clipboardData経由の合成pasteイベントを対象要素へ直接dispatchする
@@ -135,15 +137,18 @@ export async function run({ browser, check }) {
     check(name('(2) row1 品目=X2'), (await subtableControl(1, 0).inputValue()) === 'X2');
     check(name('(2) row2(新規) 品目=X3'), (await subtableControl(2, 0).inputValue()) === 'X3');
     check(name('(2) row2(新規) 優先度=低'), (await subtableControl(2, 2).inputValue()) === '低');
-    // 貼り付け範囲外の列(タグ)は新規行でも「＋行追加」と同じ既定値(空)のまま
-    const row2TagText = await subtableControl(2, 3).textContent();
+    // 貼り付け範囲外の列(タグ)は新規行でも「＋行追加」と同じ既定値(空)のまま。
+    // 3.4.1: タグ(複数選択)もメイングリッドと同じく常時1つの<input>で表示するようになった
+    // (以前はbutton.pb-overlay__subtable-choice-triggerのtextContentで読んでいたが、
+    // 角丸ボタン風の見た目をやめて他の列と同じ<input>表示に揃えたためinputValue()で読む)
+    const row2TagText = await subtableControl(2, 3).inputValue();
     check(name('(2) row2(新規) タグは既定値(未選択=空)のまま'), (row2TagText || '').trim() === '');
 
     // ── (3) 非対応列(単価=ルックアップ自動転記先)を含む貼り付け: タグ(列3)+単価(列4)の2列×1行 ──
     //     タグは選択肢'c'に一致するので適用、単価は自動転記(常に編集不可)なので飛ばす
     await pasteInto(subtableControl(0, 3), 'c\t999');
     await page.waitForTimeout(300);
-    check(name('(3) タグ(一致する選択肢)は適用される'), (await subtableControl(0, 3).textContent())?.trim() === 'c');
+    check(name('(3) タグ(一致する選択肢)は適用される'), (await subtableControl(0, 3).inputValue())?.trim() === 'c');
     check(name('(3) 単価(ルックアップ自動転記=非対応列)は変更されない(100のまま)'), (await subtableControl(0, 4).inputValue()) === '100');
     {
       const texts = await toastTexts();
@@ -158,7 +163,7 @@ export async function run({ browser, check }) {
     await pasteInto(subtableControl(1, 2), '超高\ta,b');
     await page.waitForTimeout(300);
     check(name('(4) 優先度(選択肢に不一致)は変更されない(中のまま)'), (await subtableControl(1, 2).inputValue()) === '中');
-    check(name('(4) タグ(カンマ区切りの複数一致)は適用される(a, b)'), (await subtableControl(1, 3).textContent())?.trim() === 'a, b');
+    check(name('(4) タグ(カンマ区切りの複数一致)は適用される(a, b)'), (await subtableControl(1, 3).inputValue())?.trim() === 'a, b');
 
     // ── (5) 引用符で囲まれた改行入りの1セルをメモ(複数行テキスト=modal-edit)列へ ──
     await pasteInto(subtableControl(0, 5), '"line1\nline2"');

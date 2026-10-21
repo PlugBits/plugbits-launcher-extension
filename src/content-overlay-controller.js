@@ -6727,6 +6727,17 @@
       let editorEditingCell = null; // {row, col, beforeValue}
       let editorIsDragging = false;
       let editorRowIsDragging = false;
+      // 3.4.1: 選択肢(DROP_DOWN/RADIO_BUTTON)セルの編集中だけ開く、メイングリッドの
+      // openRadioPicker相当のモーダルローカルなフローティングピッカー
+      let editorChoicePicker = null; // {panel}
+      // 3.4.1: フィルハンドルのドラッグ状態。メイングリッドのthis.fillDragと同じ形
+      // ({srcStartRow, srcEndRow, srcStartCol, srcEndCol, fillStartRow, fillEndRow,
+      //   fillStartCol, fillEndCol, direction})だが、行・列ともeditorRows/childFields
+      // 上のインデックス
+      let editorFillDrag = null;
+      let boundEditorFillDragMove = null;
+      let boundEditorFillDragUp = null;
+      let editorFillHandleEl = null;
 
       const getEditorMaxRow = () => Math.max(0, editorRows.length - 1);
       const getEditorMaxCol = () => Math.max(0, childFields.length - 1);
@@ -6739,7 +6750,7 @@
       const getDataInputEl = (rowIdx, colIdx) => {
         const cellEl = getDataCellEl(rowIdx, colIdx);
         if (!cellEl) return null;
-        return cellEl.querySelector('input, select, button.pb-overlay__subtable-choice-trigger');
+        return cellEl.querySelector('input');
       };
 
       const isEditorCellSelected = (rowIdx, colIdx) => {
@@ -6753,9 +6764,17 @@
         && editorActiveCell.row === rowIdx && editorActiveCell.col === colIdx;
       const isEditorCellEditing = (rowIdx, colIdx) => Boolean(editorEditingCell)
         && editorEditingCell.row === rowIdx && editorEditingCell.col === colIdx;
+      // 3.4.1: フィルハンドルのドラッグ中プレビュー対象セル(メイングリッドのisFillPreviewCell相当)
+      const isEditorFillPreviewCell = (rowIdx, colIdx) => {
+        const drag = editorFillDrag;
+        if (!drag || drag.fillStartRow === null) return false;
+        return rowIdx >= drag.fillStartRow && rowIdx <= drag.fillEndRow
+          && colIdx >= drag.fillStartCol && colIdx <= drag.fillEndCol;
+      };
 
       // renderRows()がtbodyを丸ごと再構築した直後、または選択のみ変わったときに呼び、
-      // 現在のeditorSelection/editorActiveCell/editorEditingCellをDOMのクラスへ反映する
+      // 現在のeditorSelection/editorActiveCell/editorEditingCellをDOMのクラスへ反映する。
+      // 3.4.1: フィルハンドル(メイングリッドのrepaintSelection相当)もここで管理する
       const repaintEditorSelection = () => {
         const rowEls = tbody.querySelectorAll('tr.pb-subtable__row');
         rowEls.forEach((rowEl, rowIdx) => {
@@ -6771,8 +6790,27 @@
             cellEl.classList.toggle('pb-overlay__subtable-cell--selected', isEditorCellSelected(rowIdx, colIdx));
             cellEl.classList.toggle('pb-overlay__subtable-cell--active', editing || isEditorCellActive(rowIdx, colIdx));
             cellEl.classList.toggle('pb-overlay__subtable-cell--editing', editing);
+            cellEl.classList.toggle('pb-overlay__subtable-cell--fill-preview', isEditorFillPreviewCell(rowIdx, colIdx));
+            const inputEl = cellEl.querySelector('.pb-overlay__subtable-input');
+            if (inputEl) inputEl.classList.toggle('pb-overlay__subtable-input--editing', editing);
           });
         });
+        // 既存のハンドルは一旦消し、選択範囲があれば終点セルへ付け直す
+        // (メイングリッドのrepaintSelectionと同じく「選択が変わるたび作り直す」方式)
+        if (editorFillHandleEl) {
+          editorFillHandleEl.remove();
+          editorFillHandleEl = null;
+        }
+        if (editorSelection) {
+          const endCell = getDataCellEl(editorSelection.endRow, editorSelection.endCol);
+          if (endCell) {
+            const handle = document.createElement('div');
+            handle.className = 'pb-overlay__fill-handle';
+            handle.addEventListener('mousedown', (e) => startEditorFillDrag(e));
+            endCell.appendChild(handle);
+            editorFillHandleEl = handle;
+          }
+        }
       };
 
       // 行の追加/削除でindexがずれた分の選択状態をクランプする(行が無くなればnullへ)
@@ -6803,6 +6841,141 @@
         if (editorEditingCell && (editorEditingCell.row > maxRow || editorEditingCell.col > maxCol)) {
           editorEditingCell = null;
         }
+      };
+
+      // ── フィルハンドル(3.4.1・owner差し戻しで復活) ──────────────────────
+      // メイングリッドのstartFillDrag/onFillDragMove/updateFillDrag/commitFillDragと
+      // 同じ流儀(垂直方向のみ・列は選択範囲と同じ・系列増加なし=常にコピー)をモーダル
+      // ローカルに再現する。ただし値の適用はcomputeFillRowMapping(メイングリッドと共通の
+      // 静的ヘルパー)でプレビュー範囲ぴったりに書く新ロジックを使う(メイングリッド側の
+      // 旧バグ=ソース行数の倍数でない範囲で書き過ぎ/書き漏らしする、は引き継がない)。
+      // 行を追加しない(最終行より下はtbody上にセルが無いのでonEditorFillDragMoveが
+      // target不在のまま終わり、自然にそこで止まる=メイングリッドと同じ挙動)
+      const startEditorFillDrag = (e) => {
+        if (readOnlyMode || !editorSelection) return; // 無料/view-onlyはno-op(メイングリッドと同じ)
+        e.preventDefault();
+        e.stopPropagation();
+        const { startRow, endRow, startCol, endCol } = editorSelection;
+        editorFillDrag = {
+          srcStartRow: startRow, srcEndRow: endRow,
+          srcStartCol: startCol, srcEndCol: endCol,
+          fillStartRow: null, fillEndRow: null,
+          fillStartCol: null, fillEndCol: null,
+          direction: null
+        };
+        boundEditorFillDragMove = (ev) => onEditorFillDragMove(ev);
+        boundEditorFillDragUp = () => commitEditorFillDrag();
+        document.addEventListener('mousemove', boundEditorFillDragMove);
+        document.addEventListener('mouseup', boundEditorFillDragUp);
+      };
+
+      const onEditorFillDragMove = (ev) => {
+        if (!editorFillDrag) return;
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const cell = el?.closest?.('.pb-subtable__cell[data-row-index]');
+        if (!cell) return;
+        const targetRow = Number(cell.dataset.rowIndex);
+        const targetCol = Number(cell.dataset.colIndex);
+        if (isNaN(targetRow) || isNaN(targetCol)) return;
+        updateEditorFillDrag(targetRow);
+      };
+
+      const updateEditorFillDrag = (targetRow) => {
+        const drag = editorFillDrag;
+        if (!drag) return;
+        const { srcStartRow, srcEndRow } = drag;
+        const deltaRow = targetRow < srcStartRow ? targetRow - srcStartRow
+          : targetRow > srcEndRow ? targetRow - srcEndRow : 0;
+        if (deltaRow === 0) {
+          drag.fillStartRow = null; drag.fillEndRow = null;
+          drag.fillStartCol = null; drag.fillEndCol = null;
+          drag.direction = null;
+          repaintEditorSelection();
+          return;
+        }
+        if (deltaRow > 0) {
+          drag.direction = 'down';
+          drag.fillStartRow = srcEndRow + 1; drag.fillEndRow = targetRow;
+        } else {
+          drag.direction = 'up';
+          drag.fillStartRow = targetRow; drag.fillEndRow = srcStartRow - 1;
+        }
+        drag.fillStartCol = drag.srcStartCol;
+        drag.fillEndCol = drag.srcEndCol;
+        repaintEditorSelection();
+      };
+
+      // Esc対応: ドラッグを即座に打ち切り、何も書かない(handleEscapeForFrontLayerから呼ばれる)
+      const cancelEditorFillDrag = () => {
+        if (!editorFillDrag) return false;
+        document.removeEventListener('mousemove', boundEditorFillDragMove);
+        document.removeEventListener('mouseup', boundEditorFillDragUp);
+        boundEditorFillDragMove = null;
+        boundEditorFillDragUp = null;
+        editorFillDrag = null;
+        repaintEditorSelection();
+        return true;
+      };
+
+      const commitEditorFillDrag = () => {
+        document.removeEventListener('mousemove', boundEditorFillDragMove);
+        document.removeEventListener('mouseup', boundEditorFillDragUp);
+        boundEditorFillDragMove = null;
+        boundEditorFillDragUp = null;
+
+        const drag = editorFillDrag;
+        editorFillDrag = null;
+
+        if (!drag || drag.fillStartRow === null || readOnlyMode) {
+          repaintEditorSelection();
+          return;
+        }
+
+        const { srcStartRow, srcEndRow, srcStartCol, srcEndCol,
+                fillStartRow, fillEndRow, fillStartCol, fillEndCol, direction } = drag;
+
+        const mapping = ExcelOverlayController.computeFillRowMapping(
+          srcStartRow, srcEndRow, fillStartRow, fillEndRow, direction
+        );
+
+        let appliedCount = 0;
+        let skippedCount = 0;
+        mapping.forEach(({ targetIndex, sourceIndex }) => {
+          const sourceItem = editorRows[sourceIndex];
+          const targetItem = editorRows[targetIndex];
+          if (!sourceItem || !targetItem) return;
+          for (let c = fillStartCol; c <= fillEndCol; c += 1) {
+            const child = childFields[c];
+            if (!child) continue;
+            const permission = getChildPermission(child);
+            const interaction = this.resolveFieldInteraction(child, permission, { viewOnly: true });
+            if (!isSubtablePasteableInteraction(interaction)) { skippedCount += 1; continue; }
+            // 表示整形ではなく生の値をそのまま複製する(複数行テキストの改行・
+            // 複数選択の配列をformatSubtableCellDisplayValueの", "結合/再分割で壊さない)
+            const rawValue = this.deepClone(sourceItem.value?.[child.code]?.value);
+            setSubtableCellValue(targetItem, child, rawValue);
+            appliedCount += 1;
+          }
+        });
+
+        renderRows();
+        if (appliedCount > 0) {
+          this.notify(resolveText(this.language, 'toastSubtablePasteDone', appliedCount));
+        } else if (skippedCount > 0) {
+          this.notify(resolveText(this.language, 'toastSubtablePasteSummary', appliedCount, skippedCount));
+        }
+
+        // 保存後の選択範囲をソースと埋め込み先を合わせた範囲に広げる(メイングリッドと同じ)
+        editorSelection = {
+          anchorRow: srcStartRow, anchorCol: srcStartCol,
+          startRow: Math.min(srcStartRow, fillStartRow),
+          endRow: Math.max(srcEndRow, fillEndRow),
+          startCol: Math.min(srcStartCol, fillStartCol),
+          endCol: Math.max(srcEndCol, fillEndCol),
+          wholeRow: false
+        };
+        editorActiveCell = { row: srcStartRow, col: srcStartCol };
+        repaintEditorSelection();
       };
 
       const setEditorSelectionSingle = (rowIdx, colIdx) => {
@@ -6886,6 +7059,112 @@
 
       // 対象セルがinline-edit(通常の文字入力)かつ編集可能な場合のみ編集状態へ入る。
       // initialChar指定時は既存値を置き換えて1文字目を入れる(メイングリッドのtype-to-replaceと同じ)
+      // 3.4.1: 選択肢(DROP_DOWN/RADIO_BUTTON)1セル分のフローティングピッカー。
+      // メイングリッドのopenRadioPicker(this.fields/this.handleRadioChoiceSelectという
+      // メイングリッド専用のインデックス・適用経路に結びついている)はそのまま再利用できない
+      // ため、同じ見た目(.pb-overlay__choice-panel/.pb-overlay__choice-list/
+      // .pb-overlay__choice-item)・同じpositionRadioPicker(汎用・再利用可能)を使い、
+      // 適用先だけモーダルのsetSubtableCellValueに差し替えたモーダルローカル版として持つ
+      const openEditorChoicePicker = (rowIdx, colIdx, input) => {
+        const child = childFields[colIdx];
+        if (!child || !this.root) return;
+        const choices = Array.from(new Set((Array.isArray(child.choices) ? child.choices : [])
+          .map((c) => String(c || '')).filter(Boolean)));
+        if (!choices.length) return;
+        closeEditorChoicePicker();
+        const panel = document.createElement('div');
+        panel.className = 'pb-overlay__choice-panel';
+        panel.setAttribute('role', 'listbox');
+        panel.setAttribute('aria-label', child.label || child.code || 'choices');
+        const list = document.createElement('div');
+        list.className = 'pb-overlay__choice-list';
+        const currentValue = input.value || '';
+        choices.forEach((choice) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'pb-overlay__choice-item';
+          button.dataset.value = choice;
+          button.textContent = choice;
+          button.setAttribute('role', 'option');
+          if (choice === currentValue) {
+            button.classList.add('is-selected');
+            button.setAttribute('aria-selected', 'true');
+          } else {
+            button.setAttribute('aria-selected', 'false');
+          }
+          button.addEventListener('click', () => {
+            const item = editorRows[rowIdx];
+            if (item && child) setSubtableCellValue(item, child, choice);
+            closeEditorChoicePicker();
+            commitEditorCellEdit();
+          });
+          list.appendChild(button);
+        });
+        panel.appendChild(list);
+        panel.style.visibility = 'hidden';
+        panel.style.left = '0px';
+        panel.style.top = '0px';
+        this.root.appendChild(panel);
+        this.positionRadioPicker(panel, input);
+        panel.style.visibility = 'visible';
+        editorChoicePicker = { panel };
+        document.addEventListener('mousedown', onEditorChoicePickerOutsideClick, true);
+      };
+      const onEditorChoicePickerOutsideClick = (event) => {
+        if (!editorChoicePicker) return;
+        if (editorChoicePicker.panel.contains(event.target)) return;
+        closeEditorChoicePicker();
+      };
+      const closeEditorChoicePicker = () => {
+        if (!editorChoicePicker) return;
+        editorChoicePicker.panel.remove();
+        editorChoicePicker = null;
+        document.removeEventListener('mousedown', onEditorChoicePickerOutsideClick, true);
+      };
+
+      // 3.4.1: 複数選択セル用。メイングリッドのopenMultiChoicePicker(this.fields/row経由)
+      // ではなく、汎用のopenMultiChoicePickerForValuesをモーダルの行/列・
+      // setSubtableCellValueに結びつけて直接呼ぶ(メイングリッドと同じ見た目のピッカーを再利用)
+      const openEditorMultiChoicePicker = (rowIdx, colIdx, input) => {
+        const item = editorRows[rowIdx];
+        const child = childFields[colIdx];
+        if (!item || !child) return;
+        const rawCell = item.value?.[child.code]?.value;
+        this.openMultiChoicePickerForValues(child, input, rawCell, (nextValues) => {
+          setSubtableCellValue(item, child, nextValues);
+          renderRows();
+        });
+      };
+
+      // 3.4.1: メイングリッドと同じく「表示は文字だけ、dblclick/F2/Enter/タイプで初めて
+      // 入力欄/ピッカーが開く」を型ごとに振り分ける共通入口。inline-edit系はbeginEditorCellEdit
+      // (readOnlyを外して入力状態へ)、選択肢/複数行テキストは対応するピッカー/モーダルを開く
+      const activateEditorCellForEntry = (rowIdx, colIdx, { selectAll = true } = {}) => {
+        const item = editorRows[rowIdx];
+        const child = childFields[colIdx];
+        if (!item || !child) return false;
+        const permission = getChildPermission(child);
+        const interaction = this.resolveFieldInteraction(child, permission, { viewOnly: true });
+        if (interaction === 'inline-edit' || interaction === 'inline-choice-single') {
+          return beginEditorCellEdit(rowIdx, colIdx, { selectAll });
+        }
+        if (!permission.editable) return false;
+        const controlEl = getDataInputEl(rowIdx, colIdx);
+        if (!controlEl) return false;
+        if (interaction === 'inline-choice-multi') {
+          openEditorMultiChoicePicker(rowIdx, colIdx, controlEl);
+          return true;
+        }
+        if (interaction === 'modal-edit' || interaction === 'modal-view') {
+          controlEl.click();
+          return true;
+        }
+        return false;
+      };
+
+      // inline-edit(通常の文字入力)・inline-choice-single(選択肢)かつ編集可能な場合のみ
+      // 編集状態へ入る。initialChar指定時は既存値を置き換えて1文字目を入れる
+      // (メイングリッドのtype-to-replaceと同じ)
       const beginEditorCellEdit = (rowIdx, colIdx, { selectAll = true, initialChar = null } = {}) => {
         if (readOnlyMode) return false;
         const item = editorRows[rowIdx];
@@ -6894,7 +7173,7 @@
         const permission = getChildPermission(child);
         if (!permission.editable) return false;
         const interaction = this.resolveFieldInteraction(child, permission, { viewOnly: true });
-        if (interaction !== 'inline-edit') return false;
+        if (interaction !== 'inline-edit' && interaction !== 'inline-choice-single') return false;
         const rawCell = item.value?.[child.code]?.value;
         editorEditingCell = { row: rowIdx, col: colIdx, beforeValue: this.deepClone(rawCell) };
         editorActiveCell = { row: rowIdx, col: colIdx };
@@ -6910,6 +7189,11 @@
             input.focus();
             if (selectAll) { try { input.select(); } catch (_e) { /* noop */ } }
           }
+          // メイングリッドのenterEditMode同様、選択肢セルは編集状態にすると同時に
+          // ピッカーも開く(入力でのタイプ一致/クリック選択のどちらでも確定できる)
+          if (interaction === 'inline-choice-single') {
+            openEditorChoicePicker(rowIdx, colIdx, input);
+          }
         }
         return true;
       };
@@ -6918,6 +7202,7 @@
       const commitEditorCellEdit = () => {
         if (!editorEditingCell) return;
         editorEditingCell = null;
+        closeEditorChoicePicker();
         renderRows();
       };
 
@@ -6929,34 +7214,15 @@
         const child = childFields[col];
         if (item && child) setSubtableCellValue(item, child, beforeValue);
         editorEditingCell = null;
+        closeEditorChoicePicker();
         renderRows();
         focusEditorDisplayCell(row, col);
       };
 
-      // F2/Enterでの「開く」動作: inline-editは編集モードへ、選択肢/複数行テキストは
-      // 既存のクリック動作(ネイティブselect/複数選択ピッカー/モーダル)をそのまま起動する
+      // F2/Enterでの「開く」動作。実体はactivateEditorCellForEntryと同じ入口を使う
       const tryActivateEditorActiveCell = ({ selectAll = true } = {}) => {
         if (!editorActiveCell) return false;
-        const { row, col } = editorActiveCell;
-        const item = editorRows[row];
-        const child = childFields[col];
-        if (!item || !child) return false;
-        const permission = getChildPermission(child);
-        const interaction = this.resolveFieldInteraction(child, permission, { viewOnly: true });
-        if (interaction === 'inline-edit') {
-          return beginEditorCellEdit(row, col, { selectAll });
-        }
-        if (!permission.editable) return false;
-        const controlEl = getDataInputEl(row, col);
-        if (!controlEl) return false;
-        if (interaction === 'inline-choice-multi' || interaction === 'modal-edit') {
-          controlEl.click();
-          return true;
-        }
-        if (interaction === 'inline-choice-single') {
-          controlEl.focus();
-        }
-        return false;
+        return activateEditorCellForEntry(editorActiveCell.row, editorActiveCell.col, { selectAll });
       };
 
       const copyEditorSelectionToClipboard = async () => {
@@ -7117,14 +7383,14 @@
       };
 
       // ダブルクリック=編集開始(メイングリッドの慣習: startSelectionのevent.detail>=2と同じ
-      // 「選択してから編集に入る」)。beginEditorCellEdit自身がreadOnlyMode/権限/列種別
-      // (inline-edit以外)で何もしない(false を返す)ため、view-onlyや編集不可列では
-      // 単に選択されるだけで編集状態にはならない。openSubtableEditorには一切触れないので、
-      // ダブルクリックの多重発火で問題になった「モーダルの多重オープン」とは無関係
+      // 「選択してから編集に入る」)。activateEditorCellForEntry自身がreadOnlyMode/権限/列種別で
+      // 何もしない(false を返す)ため、view-onlyや編集不可列では単に選択されるだけで編集状態に
+      // ならない。openSubtableEditorには一切触れないので、ダブルクリックの多重発火で問題に
+      // なった「モーダルの多重オープン」とは無関係
       const handleDataCellDblClick = (rowIdx, colIdx) => (event) => {
         if (event.button !== 0) return;
         setEditorSelectionSingle(rowIdx, colIdx);
-        beginEditorCellEdit(rowIdx, colIdx, { selectAll: true });
+        activateEditorCellForEntry(rowIdx, colIdx, { selectAll: true });
       };
 
       const handleRowNumMouseDown = (rowIdx) => (event) => {
@@ -7369,6 +7635,10 @@
       };
 
       const renderRows = () => {
+        // tbodyを丸ごと作り直す前に、古いinputを参照しているフローティングピッカーが
+        // あれば片付けておく(通常はcommitEditorCellEdit/revertEditorCellEdit経由で
+        // 既に閉じているはずだが、reload/save等の経路からの保険)
+        closeEditorChoicePicker();
         tbody.textContent = '';
         if (!editorRows.length) {
           const emptyRow = document.createElement('tr');
@@ -7389,6 +7659,7 @@
           // 3.4.0: 行番号セル(左端)。クリック=行全体の選択、Shift+クリック/ドラッグ=複数行選択
           const rownumCell = document.createElement('td');
           rownumCell.className = 'pb-subtable__cell pb-subtable__rownum';
+          rownumCell.dataset.rowIndex = String(rowIdx);
           rownumCell.textContent = String(rowIdx + 1);
           rownumCell.addEventListener('mousedown', handleRowNumMouseDown(rowIdx));
           rownumCell.addEventListener('mouseenter', handleRowNumMouseEnter(rowIdx));
@@ -7397,6 +7668,9 @@
           childFields.forEach((child, colIdx) => {
             const cell = document.createElement('td');
             cell.className = 'pb-subtable__cell';
+            // 3.4.1: フィルハンドルのドラッグ中、マウス位置から行を特定するためのインデックス
+            // (メイングリッドはinputのdata-row-indexを見るが、モーダルはセル自身に持たせる)
+            cell.dataset.rowIndex = String(rowIdx);
             cell.dataset.colIndex = String(colIdx);
             const width = this.normalizeSubtableColumnWidth(currentColumnWidths?.[child.code], child.type);
             cell.style.width = `${width}px`;
@@ -7409,42 +7683,18 @@
             const permission = getChildPermission(child);
             const interaction = this.resolveFieldInteraction(child, permission, { viewOnly: true });
             const isEditingThisCell = isEditorCellEditing(rowIdx, colIdx);
-            if (interaction === 'inline-choice-single') {
-              const select = document.createElement('select');
-              select.className = 'pb-overlay__subtable-input';
-              const empty = document.createElement('option');
-              empty.value = '';
-              empty.textContent = '';
-              select.appendChild(empty);
-              (Array.isArray(child.choices) ? child.choices : []).forEach((choice) => {
-                const option = document.createElement('option');
-                option.value = String(choice || '');
-                option.textContent = String(choice || '');
-                option.selected = String(rawCell ?? '') === option.value;
-                select.appendChild(option);
-              });
-              select.disabled = !permission.editable;
-              select.addEventListener('change', () => {
-                setSubtableCellValue(item, child, select.value);
-              });
-              attachSubtablePasteHandler(select, item, child);
-              cell.appendChild(select);
-            } else if (interaction === 'inline-choice-multi') {
-              const trigger = document.createElement('button');
-              trigger.type = 'button';
-              trigger.className = 'pb-overlay__subtable-choice-trigger';
-              trigger.textContent = displayValue || ' ';
-              trigger.disabled = !permission.editable;
-              trigger.addEventListener('click', () => {
-                if (!permission.editable) return;
-                this.openMultiChoicePickerForValues(child, trigger, rawCell, (nextValues) => {
-                  setSubtableCellValue(item, child, nextValues);
-                  renderRows();
-                });
-              });
-              attachSubtablePasteHandler(trigger, item, child);
-              cell.appendChild(trigger);
-            } else {
+            // 3.4.1: 選択肢/日付等の全列がメイングリッドと同じ「常に1つのinput・
+            // 表示はテキストだけ・枠線や角丸は編集中にしか出ない」という1枚のつくりに揃える
+            // (以前はinline-choice-single/inline-choice-multiだけ別にnative select/buttonを
+            // 常時表示していたため、角丸input/ボタン風の見た目が残っていた)
+            const isChoiceSingle = interaction === 'inline-choice-single';
+            const isChoiceMulti = interaction === 'inline-choice-multi';
+            // メイングリッドの.pb-overlay__cell--dropdown/--radio/--multichoiceと同じ矢印アイコン
+            // (CSS側は非スコープのまま流用。ここではクラスを立てるだけ)
+            cell.classList.toggle('pb-overlay__cell--dropdown', isChoiceSingle && String(child.type || '').toUpperCase() === 'DROP_DOWN');
+            cell.classList.toggle('pb-overlay__cell--radio', isChoiceSingle && String(child.type || '').toUpperCase() === 'RADIO_BUTTON');
+            cell.classList.toggle('pb-overlay__cell--multichoice', isChoiceMulti);
+            {
               const input = document.createElement('input');
               input.className = 'pb-overlay__subtable-input';
               const isDateField = String(child.type || '').toUpperCase() === 'DATE';
@@ -7455,7 +7705,7 @@
               if (isDateTimeField) input.placeholder = 'now · t · +1d · +2h · +30m';
               const _willHavePicker = (isDateField || isDateTimeField) && interaction === 'inline-edit' && permission.editable;
               input.style.width = `${Math.max(70, width - 16 - (_willHavePicker ? 22 : 0))}px`;
-              if (interaction === 'inline-edit') {
+              if (interaction === 'inline-edit' || isChoiceSingle) {
                 if (isDateTimeField) {
                   input.value = rawCell ? utcToLocalDisplay(rawCell, this.kintoneTimezone) : '';
                 } else {
@@ -7743,8 +7993,14 @@
         get editingCell() { return editorEditingCell; },
         revertEditingCell: () => revertEditorCellEdit(),
         handleKeydown: (event) => handleSubtableEditorKeydown(event),
+        // 3.4.1: handleEscapeForFrontLayerからフィルハンドルのドラッグ中Escを最優先で
+        // ルーティングするための窓口(メイングリッドのthis.fillDrag/cancelFillDragに相当)
+        isFillDragging: () => Boolean(editorFillDrag),
+        cancelFillDrag: () => cancelEditorFillDrag(),
         cleanup: () => {
           document.removeEventListener('mouseup', onEditorGlobalMouseUp, true);
+          cancelEditorFillDrag();
+          closeEditorChoicePicker();
         }
       };
     }
@@ -8102,6 +8358,26 @@
       }
     }
 
+    // 3.4.1: フィルハンドルで埋める行の対応表(メイングリッド・サブテーブル編集モーダル共通)。
+    // targetStart/targetEndはプレビューされている範囲そのもの(それより多くも少なくも書かない。
+    // ソース行数の倍数でなくてもタイル展開のバグでずれない)。directionが'down'なら
+    // ソースに隣接する行(targetStart)がソース先頭行、'up'なら隣接する行(targetEnd)が
+    // ソース最終行になるよう周期的に割り当てる(Excelの連続パターンと同じ向き)。
+    // 戻り値は[{targetIndex, sourceIndex}, ...]（targetIndex昇順）
+    static computeFillRowMapping(sourceStart, sourceEnd, targetStart, targetEnd, direction) {
+      const mapping = [];
+      if (targetEnd < targetStart) return mapping;
+      const sourceCount = Math.max(1, sourceEnd - sourceStart + 1);
+      for (let t = targetStart; t <= targetEnd; t += 1) {
+        const offsetFromAdjacent = direction === 'up' ? (targetEnd - t) : (t - targetStart);
+        const srcOffset = direction === 'up'
+          ? (sourceCount - 1 - (offsetFromAdjacent % sourceCount) + sourceCount) % sourceCount
+          : offsetFromAdjacent % sourceCount;
+        mapping.push({ targetIndex: t, sourceIndex: sourceStart + srcOffset });
+      }
+      return mapping;
+    }
+
     // Excel互換のTSV文字列化(parseClipboardMatrixの逆変換)。タブ/改行/二重引用符を
     // 含むセルは二重引用符で囲み、内部の"は""へエスケープする
     static matrixToTsv(matrix) {
@@ -8428,22 +8704,6 @@
       }, 220);
     }
 
-    buildFillMatrix() {
-      if (!this.selection) return [];
-      const { startRow, endRow, startCol, endCol } = this.selection;
-      const matrix = [];
-      for (let r = startRow; r <= endRow; r += 1) {
-        const row = this.getVisibleRowAt(r);
-        const rowData = [];
-        for (let c = startCol; c <= endCol; c += 1) {
-          const field = this.fields[c];
-          rowData.push(row && field ? this.formatCellDisplayValue(field, row.values[field.code]) : '');
-        }
-        matrix.push(rowData);
-      }
-      return matrix;
-    }
-
     isFillPreviewCell(r, c) {
       const drag = this.fillDrag;
       if (!drag || drag.fillStartRow === null) return false;
@@ -8512,6 +8772,26 @@
       this.repaintSelection();
     }
 
+    // 3.4.1: ドラッグ中にEscでキャンセルする(プレビューを消すだけで何も書かない)。
+    // trueを返したらキャンセルするドラッグが実際にあったことを示す(Esc優先順位の判定用)
+    cancelFillDrag() {
+      if (!this.fillDrag) return false;
+      document.removeEventListener('mousemove', this._boundFillDragMove);
+      document.removeEventListener('mouseup', this._boundFillDragUp);
+      this._boundFillDragMove = null;
+      this._boundFillDragUp = null;
+      this.fillDrag = null;
+      this.repaintSelection();
+      return true;
+    }
+
+    // 3.4.1: フィルはプレビューされた範囲(fillStartRow..fillEndRow)だけに書く。
+    // 以前はapplyPastedMatrixAt(選択範囲がソースの整数倍の時だけタイル展開する、
+    // 貼り付け専用のロジック)を流用していたため、倍数でない範囲へのドラッグで
+    // 書き過ぎ/書き漏らしが起きていた(非整数倍だとソース行数分しか書かない等)。
+    // ここでは対応表をcomputeFillRowMappingで明示的に求め、該当セルだけを書く。
+    // 値は表示整形(formatCellDisplayValue)ではなく生の値をそのまま複製する
+    // (複数行テキストの改行・CHECK_BOX/MULTI_SELECTの配列を壊さない)
     commitFillDrag() {
       document.removeEventListener('mousemove', this._boundFillDragMove);
       document.removeEventListener('mouseup', this._boundFillDragUp);
@@ -8526,21 +8806,53 @@
         return;
       }
 
-      const srcMatrix = this.buildFillMatrix();
-      if (!srcMatrix.length) {
+      const { srcStartRow, srcEndRow, srcStartCol, srcEndCol,
+              fillStartRow, fillEndRow, fillStartCol, fillEndCol, direction } = drag;
+
+      const mapping = ExcelOverlayController.computeFillRowMapping(
+        srcStartRow, srcEndRow, fillStartRow, fillEndRow, direction
+      );
+
+      const targets = [];
+      mapping.forEach(({ targetIndex, sourceIndex }) => {
+        const sourceRow = this.getVisibleRowAt(sourceIndex);
+        const targetRow = this.getVisibleRowAt(targetIndex);
+        if (!sourceRow || !targetRow) return;
+        for (let c = fillStartCol; c <= fillEndCol; c += 1) {
+          const field = this.fields[c];
+          if (!field || this.isSubtableField(field)) continue;
+          targets.push({
+            recordId: String(targetRow.id || '').trim(),
+            fieldCode: String(field.code || '').trim(),
+            rowIndex: targetIndex,
+            colIndex: c,
+            value: this.deepClone(sourceRow.values[field.code])
+          });
+        }
+      });
+
+      if (!targets.length) {
         this.repaintSelection();
         return;
       }
 
-      const { srcStartRow, srcEndRow, srcStartCol, srcEndCol,
-              fillStartRow, fillEndRow, fillStartCol, fillEndCol } = drag;
+      const filteredTargets = this.permissionService.filterPasteTargets(targets);
+      const applicableTargets = Array.isArray(filteredTargets?.applicable) ? filteredTargets.applicable : [];
+      const skippedTargets = Array.isArray(filteredTargets?.skipped) ? filteredTargets.skipped : [];
+      const fillChanges = [];
+      applicableTargets.forEach((target) => {
+        const change = this.applyRawValueToCell(target.rowIndex, target.colIndex, target.value);
+        if (change) fillChanges.push(change);
+      });
 
-      this.selection = {
-        startRow: fillStartRow, endRow: fillEndRow,
-        startCol: fillStartCol, endCol: fillEndCol,
-        anchorRow: fillStartRow, anchorCol: fillStartCol
-      };
-      this.applyPastedMatrixAt(srcMatrix, fillStartRow, fillStartCol);
+      if (skippedTargets.length) {
+        this.notify(resolveText(this.language, 'toastPasteSkipped', skippedTargets.length));
+      }
+      if (fillChanges.length) {
+        this.pushHistory({ type: 'fill', payload: { changes: fillChanges } });
+      }
+      // 貼り付けと同じく、ルックアップキー列へ埋めた値は参照先と非同期で照合する
+      this.triggerLookupPasteVerification(applicableTargets);
 
       // 保存後の選択範囲をソースと埋め込み先を合わせた範囲に広げる
       this.selection = {
@@ -8552,6 +8864,7 @@
         anchorCol: srcStartCol
       };
       this.repaintSelection();
+      this.updateStats();
     }
 
     applyPastedValue(rowIndex, colIndex, rawValue) {
@@ -8584,6 +8897,54 @@
       const fieldCode = field.code;
       const key = `${recordId}:${fieldCode}`;
       const validation = this.validate(rawValue, field);
+      if (!validation.ok) {
+        this.invalidCells.add(key);
+        this.invalidValueCache.set(key, rawValue);
+        this.markDirtyState(recordId, fieldCode, row.original[fieldCode], null);
+        this.updateDirtyBadge();
+        this.updateStats();
+        if (input) this.applyCellVisualState(input, row, fieldCode);
+        return null;
+      }
+      this.invalidCells.delete(key);
+      this.invalidValueCache.delete(key);
+      const normalized = validation.value;
+      row.values[fieldCode] = normalized;
+      if (this.valuesEqual(normalized, row.original[fieldCode])) {
+        this.removeDiff(recordId, fieldCode);
+      } else {
+        this.addDiff(recordId, fieldCode, normalized, field.type);
+      }
+      this.updateDirtyBadge();
+      this.updateStats();
+      if (input) this.applyCellVisualState(input, row, fieldCode);
+      const afterValue = this.deepClone(row.values[fieldCode]);
+      if (this.valuesEqual(beforeValue, afterValue)) return null;
+      return {
+        recordId,
+        fieldCode,
+        before: beforeValue,
+        after: afterValue
+      };
+    }
+
+    // 3.4.1: フィルハンドル専用。applyPastedValueはクリップボードの「文字列」貼り付け前提
+    // (input.valueへ代入してからonInputChangedで再解釈する分岐を持つ)だが、フィルは
+    // 既に型の合った生の値(CHECK_BOX/MULTI_SELECTの配列・複数行テキストの実改行等)を
+    // 別セルからそのまま複製するだけなので、文字列化を経由せずvalidate()にそのまま渡す
+    applyRawValueToCell(rowIndex, colIndex, rawValue) {
+      const row = this.getVisibleRowAt(rowIndex);
+      const field = this.fields[colIndex];
+      if (!row || !field) return null;
+      if (this.isSubtableField(field)) return null;
+      const cellPermission = this.getCellPermissionInfo(row.id, field.code);
+      if (!this.isOverlayEditable() || !cellPermission.editable) return null;
+      const beforeValue = this.deepClone(row.values[field.code]);
+      const recordId = row.id;
+      const fieldCode = field.code;
+      const key = `${recordId}:${fieldCode}`;
+      const validation = this.validate(rawValue, field);
+      const input = this.getInput(rowIndex, colIndex);
       if (!validation.ok) {
         this.invalidCells.add(key);
         this.invalidValueCache.set(key, rawValue);
@@ -9469,6 +9830,15 @@
         const nextValue = reverse ? payload.before : payload.after;
         this.setRowFieldValueFromHistory(payload.recordId, payload.fieldCode, nextValue);
         shouldRecomputeFilters = true;
+      } else if (entry.type === 'fill') {
+        // フィルハンドルで埋めた複数セルを1回のUndo/Redoでまとめて戻す(pasteと同じ形)
+        const changes = Array.isArray(payload.changes) ? payload.changes.slice() : [];
+        if (reverse) changes.reverse();
+        changes.forEach((change) => {
+          const nextValue = reverse ? change.before : change.after;
+          this.setRowFieldValueFromHistory(change.recordId, change.fieldCode, nextValue);
+        });
+        shouldRecomputeFilters = true;
       }
       if (shouldRecomputeFilters && this.hasActiveFilters()) {
         this.recomputeFilteredRowIds();
@@ -10109,6 +10479,24 @@
 
     handleEscapeForFrontLayer(event) {
       if (!event || event.key !== 'Escape') return false;
+      // 3.4.1: フィルハンドルのドラッグ中は何よりも先にEscで中断する
+      // (プレビューを消すだけで何も書かない。オーバーレイやモーダルは閉じない)
+      if (this.fillDrag) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        this.cancelFillDrag();
+        return true;
+      }
+      // サブテーブル編集モーダル内のフィルハンドルのドラッグ中も同様に最優先
+      if (this.subtableEditor?.panel && typeof this.subtableEditor.cancelFillDrag === 'function'
+        && this.subtableEditor.isFillDragging?.()) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        this.subtableEditor.cancelFillDrag();
+        return true;
+      }
       // Close only the front-most transient UI and stop bubbling to overlay close.
       if (this.confirmLayer) {
         event.preventDefault();
