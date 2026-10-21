@@ -8787,7 +8787,7 @@
       this.exitEditMode();
       // await の前に、この(rowIndex, colIndex)向けの「開き中」マーカーを同期的に立てる。
       // これにより、await中に発生した重複呼び出しは上のガードで弾かれる。
-      this.subtableEditor = {
+      const openingMarker = {
         layer: null,
         panel: null,
         rowIndex,
@@ -8796,15 +8796,26 @@
         subtableFieldCode: String(field.code || ''),
         getCurrentWidths: () => ({})
       };
-
-      let childFields = await this.getSubtableEditorChildFields(field);
+      this.subtableEditor = openingMarker;
+      // await の途中で例外が出たらマーカーを外す(残ると同じセルが二度と開かなくなる)。
+      // await の間に別のセルが開かれた(マーカーが差し替わった)ら、こちらは組み立てずに抜ける。
+      let childFields;
+      let currentColumnWidths;
       const sourceRows = Array.isArray(row.values[field.code]) ? row.values[field.code] : [];
       const editorRows = sourceRows.map((item, idx) => ({
         localId: `row:${idx}:${Date.now()}`,
         id: item?.id ? String(item.id) : '',
         value: item && typeof item.value === 'object' ? JSON.parse(JSON.stringify(item.value)) : {}
       }));
-      let currentColumnWidths = await this.getInitialSubtableColumnWidths(field.code, childFields, editorRows);
+      try {
+        childFields = await this.getSubtableEditorChildFields(field);
+        if (this.subtableEditor !== openingMarker) return;
+        currentColumnWidths = await this.getInitialSubtableColumnWidths(field.code, childFields, editorRows);
+        if (this.subtableEditor !== openingMarker) return;
+      } catch (err) {
+        if (this.subtableEditor === openingMarker) this.subtableEditor = null;
+        throw err;
+      }
 
       const layer = document.createElement('div');
       layer.className = 'pb-overlay__subtable-layer';
