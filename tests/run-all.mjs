@@ -63,7 +63,9 @@ const SUITES = [
   ['view-sync-after-trial-e2e', './view-sync-after-trial-e2e.test.mjs'],
   // 3.3.0: サブテーブル編集モーダルへのExcel範囲貼り付け + 引用符囲みセル(改行入り)のTSV解析
   ['parse-clipboard-matrix-unit', './parse-clipboard-matrix-unit.test.mjs'],
-  ['subtable-paste-e2e', './subtable-paste-e2e.test.mjs']
+  ['subtable-paste-e2e', './subtable-paste-e2e.test.mjs'],
+  // サブテーブルセルのダブルクリックでopenSubtableEditorが3重発火していたバグの回帰テスト
+  ['subtable-dblclick-e2e', './subtable-dblclick-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];

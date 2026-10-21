@@ -8776,9 +8776,26 @@
       const row = this.getVisibleRowAt(rowIndex);
       const field = this.fields[colIndex];
       if (!row || !field || !this.isSubtableField(field)) return;
+      // 同一セルに対する多重発火（ダブルクリックでの click×2 + mousedown由来の
+      // enterEditMode 等）があっても、開く処理が実際に走るのは一度だけにする。
+      // すでに同じセルを開いている最中、または開き終わっている場合は無視する。
+      if (this.subtableEditor && this.subtableEditor.rowIndex === rowIndex && this.subtableEditor.colIndex === colIndex) {
+        return;
+      }
       const readOnlyMode = !this.isOverlayEditable() || !this.permissionService.canEditRecord(row.id);
       this.closeSubtableEditor(false);
       this.exitEditMode();
+      // await の前に、この(rowIndex, colIndex)向けの「開き中」マーカーを同期的に立てる。
+      // これにより、await中に発生した重複呼び出しは上のガードで弾かれる。
+      this.subtableEditor = {
+        layer: null,
+        panel: null,
+        rowIndex,
+        colIndex,
+        anchorInput: anchorInput || null,
+        subtableFieldCode: String(field.code || ''),
+        getCurrentWidths: () => ({})
+      };
 
       let childFields = await this.getSubtableEditorChildFields(field);
       const sourceRows = Array.isArray(row.values[field.code]) ? row.values[field.code] : [];
