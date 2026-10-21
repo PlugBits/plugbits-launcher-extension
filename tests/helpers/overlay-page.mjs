@@ -35,15 +35,20 @@ async function routeSrcFiles(ctx, bridgeScript, { withPro }) {
 // として扱うProライセンスキャッシュ(24h以内のcachedAt・status:'active')を事前投入し、
 // manifest.jsonのcontent_scriptsと同じ順序でpermission-service.js/pro-service.js/
 // content.jsを読み込む。
-export async function openOverlayContext({ browser, bridgeScript, viewport = { width: 1400, height: 900 }, deviceScaleFactor, url }) {
+// pro: false で呼ぶと pbLicenseKey/pbLicenseCache を一切投入しない(= 無料/Standardモード。
+// pro-service.jsのevaluateProductionEntitlementはキー無しなら{enabled:false,source:'no_key'}を
+// 同期的に返すのでネットワークは叩かれない)。無料ユーザーでのview-only挙動を検証するテスト用
+export async function openOverlayContext({ browser, bridgeScript, viewport = { width: 1400, height: 900 }, deviceScaleFactor, url, pro = true }) {
   const ctx = await browser.newContext({ viewport, ...(deviceScaleFactor ? { deviceScaleFactor } : {}) });
   await ctx.addInitScript(buildChromeStub({ empty: true }));
-  await ctx.addInitScript(() => {
-    window.chrome.storage.local.set({
-      pbLicenseKey: 'TEST-KEY',
-      pbLicenseCache: { status: 'active', cachedAt: Date.now() }
+  if (pro) {
+    await ctx.addInitScript(() => {
+      window.chrome.storage.local.set({
+        pbLicenseKey: 'TEST-KEY',
+        pbLicenseCache: { status: 'active', cachedAt: Date.now() }
+      });
     });
-  });
+  }
   await routeSrcFiles(ctx, bridgeScript, { withPro: true });
 
   const page = await ctx.newPage();

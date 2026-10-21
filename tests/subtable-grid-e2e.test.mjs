@@ -270,6 +270,20 @@ export async function run({ browser, check }) {
     await page.waitForTimeout(150);
     check(name('(15) 行の削除ボタンで1行減る'), (await subtableRowCount()) === rowsBeforeBtnDelete - 1);
 
+    // ── (17) ダブルクリックで編集開始(メイングリッドの慣習) ───────────
+    const beforeDbl = await subtableControl(0, 0).inputValue();
+    await subtableCellEl(0, 0).dblclick();
+    await page.waitForTimeout(80);
+    check(name('(17) ダブルクリックで編集中クラスがつく'), await hasClass(subtableCellEl(0, 0), 'pb-overlay__subtable-cell--editing'));
+    check(name('(17) ダブルクリックでreadonly属性が外れ、キャレットが入力できる状態になる'),
+      !(await subtableControl(0, 0).evaluate((el) => el.readOnly)));
+    await page.keyboard.type('DBL');
+    await page.waitForTimeout(80);
+    check(name('(17) ダブルクリック編集後にタイプすると値が変わる(全選択置き換え)'), (await subtableControl(0, 0).inputValue()) === 'DBL');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(80);
+    check(name('(17) Escで取り消すと元の値に戻る'), (await subtableControl(0, 0).inputValue()) === beforeDbl);
+
     // ── (16) モーダルを閉じたあと、メイングリッド側の矢印移動が正しく動く ─
     await page.locator('.pb-overlay__subtable-close').click();
     await page.waitForTimeout(300);
@@ -283,5 +297,138 @@ export async function run({ browser, check }) {
       Boolean(await mainCell(0, '明細').evaluate((el) => el.parentElement.classList.contains('pb-overlay__cell--active'))));
   } finally {
     await ctx.close();
+  }
+
+  // ================================================================
+  // 無料/view-onlyユーザー(Pro未契約): canEditOverlay()がfalseになり、
+  // openSubtableEditor内のreadOnlyModeがtrueになる。選択・移動・Ctrl+Cは
+  // メイングリッドと同じく動く必要があり、書き込み系(Ctrl+V/Delete/Ctrl+Enter/
+  // 行番号からの行削除/F2・ダブルクリック編集/保存)だけが抑止される。
+  // ================================================================
+  {
+    const freeName = (n) => `subtable-grid-e2e[free]: ${n}`;
+    // 品目(SINGLE_LINE_TEXT)にタブ文字を直接仕込む(ブリッジ経由でレコードを直接注入するので、
+    // 通常の入力UIでは入りにくいタブもテストできる)。Excel貼り付け可能なTSVへ戻すには
+    // この手のセルを二重引用符で囲む必要があり、それをCtrl+Cの出力で確認する
+    const FREE_FIELDS = [
+      { code: '案件名', label: '案件名', type: 'SINGLE_LINE_TEXT', required: false, choices: [] },
+      {
+        code: '明細', label: '明細', type: 'SUBTABLE', required: false, choices: [],
+        subtable: { fields: [
+          { code: '品目', label: '品目', type: 'SINGLE_LINE_TEXT', required: false, choices: [] },
+          { code: '数量', label: '数量', type: 'NUMBER', required: false, choices: [] }
+        ] }
+      }
+    ];
+    const FREE_RECORDS = [
+      {
+        $id: { value: '301' }, $revision: { value: '1' }, 案件名: { value: '案件A' },
+        明細: {
+          value: [
+            { id: '1', value: { 品目: { value: 'タブ\t入り' }, 数量: { value: '1' } } },
+            { id: '2', value: { 品目: { value: 'B' }, 数量: { value: '2' } } }
+          ]
+        }
+      }
+    ];
+    const buildFreeBridge = () => `
+const RECORDS = ${JSON.stringify(FREE_RECORDS)};
+window.addEventListener('message', (ev) => {
+  const d = ev.data || {};
+  if (!d || d.__kfav__ !== true || !d.id || d.replyTo) return;
+  const reply = (extra) => window.postMessage({ __kfav__: true, replyTo: d.id, ...extra }, location.origin);
+  const type = d.type;
+  if (type === 'EXCEL_GET_APP_CONTEXT') return reply({ ok: true, appId: '12', appName: '受注管理', query: '', timezone: 'Asia/Tokyo' });
+  if (type === 'EXCEL_GET_FIELDS_META') return reply({ ok: true, fieldsMeta: ${JSON.stringify(FREE_FIELDS)} });
+  if (type === 'EXCEL_GET_RECORDS') return reply({ ok: true, records: RECORDS, totalCount: RECORDS.length });
+  if (type === 'EXCEL_EVALUATE_RECORD_ACL') {
+    const ids = Array.isArray(d.payload?.ids) ? d.payload.ids : [];
+    return reply({ ok: true, rights: ids.map((id) => ({ id, editable: true, deletable: true, viewable: true })) });
+  }
+  if (type === 'EXCEL_GET_LOGIN_USER') return reply({ ok: true, user: { timezone: 'Asia/Tokyo' } });
+  if (type === 'GET_APP_NAME') return reply({ ok: true, name: '受注管理' });
+  if (type === 'EXCEL_GET_APP_ACL' || type === 'EXCEL_GET_RECORD_ACL' || type === 'EXCEL_GET_FIELD_ACL' || type === 'EXCEL_GET_VIEWS') return reply({ ok: true, result: {} });
+  reply({ ok: false });
+});`;
+
+    const { ctx: freeCtx, page: freePage } = await openOverlay({ browser, bridgeScript: buildFreeBridge(), pro: false });
+    try {
+      check(freeName('overlay opened(無料でも閲覧はできる)'), (await freePage.locator('#pb-excel-overlay, .pb-overlay').count()) > 0);
+      await installClipboardStub(freePage);
+
+      const fRow = (idx) => freePage.locator('.pb-subtable__body .pb-subtable__row').nth(idx);
+      const fCell = (r, c) => fRow(r).locator(`.pb-subtable__cell[data-col-index="${c}"]`);
+      const fControl = (r, c) => fCell(r, c).locator('input, select, button.pb-overlay__subtable-choice-trigger');
+      const fHasClass = async (locator, cls) => Boolean(await locator.evaluate((el, c) => el.classList.contains(c), cls));
+
+      await mainGridCell(freePage, 0, '明細').click();
+      await freePage.waitForTimeout(300);
+      check(freeName('(1) 無料ユーザーでもモーダルが開く(view-only)'), (await freePage.locator('.pb-overlay__subtable-panel').count()) === 1);
+      check(freeName('(2) 保存ボタンが無効'), await freePage.locator('.pb-overlay__subtable-foot [data-subtable-action="save"]').isDisabled());
+      check(freeName('(3) 行追加ボタンが無効'), await freePage.locator('.pb-overlay__subtable-foot [data-subtable-action="add"]').isDisabled());
+      check(freeName('(4) 行削除ボタン(既存の行ごと削除)も無効'), await fRow(0).locator('.pb-subtable__remove').isDisabled());
+
+      // ── 選択/移動/Ctrl+Cはview-onlyでも動く ──
+      await fCell(0, 0).dispatchEvent('mousedown', { button: 0 });
+      await freePage.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
+      await freePage.waitForTimeout(80);
+      check(freeName('(5) クリックでセルがアクティブになる(選択は無料でも動く)'), await fHasClass(fCell(0, 0), 'pb-overlay__subtable-cell--active'));
+      await fCell(1, 1).dispatchEvent('mousedown', { button: 0, shiftKey: true });
+      await freePage.waitForTimeout(80);
+      check(freeName('(6) Shift+クリックで範囲選択できる(2x2)'),
+        (await Promise.all([[0, 0], [0, 1], [1, 0], [1, 1]].map(([r, c]) => fHasClass(fCell(r, c), 'pb-overlay__subtable-cell--selected')))).every(Boolean));
+
+      await freePage.keyboard.press('Control+c');
+      await freePage.waitForTimeout(80);
+      const freeCopied = await freePage.evaluate(() => navigator.clipboard.__get());
+      // 品目(0,0)="タブ\t入り"はタブを含むのでExcel互換の二重引用符で囲まれる(parseClipboardMatrixの
+      // 引用符解釈と対になる、Excelへそのまま貼り付けても列がずれない形式)
+      check(freeName('(7) Ctrl+CのTSVはタブを含むセルを二重引用符で囲む(Excel貼り付け可能な形式)'),
+        freeCopied === '"タブ\t入り"\t1\nB\t2');
+
+      // ── 書き込み系はすべて無効 ──
+      const beforeFreePaste00 = await fControl(0, 0).inputValue();
+      await fCell(0, 0).dispatchEvent('mousedown', { button: 0 });
+      await freePage.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
+      await freePage.evaluate(() => navigator.clipboard.__set('ZZZ\t999'));
+      await freePage.keyboard.press('Control+v');
+      await freePage.waitForTimeout(150);
+      check(freeName('(8) Ctrl+Vでは値が変わらない'), (await fControl(0, 0).inputValue()) === beforeFreePaste00);
+
+      await freePage.keyboard.press('Delete');
+      await freePage.waitForTimeout(150);
+      check(freeName('(9) Deleteでは値が変わらない'), (await fControl(0, 0).inputValue()) === beforeFreePaste00);
+
+      await freePage.keyboard.press('Control+Enter');
+      await freePage.waitForTimeout(150);
+      check(freeName('(10) Ctrl+Enterでは値が変わらない(編集状態にそもそも入れない)'), (await fControl(0, 0).inputValue()) === beforeFreePaste00);
+
+      // F2は編集状態に入らない(そもそも編集中クラスがつかない)
+      await freePage.keyboard.press('F2');
+      await freePage.waitForTimeout(80);
+      check(freeName('(11) F2では編集中にならない'), !(await fHasClass(fCell(0, 0), 'pb-overlay__subtable-cell--editing')));
+
+      // ダブルクリックでも編集状態に入らない
+      await fCell(0, 0).dblclick();
+      await freePage.waitForTimeout(80);
+      check(freeName('(12) ダブルクリックでも編集中にならない(view-onlyでは編集に入れない)'),
+        !(await fHasClass(fCell(0, 0), 'pb-overlay__subtable-cell--editing')));
+      check(freeName('(12) 入力はreadonlyのまま'), await fControl(0, 0).evaluate((el) => el.readOnly));
+
+      // 行番号からの行選択+Deleteも、確認ダイアログすら出さずに何もしない
+      const rowsBeforeFreeDelete = await freePage.locator('.pb-subtable__body .pb-subtable__row').count();
+      await fRow(0).locator('.pb-subtable__rownum').dispatchEvent('mousedown', { button: 0 });
+      await freePage.waitForTimeout(80);
+      await freePage.keyboard.press('Delete');
+      await freePage.waitForTimeout(150);
+      check(freeName('(13) 行番号列のDeleteでは確認ダイアログも出ず行も減らない'),
+        (await freePage.locator('.pb-overlay__confirm-layer').count()) === 0
+        && (await freePage.locator('.pb-subtable__body .pb-subtable__row').count()) === rowsBeforeFreeDelete);
+
+      check(freeName('(14) 一連の操作のあとも保存ボタンは無効のまま'),
+        await freePage.locator('.pb-overlay__subtable-foot [data-subtable-action="save"]').isDisabled());
+    } finally {
+      await freeCtx.close();
+    }
   }
 }

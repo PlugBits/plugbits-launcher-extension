@@ -7095,6 +7095,17 @@
         extendEditorSelection(rowIdx, colIdx);
       };
 
+      // ダブルクリック=編集開始(メイングリッドの慣習: startSelectionのevent.detail>=2と同じ
+      // 「選択してから編集に入る」)。beginEditorCellEdit自身がreadOnlyMode/権限/列種別
+      // (inline-edit以外)で何もしない(false を返す)ため、view-onlyや編集不可列では
+      // 単に選択されるだけで編集状態にはならない。openSubtableEditorには一切触れないので、
+      // ダブルクリックの多重発火で問題になった「モーダルの多重オープン」とは無関係
+      const handleDataCellDblClick = (rowIdx, colIdx) => (event) => {
+        if (event.button !== 0) return;
+        setEditorSelectionSingle(rowIdx, colIdx);
+        beginEditorCellEdit(rowIdx, colIdx, { selectAll: true });
+      };
+
       const handleRowNumMouseDown = (rowIdx) => (event) => {
         if (event.button !== 0) return;
         event.preventDefault();
@@ -7371,6 +7382,7 @@
             cell.style.minWidth = `${width}px`;
             cell.addEventListener('mousedown', handleDataCellMouseDown(rowIdx, colIdx));
             cell.addEventListener('mouseenter', handleDataCellMouseEnter(rowIdx, colIdx));
+            cell.addEventListener('dblclick', handleDataCellDblClick(rowIdx, colIdx));
             const rawCell = item.value?.[child.code]?.value;
             const displayValue = this.formatSubtableCellDisplayValue(child, rawCell);
             const permission = getChildPermission(child);
