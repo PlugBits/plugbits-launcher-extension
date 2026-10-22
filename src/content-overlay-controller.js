@@ -16,20 +16,23 @@
   const AUTOSCROLL_EDGE = 28;
   const AUTOSCROLL_MIN_SPEED = 2;
   const AUTOSCROLL_MAX_SPEED = 24;
+  // 速度が上限に達するまでの距離。領域の内側 EDGE px から外側 EDGE px までの間で 2→24px/フレームに上がる
+  // (端ちょうどで中間の速さ・外へ EDGE px 出たら上限)。外に出るほど速く、それ以上は上限のまま
+  const AUTOSCROLL_RAMP = AUTOSCROLL_EDGE * 2;
 
   function computeAutoscrollAxisDelta(pos, start, end) {
     const distFromStart = pos - start;
     if (distFromStart < AUTOSCROLL_EDGE) {
       const proximity = AUTOSCROLL_EDGE - distFromStart;
       const speed = Math.max(AUTOSCROLL_MIN_SPEED, Math.min(AUTOSCROLL_MAX_SPEED,
-        AUTOSCROLL_MIN_SPEED + (AUTOSCROLL_MAX_SPEED - AUTOSCROLL_MIN_SPEED) * (proximity / AUTOSCROLL_EDGE)));
+        AUTOSCROLL_MIN_SPEED + (AUTOSCROLL_MAX_SPEED - AUTOSCROLL_MIN_SPEED) * (proximity / AUTOSCROLL_RAMP)));
       return -speed;
     }
     const distFromEnd = end - pos;
     if (distFromEnd < AUTOSCROLL_EDGE) {
       const proximity = AUTOSCROLL_EDGE - distFromEnd;
       const speed = Math.max(AUTOSCROLL_MIN_SPEED, Math.min(AUTOSCROLL_MAX_SPEED,
-        AUTOSCROLL_MIN_SPEED + (AUTOSCROLL_MAX_SPEED - AUTOSCROLL_MIN_SPEED) * (proximity / AUTOSCROLL_EDGE)));
+        AUTOSCROLL_MIN_SPEED + (AUTOSCROLL_MAX_SPEED - AUTOSCROLL_MIN_SPEED) * (proximity / AUTOSCROLL_RAMP)));
       return speed;
     }
     return 0;

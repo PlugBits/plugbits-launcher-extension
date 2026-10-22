@@ -282,4 +282,132 @@ export async function run({ browser, check }) {
       check(name('(5) フッターにはRedoボタンが無い'), (await page.locator('.pb-overlay__subtable-foot [data-subtable-action="redo"]').count()) === 0);
     } finally { await ctx.close(); }
   }
+
+  // ================================================================
+  // (6)〜(9) 画面外まで引いた場合(10/22 オケオ実機の指摘「画面外までドラッグしてもスクロールしない」)。
+  //   実機に近づけるため mouse.down でボタンを押したまま、ポインターをオーバーレイ/モーダルの外・
+  //   さらにビューポート(ブラウザの表示域)の外まで出し、そこで止めたままスクロールが続くことを見る。
+  //   ポインターを動かさなくても続くこと(t1 < t2)・終端が伸びること・mouseup で止まることを確かめる
+  // ================================================================
+  const VIEWPORT_H = 900; // helpers/overlay-page.mjs の既定 viewport 高さ
+  const centerOf = async (locator) => {
+    const b = await locator.boundingBox();
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+
+  // (6) 一覧: 範囲選択でビューポートの下の外 → 下へスクロールが続く → そのまま上の外へ → 上へ戻る
+  {
+    const { ctx, page } = await openOverlay({ browser, bridgeScript: buildBridge(N_FIELDS, numRecords(120)) });
+    try {
+      const SCROLL = '.pb-overlay__cell-scroll';
+      const cellSelected = async (r) => {
+        const loc = page.locator(`.pb-overlay__cell input[data-field-code="N"][data-row-index="${r}"]`);
+        if ((await loc.count()) === 0) return false;
+        return loc.evaluate((el) => el.parentElement.classList.contains('pb-overlay__cell--selected'));
+      };
+      const initialMax = await maxRenderedRow(page, 'N');
+      const target = initialMax + 10;
+      const box = await getScrollBox(page, SCROLL);
+      const p = await centerOf(mainCell(page, 0, 'N'));
+      await page.mouse.move(p.x, p.y);
+      await page.mouse.down();
+      await page.mouse.move(box.left + box.width / 2, VIEWPORT_H + 150, { steps: 5 });
+      await page.waitForTimeout(600);
+      const t1 = await getScroll(page, SCROLL);
+      await page.waitForTimeout(900);
+      const t2 = await getScroll(page, SCROLL);
+      check(name('(6) 一覧: ビューポートの下の外で止めたままscrollTopが増え続ける'), t1.top > 0 && t2.top > t1.top);
+      check(name('(6) 一覧: 画面外で止めたまま終端行(target)まで選択が伸びる'), await cellSelected(target));
+
+      await page.mouse.move(box.left + box.width / 2, -150, { steps: 5 });
+      await page.waitForTimeout(800);
+      const t3 = await getScroll(page, SCROLL);
+      check(name('(6) 一覧: ビューポートの上の外へ出すとscrollTopが減る'), t3.top < t2.top);
+
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      const afterUp = await getScroll(page, SCROLL);
+      await page.waitForTimeout(300);
+      const afterWait = await getScroll(page, SCROLL);
+      check(name('(6) 一覧: 画面外でmouseupした後はscrollTopが変わらない'), afterUp.top === afterWait.top);
+    } finally { await ctx.close(); }
+  }
+
+  // (7) 一覧: フィルハンドルでビューポートの下の外(横もビューポートの左の外)→ スクロールが続き、確定で値が入る
+  {
+    const { ctx, page } = await openOverlay({ browser, bridgeScript: buildBridge(N_FIELDS, numRecords(120)) });
+    try {
+      const SCROLL = '.pb-overlay__cell-scroll';
+      const p0 = await centerOf(mainCell(page, 0, 'N'));
+      await page.mouse.click(p0.x, p0.y);
+      await page.waitForTimeout(80);
+      const initialMax = await maxRenderedRow(page, 'N');
+      const target = initialMax + 8;
+      const h = await centerOf(page.locator('.pb-overlay__fill-handle'));
+      await page.mouse.move(h.x, h.y);
+      await page.mouse.down();
+      await page.mouse.move(-60, VIEWPORT_H + 150, { steps: 5 });
+      await page.waitForTimeout(600);
+      const t1 = await getScroll(page, SCROLL);
+      await page.waitForTimeout(900);
+      const t2 = await getScroll(page, SCROLL);
+      check(name('(7) 一覧フィル: 画面外(左下)で止めたままscrollTopが増え続ける'), t1.top > 0 && t2.top > t1.top);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      const afterUp = await getScroll(page, SCROLL);
+      const targetValue = await mainCell(page, target, 'N').inputValue();
+      check(name('(7) 一覧フィル: 画面外でmouseup→終端行(target)にソース値"0"が入る'), targetValue === '0');
+      await page.waitForTimeout(300);
+      const afterWait = await getScroll(page, SCROLL);
+      check(name('(7) 一覧フィル: mouseup後はscrollTopが変わらない'), afterUp.top === afterWait.top);
+    } finally { await ctx.close(); }
+  }
+
+  // (8) モーダル: 範囲選択でモーダルの外・ビューポートの下の外 → スクロールが続き最終行まで伸びる
+  // (9) モーダル: フィルハンドルでも同様
+  for (const mode of ['select', 'fill']) {
+    const tag = mode === 'select' ? '(8) モーダル選択' : '(9) モーダルフィル';
+    const SUBTABLE_ROW_COUNT = 60;
+    const { ctx, page } = await openOverlay({ browser, bridgeScript: buildSubtableBridge(buildSubtableRecords(SUBTABLE_ROW_COUNT)) });
+    try {
+      const SCROLL = '.pb-subtable-wrap';
+      await mainCell(page, 0, '明細').click();
+      await page.waitForTimeout(300);
+      const subtableCellEl = (rowIdx, colIdx) => page.locator('.pb-subtable__body .pb-subtable__row').nth(rowIdx).locator(`.pb-subtable__cell[data-col-index="${colIdx}"]`);
+      const box = await getScrollBox(page, SCROLL);
+      const p0 = await centerOf(subtableCellEl(0, 0));
+      if (mode === 'select') {
+        await page.mouse.move(p0.x, p0.y);
+        await page.mouse.down();
+      } else {
+        await page.mouse.click(p0.x, p0.y);
+        await page.waitForTimeout(80);
+        const h = await centerOf(page.locator('.pb-subtable-wrap .pb-overlay__fill-handle'));
+        await page.mouse.move(h.x, h.y);
+        await page.mouse.down();
+      }
+      await page.mouse.move(box.left + box.width / 2, VIEWPORT_H + 150, { steps: 5 });
+      await page.waitForTimeout(600);
+      const t1 = await getScroll(page, SCROLL);
+      await page.waitForTimeout(900);
+      const t2 = await getScroll(page, SCROLL);
+      check(name(`${tag}: モーダルの外・ビューポートの下の外で止めたままscrollTopが増え続ける`), t1.top > 0 && (t2.top > t1.top || t2.top >= (await page.evaluate((s) => { const el = document.querySelector(s); return el.scrollHeight - el.clientHeight; }, SCROLL)) - 1));
+      await page.waitForTimeout(1500);
+      if (mode === 'select') {
+        const sel = await subtableCellEl(SUBTABLE_ROW_COUNT - 1, 0).evaluate((el) => el.classList.contains('pb-overlay__subtable-cell--selected'));
+        check(name(`${tag}: 最終行まで選択が伸びる`), sel);
+      }
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      const afterUp = await getScroll(page, SCROLL);
+      if (mode === 'fill') {
+        const firstText = await subtableCellEl(0, 0).locator('input').inputValue();
+        const lastText = await subtableCellEl(SUBTABLE_ROW_COUNT - 1, 0).locator('input').inputValue();
+        check(name(`${tag}: 画面外でmouseup→最終行に先頭行と同じ値(S0)が入る`), firstText === 'S0' && lastText === 'S0');
+      }
+      await page.waitForTimeout(300);
+      const afterWait = await getScroll(page, SCROLL);
+      check(name(`${tag}: mouseup後はscrollTopが変わらない`), afterUp.top === afterWait.top);
+    } finally { await ctx.close(); }
+  }
 }
