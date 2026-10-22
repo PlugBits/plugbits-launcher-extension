@@ -1645,6 +1645,15 @@
   color: #0f172a;
 }
 
+/* 3.4.0: 見出し欄のUndo/Redo+閉じるボタンのグループ(フッターから移設)。
+   一覧の.pb-overlay__toolbar-secondaryと同じ考え方で横並びにする */
+.pb-overlay__subtable-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .pb-overlay__subtable-close {
   border: 1px solid #d1d5db;
   background: #f8fafc;

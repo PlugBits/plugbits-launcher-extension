@@ -4449,13 +4449,13 @@
       if (addBtn) addBtn.textContent = resolveText(this.language, 'subtableAddRow');
       const undoBtn = panel.querySelector('[data-subtable-action="undo"]');
       if (undoBtn) {
-        undoBtn.textContent = resolveText(this.language, 'subtableUndo');
-        undoBtn.title = resolveText(this.language, 'titleSubtableUndo');
+        undoBtn.textContent = resolveText(this.language, 'btnUndo');
+        undoBtn.title = resolveText(this.language, 'titleUndo');
       }
       const redoBtn = panel.querySelector('[data-subtable-action="redo"]');
       if (redoBtn) {
-        redoBtn.textContent = resolveText(this.language, 'subtableRedo');
-        redoBtn.title = resolveText(this.language, 'titleSubtableRedo');
+        redoBtn.textContent = resolveText(this.language, 'btnRedo');
+        redoBtn.title = resolveText(this.language, 'titleRedo');
       }
       const autoBtn = panel.querySelector('[data-subtable-action="autowidth"]');
       if (autoBtn) autoBtn.textContent = resolveText(this.language, 'subtableAutoWidth');
@@ -8875,6 +8875,32 @@
       const title = document.createElement('div');
       title.className = 'pb-overlay__subtable-title';
       title.textContent = `${resolveText(this.language, 'subtableTitle')}: ${field.label || field.code}`;
+
+      // 3.4.0: モーダル専用Undo/Redo(メイングリッドのthis.undoButton/this.redoButtonとは別物の
+      // ローカルボタン。open〜closeの間だけ有効で、このクロージャを抜けると(=モーダルを閉じると)
+      // 一緒に消える)。見た目・文言は一覧の見出し欄(undoBtn/redoBtn・btnUndo/btnRedo)に揃え、
+      // フッターではなく見出し欄に置く(並びはタイトル→Undo→Redo→閉じる)
+      const subtableUndoBtn = document.createElement('button');
+      subtableUndoBtn.type = 'button';
+      subtableUndoBtn.className = 'pb-overlay__btn';
+      subtableUndoBtn.dataset.subtableAction = 'undo';
+      subtableUndoBtn.textContent = resolveText(this.language, 'btnUndo');
+      subtableUndoBtn.title = resolveText(this.language, 'titleUndo');
+      subtableUndoBtn.disabled = true;
+      const subtableRedoBtn = document.createElement('button');
+      subtableRedoBtn.type = 'button';
+      subtableRedoBtn.className = 'pb-overlay__btn';
+      subtableRedoBtn.dataset.subtableAction = 'redo';
+      subtableRedoBtn.textContent = resolveText(this.language, 'btnRedo');
+      subtableRedoBtn.title = resolveText(this.language, 'titleRedo');
+      subtableRedoBtn.disabled = true;
+      // 実体(editorUndoStack等)は後段で定義するが、ボタン自体はここで先に作るため、
+      // 参照用のletをここで宣言して割り当てておく
+      let editorUndoBtn = subtableUndoBtn;
+      let editorRedoBtn = subtableRedoBtn;
+      subtableUndoBtn.addEventListener('click', () => performEditorUndo());
+      subtableRedoBtn.addEventListener('click', () => performEditorRedo());
+
       const closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.className = 'pb-overlay__subtable-close';
@@ -8882,8 +8908,15 @@
       closeBtn.title = resolveText(this.language, 'subtableClose');
       closeBtn.setAttribute('aria-label', resolveText(this.language, 'subtableClose'));
       closeBtn.addEventListener('click', () => this.closeSubtableEditor(true));
+
+      const headActions = document.createElement('div');
+      headActions.className = 'pb-overlay__subtable-head-actions';
+      headActions.appendChild(subtableUndoBtn);
+      headActions.appendChild(subtableRedoBtn);
+      headActions.appendChild(closeBtn);
+
       head.appendChild(title);
-      head.appendChild(closeBtn);
+      head.appendChild(headActions);
 
       const body = document.createElement('div');
       body.className = 'pb-overlay__subtable-body';
@@ -8903,11 +8936,6 @@
       table.appendChild(tbody);
       tableWrap.appendChild(table);
 
-      // 3.4.0: モーダル専用Undo/Redoボタンへの参照。実体(editorUndoStack等)は後段で定義するが、
-      // ボタン自体はこの下のfooter構築で先に作るため、参照用のletをここで宣言しておく
-      let editorUndoBtn = null;
-      let editorRedoBtn = null;
-
       const footer = document.createElement('div');
       footer.className = 'pb-overlay__subtable-foot';
       const footerLeft = document.createElement('div');
@@ -8919,23 +8947,6 @@
       addBtn.className = 'pb-overlay__btn';
       addBtn.dataset.subtableAction = 'add';
       addBtn.textContent = resolveText(this.language, 'subtableAddRow');
-      // 3.4.0: モーダル専用Undo/Redo(メイングリッドのthis.undoButton/this.redoButtonとは別物の
-      // ローカルボタン。open〜closeの間だけ有効で、このクロージャを抜けると(=モーダルを閉じると)
-      // 一緒に消える)
-      const subtableUndoBtn = document.createElement('button');
-      subtableUndoBtn.type = 'button';
-      subtableUndoBtn.className = 'pb-overlay__btn';
-      subtableUndoBtn.dataset.subtableAction = 'undo';
-      subtableUndoBtn.textContent = resolveText(this.language, 'subtableUndo');
-      subtableUndoBtn.title = resolveText(this.language, 'titleSubtableUndo');
-      subtableUndoBtn.disabled = true;
-      const subtableRedoBtn = document.createElement('button');
-      subtableRedoBtn.type = 'button';
-      subtableRedoBtn.className = 'pb-overlay__btn';
-      subtableRedoBtn.dataset.subtableAction = 'redo';
-      subtableRedoBtn.textContent = resolveText(this.language, 'subtableRedo');
-      subtableRedoBtn.title = resolveText(this.language, 'titleSubtableRedo');
-      subtableRedoBtn.disabled = true;
       const autoBtn = document.createElement('button');
       autoBtn.type = 'button';
       autoBtn.className = 'pb-overlay__btn';
@@ -8956,8 +8967,6 @@
       saveBtn.className = 'pb-overlay__btn pb-overlay__btn--primary';
       saveBtn.dataset.subtableAction = 'save';
       saveBtn.textContent = resolveText(this.language, 'subtableSave');
-      footerLeft.appendChild(subtableUndoBtn);
-      footerLeft.appendChild(subtableRedoBtn);
       footerLeft.appendChild(autoBtn);
       footerLeft.appendChild(reloadBtn);
       footerRight.appendChild(addBtn);
@@ -8965,10 +8974,6 @@
       footerRight.appendChild(saveBtn);
       footer.appendChild(footerLeft);
       footer.appendChild(footerRight);
-      editorUndoBtn = subtableUndoBtn;
-      editorRedoBtn = subtableRedoBtn;
-      subtableUndoBtn.addEventListener('click', () => performEditorUndo());
-      subtableRedoBtn.addEventListener('click', () => performEditorRedo());
 
       const setSubtableCellValue = (item, child, nextValue) => {
         if (!item.value || typeof item.value !== 'object') item.value = {};

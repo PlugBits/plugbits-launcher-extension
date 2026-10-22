@@ -1,7 +1,7 @@
 // サブテーブル編集モーダル内専用のUndo/Redo(3.4.0)のE2E検証。
 // 対象: openSubtableEditor内のeditorUndoStack/editorRedoStack(メイングリッドの
 // this.undoStack/this.redoStackとは完全に別物)・Ctrl+Z/Ctrl+Y/Ctrl+Shift+Z・
-// フッターのUndo/Redoボタン・モーダルを開いている間はメイングリッドのUndo/Redoを
+// 見出し欄のUndo/Redoボタン・モーダルを開いている間はメイングリッドのUndo/Redoを
 // 一切動かさないこと。
 import { openOverlay, cell as mainGridCell } from './helpers/overlay-page.mjs';
 
@@ -82,8 +82,8 @@ export async function run({ browser, check }) {
     const rownumCell = (rowIdx) => subtableRow(rowIdx).locator('.pb-subtable__rownum');
     const hasClass = async (locator, cls) => Boolean(await locator.evaluate((el, c) => el.classList.contains(c), cls));
     const mainCell = (rowIndex, fieldCode) => mainGridCell(page, rowIndex, fieldCode);
-    const undoBtn = () => page.locator('.pb-overlay__subtable-foot [data-subtable-action="undo"]');
-    const redoBtn = () => page.locator('.pb-overlay__subtable-foot [data-subtable-action="redo"]');
+    const undoBtn = () => page.locator('.pb-overlay__subtable-head [data-subtable-action="undo"]');
+    const redoBtn = () => page.locator('.pb-overlay__subtable-head [data-subtable-action="redo"]');
     const clickCellSelect = async (r, c) => {
       await subtableCellEl(r, c).dispatchEvent('mousedown', { button: 0 });
       await page.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })));
@@ -437,7 +437,7 @@ export async function run({ browser, check }) {
       const fRow = (idx) => freePage.locator('.pb-subtable__body .pb-subtable__row').nth(idx);
       const fCell = (r, c) => fRow(r).locator(`.pb-subtable__cell[data-col-index="${c}"]`);
       const fControl = (r, c) => fCell(r, c).locator('input');
-      const fUndoBtn = () => freePage.locator('.pb-overlay__subtable-foot [data-subtable-action="undo"]');
+      const fUndoBtn = () => freePage.locator('.pb-overlay__subtable-head [data-subtable-action="undo"]');
 
       await mainGridCell(freePage, 0, '明細').click();
       await freePage.waitForTimeout(300);
