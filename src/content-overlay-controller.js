@@ -38,15 +38,127 @@
     return 0;
   }
 
+  // 3.4.0(自動スクロール頑丈化・実機診断): 2つの矩形を交差させる。交差が無ければ
+  // 幅/高さ0の矩形(leftとtop側に潰れる)を返す(常にleft<=right, top<=bottomを保つ)
+  function intersectRect(a, b) {
+    const left = Math.max(a.left, b.left);
+    const top = Math.max(a.top, b.top);
+    const right = Math.max(left, Math.min(a.right, b.right));
+    const bottom = Math.max(top, Math.min(a.bottom, b.bottom));
+    return { left, top, right, bottom };
+  }
+
+  // window.innerWidth/innerHeightとdocument.documentElement.clientWidth/clientHeightの
+  // どちらが「実際に見えているビューポート」を表すかはページのCSS(スクロールバーの有無等)に
+  // よって揺れるため、両方取れる時は小さい方(より厳しい方)を採る。片方しか取れない時はそれを使う
+  function pickViewportDim(a, b) {
+    const av = typeof a === 'number' && a > 0 ? a : null;
+    const bv = typeof b === 'number' && b > 0 ? b : null;
+    if (av && bv) return Math.min(av, bv);
+    return av || bv || 0;
+  }
+
+  // 3.4.0(実機頑丈化): windowのblurイベントでドラッグを終える対策(項目5)を入れる際、
+  // 「フォーカス中の要素が仮想化の再描画(updateVirtualRows)で丸ごと作り直され、フォーカスが
+  // document.body へ落ちた」だけでもwindowのblurが発火する(ドキュメント自体はフォーカスを
+  // 保ったまま=document.hasFocus()はtrueのまま)ことがe2eで判明した。この「見せかけのblur」で
+  // ドラッグを終えてしまうと、自動スクロール中の再描画そのものでドラッグが止まってしまう。
+  // 実際にブラウザの外へフォーカスが移った(alt-tab等)場合はdocument.hasFocus()がfalseに
+  // なるので、そちらだけをドラッグ終了の合図として扱う
+  function isSpuriousWindowBlur(event) {
+    return Boolean(event) && event.type === 'blur'
+      && typeof document !== 'undefined' && typeof document.hasFocus === 'function'
+      && document.hasFocus();
+  }
+
+  // 3.4.0(実機で自動スクロールが動かない問題の修正): 自動スクロールの端判定を、
+  // スクロール要素自身のgetBoundingClientRect()だけで行わない。実機のkintoneページでは
+  // オーバーレイ内のスクロール領域がビューポートの外まで続いていたり(下端が画面より下にある)、
+  // overflow:hiddenの祖先に一部がクリップされていたりする。その状態でポインターを画面の
+  // 一番下に置いても、要素の生の矩形の下端からは28px以上離れているため「端」と判定されず、
+  // 自動スクロールが起動しなかった(オケオ実機報告: 範囲選択・フィルハンドルとも無反応)。
+  // ここではスクロール要素の矩形を (1) window.innerWidth/innerHeight・documentElementの
+  // clientWidth/clientHeight (2) overflowがvisibleでない祖先の矩形、の両方で順に交差させ、
+  // 「実際にクリック/ポインター判定が成立する範囲」を求めてから端判定に使う
+  function computeVisibleRect(el) {
+    const base = el.getBoundingClientRect();
+    let rect = { left: base.left, top: base.top, right: base.right, bottom: base.bottom };
+    const vw = pickViewportDim(
+      typeof window !== 'undefined' ? window.innerWidth : 0,
+      (typeof document !== 'undefined' && document.documentElement) ? document.documentElement.clientWidth : 0
+    );
+    const vh = pickViewportDim(
+      typeof window !== 'undefined' ? window.innerHeight : 0,
+      (typeof document !== 'undefined' && document.documentElement) ? document.documentElement.clientHeight : 0
+    );
+    if (vw && vh) {
+      rect = intersectRect(rect, { left: 0, top: 0, right: vw, bottom: vh });
+    }
+    let ancestor = el.parentElement;
+    let guard = 0;
+    while (ancestor && ancestor.nodeType === 1 && guard < 50) {
+      guard += 1;
+      let style = null;
+      try { style = window.getComputedStyle(ancestor); } catch (_e) { style = null; }
+      if (style) {
+        const ox = style.overflowX;
+        const oy = style.overflowY;
+        if ((ox && ox !== 'visible') || (oy && oy !== 'visible')) {
+          const aRect = ancestor.getBoundingClientRect();
+          rect = intersectRect(rect, { left: aRect.left, top: aRect.top, right: aRect.right, bottom: aRect.bottom });
+        }
+        // position:fixedな祖先(オーバーレイ自身のルート要素がこれ)に着いたらそこで打ち切る。
+        // fixed要素はさらに上の祖先(ここではbody等)のoverflowクリップの影響を受けない
+        // (bodyがoverflow:hiddenかつ高さ0でも、fixedなオーバーレイ自体は普通に表示される。
+        // ここで打ち切らずに上まで交差させると、空のbody(高さ0)のe2e用フェイクページで
+        // 見えている矩形が潰れてしまい、実機とは違う形で自動スクロールが起動しなくなる)
+        if (style.position === 'fixed') break;
+      }
+      if (ancestor === document.documentElement) break;
+      ancestor = ancestor.parentElement;
+    }
+    return rect;
+  }
+
   class DragAutoscroller {
-    constructor(getScrollEl, onTick) {
+    // logFn: 診断ログ出力用(省略可。既定は何もしない)。呼び出し側のthis.diagLogを渡す想定
+    // (このクラス自体はExcelOverlayControllerのインスタンスメソッドではないため、
+    // diagLogを直接は持てない。コンストラクタ経由で受け取る)
+    constructor(getScrollEl, onTick, logFn) {
       this.getScrollEl = getScrollEl;
       this.onTick = onTick;
+      this.logFn = typeof logFn === 'function' ? logFn : () => {};
       this.rafId = null;
       this.pointer = null;
+      this.kind = '';
+      this.totalScrolled = 0;
+      this._lastDiagAt = 0;
     }
 
-    // 最新のポインター座標(clientX/clientY)を渡す。ドラッグ中は毎mousemoveで呼ぶ。
+    // ドラッグ開始時に1回呼ぶ: 対象スクロール要素の状態をまとめて診断ログに出す
+    // (kindでgrid-select/grid-fill/editor-select/editor-fillを区別する)
+    begin(kind) {
+      this.kind = kind;
+      this.totalScrolled = 0;
+      this._lastDiagAt = 0;
+      const scrollEl = this.getScrollEl ? this.getScrollEl() : null;
+      if (!scrollEl) return;
+      try {
+        const rawRect = scrollEl.getBoundingClientRect();
+        const visRect = computeVisibleRect(scrollEl);
+        const cs = window.getComputedStyle(scrollEl);
+        const cls = String(scrollEl.className || '').trim().split(/\s+/).join('.');
+        this.logFn(`[PB][diag] autoscroll start kind=${kind} el=${scrollEl.tagName}${cls ? '.' + cls : ''} `
+          + `scrollTop=${scrollEl.scrollTop} scrollHeight=${scrollEl.scrollHeight} clientHeight=${scrollEl.clientHeight} `
+          + `scrollLeft=${scrollEl.scrollLeft} scrollWidth=${scrollEl.scrollWidth} clientWidth=${scrollEl.clientWidth} `
+          + `overflowX=${cs.overflowX} overflowY=${cs.overflowY} `
+          + `rawRect=[${Math.round(rawRect.left)},${Math.round(rawRect.top)},${Math.round(rawRect.right)},${Math.round(rawRect.bottom)}] `
+          + `visRect=[${Math.round(visRect.left)},${Math.round(visRect.top)},${Math.round(visRect.right)},${Math.round(visRect.bottom)}] `
+          + `innerWidth=${window.innerWidth} innerHeight=${window.innerHeight}`);
+      } catch (_e) { /* noop(診断ログのみ。本処理には影響させない) */ }
+    }
+
+    // 最新のポインター座標(clientX/clientY)を渡す。ドラッグ中は毎mousemove/pointermoveで呼ぶ。
     // ループがまだ無ければここで起動する(無限に呼んでも1本しか走らない)
     setPointer(clientX, clientY) {
       this.pointer = { x: clientX, y: clientY };
@@ -58,37 +170,59 @@
       this.rafId = requestAnimationFrame(() => this._tick());
     }
 
+    // 3.4.0(実機修正): デッドゾーン内でも端まで到達して動けなくても、stop()が呼ばれるまでは
+    // 必ず毎フレーム再スケジュールしてループを止めない(以前はここでreturnして止まってしまい、
+    // 次のmousemoveが来ない限り再開しなかった。実機でポインターが画面の外に出て止まっている間、
+    // mousemoveが来ないケースがあり、そこで自動スクロールが停止していた)
     _tick() {
       this.rafId = null;
       const scrollEl = this.getScrollEl ? this.getScrollEl() : null;
-      if (!scrollEl || !this.pointer) return;
-      const rect = scrollEl.getBoundingClientRect();
-      const dx = computeAutoscrollAxisDelta(this.pointer.x, rect.left, rect.right);
-      const dy = computeAutoscrollAxisDelta(this.pointer.y, rect.top, rect.bottom);
-      if (!dx && !dy) return; // デッドゾーン内。次のsetPointer(mousemove)が来るまで止めておく
-      const prevLeft = scrollEl.scrollLeft;
-      const prevTop = scrollEl.scrollTop;
-      if (dx) {
-        scrollEl.scrollLeft = Math.max(0, Math.min(scrollEl.scrollWidth - scrollEl.clientWidth, scrollEl.scrollLeft + dx));
+      if (scrollEl && this.pointer) {
+        const rect = computeVisibleRect(scrollEl);
+        const dx = computeAutoscrollAxisDelta(this.pointer.x, rect.left, rect.right);
+        const dy = computeAutoscrollAxisDelta(this.pointer.y, rect.top, rect.bottom);
+        if (dx || dy) {
+          const prevLeft = scrollEl.scrollLeft;
+          const prevTop = scrollEl.scrollTop;
+          if (dx) {
+            scrollEl.scrollLeft = Math.max(0, Math.min(scrollEl.scrollWidth - scrollEl.clientWidth, scrollEl.scrollLeft + dx));
+          }
+          if (dy) {
+            scrollEl.scrollTop = Math.max(0, Math.min(scrollEl.scrollHeight - scrollEl.clientHeight, scrollEl.scrollTop + dy));
+          }
+          const movedX = scrollEl.scrollLeft - prevLeft;
+          const movedY = scrollEl.scrollTop - prevTop;
+          if (movedX || movedY) {
+            this.totalScrolled += Math.abs(movedX) + Math.abs(movedY);
+            if (typeof this.onTick === 'function') this.onTick(scrollEl, this.pointer);
+          }
+        }
+        const now = performance.now();
+        if (now - this._lastDiagAt >= 200) {
+          this._lastDiagAt = now;
+          this.logFn(`[PB][diag] autoscroll tick kind=${this.kind} `
+            + `edgeL=${Math.round(this.pointer.x - rect.left)} edgeR=${Math.round(rect.right - this.pointer.x)} `
+            + `edgeT=${Math.round(this.pointer.y - rect.top)} edgeB=${Math.round(rect.bottom - this.pointer.y)} `
+            + `dx=${dx} dy=${dy} scrollTop=${scrollEl.scrollTop} scrollLeft=${scrollEl.scrollLeft}`);
+        }
       }
-      if (dy) {
-        scrollEl.scrollTop = Math.max(0, Math.min(scrollEl.scrollHeight - scrollEl.clientHeight, scrollEl.scrollTop + dy));
-      }
-      const moved = scrollEl.scrollLeft !== prevLeft || scrollEl.scrollTop !== prevTop;
-      if (moved) {
-        if (typeof this.onTick === 'function') this.onTick(scrollEl, this.pointer);
-        this.rafId = requestAnimationFrame(() => this._tick());
-      }
-      // 端まで到達して動けなかった(moved===false)場合はここでループを止める。
-      // ポインターがさらに外へ動けば次のsetPointerで再開する
+      // デッドゾーン・端まで到達のいずれでも、stop()が呼ばれるまでは毎フレーム判定し続ける。
+      // ポインターが止まっていてもmousemoveが来なくても、最後の座標で判定を継続する
+      this.rafId = requestAnimationFrame(() => this._tick());
     }
 
-    stop() {
+    // reason: mouseup/window-mouseup/blur/pointercancel/buttons0/cancel/commit/close/teardown等。
+    // 呼び出し側は必ずこれを経由してrAFを解除すること(リーク防止)
+    stop(reason) {
+      const wasRunning = this.rafId !== null || this.pointer !== null;
       if (this.rafId !== null) {
         cancelAnimationFrame(this.rafId);
         this.rafId = null;
       }
       this.pointer = null;
+      if (wasRunning && reason) {
+        this.logFn(`[PB][diag] autoscroll stop reason=${reason} kind=${this.kind} total=${Math.round(this.totalScrolled)}`);
+      }
     }
   }
 
@@ -299,7 +433,9 @@
       this.navigating = false;
       this.dragSelecting = false;
       this.editingCell = null;
-      this.handleMouseUp = this.endSelection.bind(this);
+      // 3.4.0: reason付きのendSelectionへ切り替えた(診断ログ用)。document capture の
+      // mouseupイベント自体をreasonとして渡さないよう、ここでラップする
+      this.handleMouseUp = () => this.endSelection('mouseup');
       this.handleOverlayDragOver = (ev) => { ev.preventDefault(); };
       this.handleOverlayDrop = (ev) => { ev.preventDefault(); };
       this.pendingFileUploads = new Map();
@@ -344,9 +480,14 @@
       // startSelection/endSelectionで行う。フィルドラッグ側はthis.gridAutoscrollerを
       // そのまま共有し、onFillDragMove/cancelFillDrag/commitFillDragで止める)
       this._boundGridSelectDragMove = null;
+      this._boundGridSelectDragEnd = null;
+      this._boundFillWindowEnd = null;
+      this._gridDragGuardCount = 0;
+      this._boundGridDragNativeGuard = null;
       this.gridAutoscroller = new DragAutoscroller(
         () => this.bodyScroll,
-        (_scrollEl, pointer) => this.handleGridAutoscrollTick(pointer)
+        (_scrollEl, pointer) => this.handleGridAutoscrollTick(pointer),
+        (line) => this.diagLog(line)
       );
       this.subtableActivationTs = 0;
       this.boundRadioPickerScrollHandler = () => { this.repositionRadioPicker(); };
@@ -901,6 +1042,8 @@
 
     attachEvents() {
       if (!this.root) return;
+      // 3.4.0: 実機に自動スクロール頑丈化版が入っているかを一覧を開くたびに1回だけ示す
+      this.diagLog('[PB][diag] autoscroll build=3.4.0-as2');
       this.bodyScroll.addEventListener('scroll', this.handleScroll, { passive: true });
       this.saveButton.addEventListener('click', () => { this.save(); });
       this.addRowButton?.addEventListener('click', () => { this.addNewRow(); });
@@ -940,8 +1083,8 @@
       }
       // 3.4.0: オーバーレイを閉じる時、ドラッグ中のまま残っている自動スクロールのrAFを
       // 必ず解除する(範囲選択ドラッグ監視用リスナー・フィルドラッグ中なら後者も)
-      this._teardownGridSelectDragWatch();
-      if (this.fillDrag) this.cancelFillDrag();
+      this._teardownGridSelectDragWatch('close');
+      if (this.fillDrag) this.cancelFillDrag('close');
       this.closeLayoutPresetMenu();
       this.closeToolMenu();
     }
@@ -6885,10 +7028,38 @@
       // handleDataCellMouseDown/onEditorGlobalMouseUpで行う)。フィルドラッグ側は
       // editorAutoscrollerをそのまま共有し、onEditorFillDragMove/cancel・commitEditorFillDragで止める
       let boundEditorSelectDragMove = null;
+      let boundEditorSelectDragEnd = null;
+      let boundEditorFillWindowEnd = null;
+      // 3.4.0(実機頑丈化): dragstart/selectstartをドラッグ中だけwindow captureで止めるための
+      // 参照カウント(範囲選択ドラッグ・フィルドラッグの両方から呼ぶ)
+      let editorDragGuardCount = 0;
+      let boundEditorDragNativeGuard = null;
+      const ensureEditorDragNativeGuards = () => {
+        editorDragGuardCount += 1;
+        if (editorDragGuardCount > 1) return;
+        boundEditorDragNativeGuard = (event) => {
+          if (editorEditingCell) return;
+          event.preventDefault();
+        };
+        window.addEventListener('dragstart', boundEditorDragNativeGuard, true);
+        window.addEventListener('selectstart', boundEditorDragNativeGuard, true);
+      };
+      const teardownEditorDragNativeGuards = () => {
+        editorDragGuardCount = Math.max(0, editorDragGuardCount - 1);
+        if (editorDragGuardCount > 0) return;
+        if (boundEditorDragNativeGuard) {
+          window.removeEventListener('dragstart', boundEditorDragNativeGuard, true);
+          window.removeEventListener('selectstart', boundEditorDragNativeGuard, true);
+          boundEditorDragNativeGuard = null;
+        }
+      };
       const editorAutoscroller = new DragAutoscroller(
         () => tableWrap,
-        (_scrollEl, pointer) => handleEditorAutoscrollTick(pointer)
+        (_scrollEl, pointer) => handleEditorAutoscrollTick(pointer),
+        (line) => this.diagLog(line)
       );
+      // 3.4.0: 実機に自動スクロール頑丈化版が入っているかをモーダルを開くたびに1回だけ示す
+      this.diagLog('[PB][diag] autoscroll build=3.4.0-as2');
       // 3.4.0: モーダル専用のUndo/Redo。メイングリッドのthis.undoStack/this.redoStack
       // (pushHistory/undo/redo)とは完全に別物で、モーダルを開いている間だけ生き、
       // 保存/キャンセル/×/Escで閉じると同時に消える(closeSubtableEditor側では何もせず、
@@ -7124,23 +7295,59 @@
         }
       };
 
+      // 3.4.0(実機頑丈化): documentのmousemove(bubble)に加え、window captureでも
+      // mousemove/pointermoveを拾う(ページ側のstopPropagationに左右されないように)。
+      // mouseup/blur/pointercancelもwindow captureで拾い、取りこぼし無くドラッグを終える
       const ensureEditorSelectDragWatch = () => {
         if (boundEditorSelectDragMove) return;
+        editorAutoscroller.begin('editor-select');
         boundEditorSelectDragMove = (ev) => onEditorSelectDragMove(ev);
+        boundEditorSelectDragEnd = (event) => {
+          if (isSpuriousWindowBlur(event)) return;
+          endEditorSelectDrag(event.type === 'mouseup' ? 'window-mouseup' : event.type);
+        };
         document.addEventListener('mousemove', boundEditorSelectDragMove);
+        window.addEventListener('mousemove', boundEditorSelectDragMove, { capture: true, passive: true });
+        window.addEventListener('pointermove', boundEditorSelectDragMove, { capture: true, passive: true });
+        window.addEventListener('mouseup', boundEditorSelectDragEnd, true);
+        window.addEventListener('blur', boundEditorSelectDragEnd, true);
+        window.addEventListener('pointercancel', boundEditorSelectDragEnd, true);
+        ensureEditorDragNativeGuards();
       };
 
-      const teardownEditorSelectDragWatch = () => {
+      const teardownEditorSelectDragWatch = (reason = 'teardown') => {
+        const wasActive = Boolean(boundEditorSelectDragMove);
         if (boundEditorSelectDragMove) {
           document.removeEventListener('mousemove', boundEditorSelectDragMove);
+          window.removeEventListener('mousemove', boundEditorSelectDragMove, true);
+          window.removeEventListener('pointermove', boundEditorSelectDragMove, true);
           boundEditorSelectDragMove = null;
         }
-        editorAutoscroller.stop();
+        if (boundEditorSelectDragEnd) {
+          window.removeEventListener('mouseup', boundEditorSelectDragEnd, true);
+          window.removeEventListener('blur', boundEditorSelectDragEnd, true);
+          window.removeEventListener('pointercancel', boundEditorSelectDragEnd, true);
+          boundEditorSelectDragEnd = null;
+        }
+        if (wasActive) teardownEditorDragNativeGuards();
+        editorAutoscroller.stop(reason);
+      };
+
+      // onEditorGlobalMouseUp(モーダル常駐のdocument capture mouseup)と共通化する
+      const endEditorSelectDrag = (reason) => {
+        editorIsDragging = false;
+        editorRowIsDragging = false;
+        teardownEditorSelectDragWatch(reason);
       };
 
       const onEditorSelectDragMove = (ev) => {
         if (!editorIsDragging) {
-          teardownEditorSelectDragWatch();
+          teardownEditorSelectDragWatch('teardown');
+          return;
+        }
+        // 3.4.0: mouseupの取りこぼし対策。ボタンが離れているのにmousemoveが来たら終える
+        if (typeof ev.buttons === 'number' && ev.buttons === 0) {
+          endEditorSelectDrag('buttons0');
           return;
         }
         editorAutoscroller.setPointer(ev.clientX, ev.clientY);
@@ -7158,14 +7365,53 @@
           fillStartCol: null, fillEndCol: null,
           direction: null
         };
+        editorAutoscroller.begin('editor-fill');
         boundEditorFillDragMove = (ev) => onEditorFillDragMove(ev);
         boundEditorFillDragUp = () => commitEditorFillDrag();
+        boundEditorFillWindowEnd = (event) => {
+          if (!editorFillDrag) return;
+          if (isSpuriousWindowBlur(event)) return;
+          if (event.type === 'pointercancel') { cancelEditorFillDrag('pointercancel'); return; }
+          commitEditorFillDrag(event.type === 'blur' ? 'blur' : 'window-mouseup');
+        };
         document.addEventListener('mousemove', boundEditorFillDragMove);
         document.addEventListener('mouseup', boundEditorFillDragUp);
+        window.addEventListener('mousemove', boundEditorFillDragMove, { capture: true, passive: true });
+        window.addEventListener('pointermove', boundEditorFillDragMove, { capture: true, passive: true });
+        window.addEventListener('mouseup', boundEditorFillWindowEnd, true);
+        window.addEventListener('blur', boundEditorFillWindowEnd, true);
+        window.addEventListener('pointercancel', boundEditorFillWindowEnd, true);
+        ensureEditorDragNativeGuards();
+      };
+
+      const teardownEditorFillDragWatch = () => {
+        const wasActive = Boolean(boundEditorFillDragMove);
+        if (boundEditorFillDragMove) {
+          document.removeEventListener('mousemove', boundEditorFillDragMove);
+          window.removeEventListener('mousemove', boundEditorFillDragMove, true);
+          window.removeEventListener('pointermove', boundEditorFillDragMove, true);
+          boundEditorFillDragMove = null;
+        }
+        if (boundEditorFillDragUp) {
+          document.removeEventListener('mouseup', boundEditorFillDragUp);
+          boundEditorFillDragUp = null;
+        }
+        if (boundEditorFillWindowEnd) {
+          window.removeEventListener('mouseup', boundEditorFillWindowEnd, true);
+          window.removeEventListener('blur', boundEditorFillWindowEnd, true);
+          window.removeEventListener('pointercancel', boundEditorFillWindowEnd, true);
+          boundEditorFillWindowEnd = null;
+        }
+        if (wasActive) teardownEditorDragNativeGuards();
       };
 
       const onEditorFillDragMove = (ev) => {
         if (!editorFillDrag) return;
+        // 3.4.0: mouseupの取りこぼし対策。ボタンが離れているのにmousemoveが来たら確定する
+        if (typeof ev.buttons === 'number' && ev.buttons === 0) {
+          commitEditorFillDrag('buttons0');
+          return;
+        }
         editorAutoscroller.setPointer(ev.clientX, ev.clientY);
         const el = document.elementFromPoint(ev.clientX, ev.clientY);
         const cell = el?.closest?.('.pb-subtable__cell[data-row-index]');
@@ -7202,24 +7448,18 @@
       };
 
       // Esc対応: ドラッグを即座に打ち切り、何も書かない(handleEscapeForFrontLayerから呼ばれる)
-      const cancelEditorFillDrag = () => {
+      const cancelEditorFillDrag = (reason = 'cancel') => {
         if (!editorFillDrag) return false;
-        document.removeEventListener('mousemove', boundEditorFillDragMove);
-        document.removeEventListener('mouseup', boundEditorFillDragUp);
-        boundEditorFillDragMove = null;
-        boundEditorFillDragUp = null;
+        teardownEditorFillDragWatch();
         editorFillDrag = null;
-        editorAutoscroller.stop();
+        editorAutoscroller.stop(reason);
         repaintEditorSelection();
         return true;
       };
 
-      const commitEditorFillDrag = () => {
-        document.removeEventListener('mousemove', boundEditorFillDragMove);
-        document.removeEventListener('mouseup', boundEditorFillDragUp);
-        boundEditorFillDragMove = null;
-        boundEditorFillDragUp = null;
-        editorAutoscroller.stop();
+      const commitEditorFillDrag = (reason = 'commit') => {
+        teardownEditorFillDragWatch();
+        editorAutoscroller.stop(reason);
 
         const drag = editorFillDrag;
         editorFillDrag = null;
@@ -7749,9 +7989,7 @@
       };
 
       const onEditorGlobalMouseUp = () => {
-        editorIsDragging = false;
-        editorRowIsDragging = false;
-        teardownEditorSelectDragWatch();
+        endEditorSelectDrag('mouseup');
       };
       document.addEventListener('mouseup', onEditorGlobalMouseUp, true);
 
@@ -8380,8 +8618,8 @@
         cancelFillDrag: () => cancelEditorFillDrag(),
         cleanup: () => {
           document.removeEventListener('mouseup', onEditorGlobalMouseUp, true);
-          cancelEditorFillDrag();
-          teardownEditorSelectDragWatch();
+          cancelEditorFillDrag('close');
+          teardownEditorSelectDragWatch('close');
           closeEditorChoicePicker();
         }
       };
@@ -9105,14 +9343,59 @@
         fillStartCol: null, fillEndCol: null,
         direction: null
       };
+      this.gridAutoscroller.begin('grid-fill');
       this._boundFillDragMove = (ev) => this.onFillDragMove(ev);
       this._boundFillDragUp = () => this.commitFillDrag();
+      // 3.4.0(実機頑丈化): document(bubble)に加え、window captureでもmousemove/pointermoveを
+      // 拾う。mouseup/blur/pointercancelはwindow captureで拾って取りこぼし無く確定/キャンセルする
+      // (pointercancelはジェスチャー自体の取り消しなのでキャンセル、他は確定する)
+      this._boundFillWindowEnd = (event) => {
+        if (!this.fillDrag) return;
+        if (isSpuriousWindowBlur(event)) return;
+        if (event.type === 'pointercancel') { this.cancelFillDrag('pointercancel'); return; }
+        this.commitFillDrag(event.type === 'blur' ? 'blur' : 'window-mouseup');
+      };
       document.addEventListener('mousemove', this._boundFillDragMove);
       document.addEventListener('mouseup', this._boundFillDragUp);
+      window.addEventListener('mousemove', this._boundFillDragMove, { capture: true, passive: true });
+      window.addEventListener('pointermove', this._boundFillDragMove, { capture: true, passive: true });
+      window.addEventListener('mouseup', this._boundFillWindowEnd, true);
+      window.addEventListener('blur', this._boundFillWindowEnd, true);
+      window.addEventListener('pointercancel', this._boundFillWindowEnd, true);
+      this._ensureGridDragNativeGuards();
+    }
+
+    // フィルドラッグ用のリスナー一式を外す(cancel/commitどちらからも呼ぶ)。
+    // 呼び出し元がgridAutoscroller.stop(reason)するので、ここでは止めない
+    _teardownFillDragWatch() {
+      const wasActive = Boolean(this._boundFillDragMove);
+      if (this._boundFillDragMove) {
+        document.removeEventListener('mousemove', this._boundFillDragMove);
+        window.removeEventListener('mousemove', this._boundFillDragMove, true);
+        window.removeEventListener('pointermove', this._boundFillDragMove, true);
+        this._boundFillDragMove = null;
+      }
+      if (this._boundFillDragUp) {
+        document.removeEventListener('mouseup', this._boundFillDragUp);
+        this._boundFillDragUp = null;
+      }
+      if (this._boundFillWindowEnd) {
+        window.removeEventListener('mouseup', this._boundFillWindowEnd, true);
+        window.removeEventListener('blur', this._boundFillWindowEnd, true);
+        window.removeEventListener('pointercancel', this._boundFillWindowEnd, true);
+        this._boundFillWindowEnd = null;
+      }
+      if (wasActive) this._teardownGridDragNativeGuards();
     }
 
     onFillDragMove(e) {
       if (!this.fillDrag) return;
+      // 3.4.0: mouseupの取りこぼし対策。ボタンが離れているのにmousemoveが来た場合は
+      // (実mouseupが来たのと同じ扱いで)確定する
+      if (typeof e.buttons === 'number' && e.buttons === 0) {
+        this.commitFillDrag('buttons0');
+        return;
+      }
       // 3.4.0: 端に近づいたら自動スクロールさせる(実際の判定・スクロール・終端再計算は
       // gridAutoscroller/handleGridAutoscrollTick側。ここでは最新座標を渡すだけ)
       this.gridAutoscroller.setPointer(e.clientX, e.clientY);
@@ -9159,14 +9442,11 @@
 
     // 3.4.0: ドラッグ中にEscでキャンセルする(プレビューを消すだけで何も書かない)。
     // trueを返したらキャンセルするドラッグが実際にあったことを示す(Esc優先順位の判定用)
-    cancelFillDrag() {
+    cancelFillDrag(reason = 'cancel') {
       if (!this.fillDrag) return false;
-      document.removeEventListener('mousemove', this._boundFillDragMove);
-      document.removeEventListener('mouseup', this._boundFillDragUp);
-      this._boundFillDragMove = null;
-      this._boundFillDragUp = null;
+      this._teardownFillDragWatch();
       this.fillDrag = null;
-      this.gridAutoscroller.stop();
+      this.gridAutoscroller.stop(reason);
       this.repaintSelection();
       return true;
     }
@@ -9178,12 +9458,9 @@
     // ここでは対応表をcomputeFillRowMappingで明示的に求め、該当セルだけを書く。
     // 値は表示整形(formatCellDisplayValue)ではなく生の値をそのまま複製する
     // (複数行テキストの改行・CHECK_BOX/MULTI_SELECTの配列を壊さない)
-    commitFillDrag() {
-      document.removeEventListener('mousemove', this._boundFillDragMove);
-      document.removeEventListener('mouseup', this._boundFillDragUp);
-      this._boundFillDragMove = null;
-      this._boundFillDragUp = null;
-      this.gridAutoscroller.stop();
+    commitFillDrag(reason = 'commit') {
+      this._teardownFillDragWatch();
+      this.gridAutoscroller.stop(reason);
 
       const drag = this.fillDrag;
       this.fillDrag = null;
@@ -9481,23 +9758,85 @@
     // mouseenter(handleCellHover)は仮想化で未レンダリングの行には届かないため、documentの
     // mousemoveを別途見て、座標をthis.gridAutoscrollerへ渡すだけのここは薄い窓口にする
     // (実際のスクロール・終端再計算はhandleGridAutoscrollTick/computeGridCellAtPointが担う)
-    _ensureGridSelectDragWatch() {
-      if (this._boundGridSelectDragMove) return;
-      this._boundGridSelectDragMove = (event) => this.onGridSelectDragMove(event);
-      document.addEventListener('mousemove', this._boundGridSelectDragMove);
+    // 3.4.0(実機頑丈化): dragstart/selectstartをドラッグ中だけwindow captureで止める
+    // (ネイティブのドラッグ/テキスト選択が自動スクロール判定を妨げることがあるため)。
+    // 範囲選択ドラッグ・フィルドラッグの両方から呼ばれるため参照カウントで管理する
+    // (片方が終わってももう片方が続いていれば外さない)。セル編集中(this.editingCell、
+    // 入力にキャレットがある状態)は邪魔しない
+    _ensureGridDragNativeGuards() {
+      this._gridDragGuardCount = (this._gridDragGuardCount || 0) + 1;
+      if (this._gridDragGuardCount > 1) return;
+      this._boundGridDragNativeGuard = (event) => {
+        if (this.editingCell) return;
+        event.preventDefault();
+      };
+      window.addEventListener('dragstart', this._boundGridDragNativeGuard, true);
+      window.addEventListener('selectstart', this._boundGridDragNativeGuard, true);
     }
 
-    _teardownGridSelectDragWatch() {
+    _teardownGridDragNativeGuards() {
+      this._gridDragGuardCount = Math.max(0, (this._gridDragGuardCount || 0) - 1);
+      if (this._gridDragGuardCount > 0) return;
+      if (this._boundGridDragNativeGuard) {
+        window.removeEventListener('dragstart', this._boundGridDragNativeGuard, true);
+        window.removeEventListener('selectstart', this._boundGridDragNativeGuard, true);
+        this._boundGridDragNativeGuard = null;
+      }
+    }
+
+    // 3.4.0: 範囲選択ドラッグ中、ポインターがthis.bodyScrollの端に近づいたら自動スクロールする。
+    // mouseenter(handleCellHover)は仮想化で未レンダリングの行には届かないため、documentの
+    // mousemoveを別途見て、座標をthis.gridAutoscrollerへ渡すだけのここは薄い窓口にする
+    // (実際のスクロール・終端再計算はhandleGridAutoscrollTick/computeGridCellAtPointが担う)。
+    // 3.4.0(実機頑丈化): documentのmousemove(bubble)だけでなく、window captureでも
+    // mousemove/pointermoveを拾う(ページ側やoverlay内のstopPropagationに左右されないように。
+    // どちらかが届けばよい)。mouseup/blur/pointercancelもwindow captureで拾い、取りこぼし無く
+    // ドラッグを終える
+    _ensureGridSelectDragWatch() {
+      if (this._boundGridSelectDragMove) return;
+      this.gridAutoscroller.begin('grid-select');
+      this._boundGridSelectDragMove = (event) => this.onGridSelectDragMove(event);
+      this._boundGridSelectDragEnd = (event) => {
+        if (isSpuriousWindowBlur(event)) return;
+        this.endSelection(event.type === 'mouseup' ? 'window-mouseup' : event.type);
+      };
+      document.addEventListener('mousemove', this._boundGridSelectDragMove);
+      window.addEventListener('mousemove', this._boundGridSelectDragMove, { capture: true, passive: true });
+      window.addEventListener('pointermove', this._boundGridSelectDragMove, { capture: true, passive: true });
+      window.addEventListener('mouseup', this._boundGridSelectDragEnd, true);
+      window.addEventListener('blur', this._boundGridSelectDragEnd, true);
+      window.addEventListener('pointercancel', this._boundGridSelectDragEnd, true);
+      this._ensureGridDragNativeGuards();
+    }
+
+    _teardownGridSelectDragWatch(reason = 'teardown') {
+      const wasActive = Boolean(this._boundGridSelectDragMove);
       if (this._boundGridSelectDragMove) {
         document.removeEventListener('mousemove', this._boundGridSelectDragMove);
+        window.removeEventListener('mousemove', this._boundGridSelectDragMove, true);
+        window.removeEventListener('pointermove', this._boundGridSelectDragMove, true);
         this._boundGridSelectDragMove = null;
       }
-      this.gridAutoscroller.stop();
+      if (this._boundGridSelectDragEnd) {
+        window.removeEventListener('mouseup', this._boundGridSelectDragEnd, true);
+        window.removeEventListener('blur', this._boundGridSelectDragEnd, true);
+        window.removeEventListener('pointercancel', this._boundGridSelectDragEnd, true);
+        this._boundGridSelectDragEnd = null;
+      }
+      if (wasActive) this._teardownGridDragNativeGuards();
+      this.gridAutoscroller.stop(reason);
     }
 
     onGridSelectDragMove(event) {
       if (!this.dragSelecting || this.editingCell) {
-        this._teardownGridSelectDragWatch();
+        this._teardownGridSelectDragWatch('teardown');
+        return;
+      }
+      // 3.4.0: mouseupの取りこぼし対策。ボタンが離れているのにmousemoveが来た場合は
+      // ここでドラッグを終える(mouse.down()無しでdispatchEventしていた一部の旧e2eは
+      // page.mouse.down()を使う形に直した。buttons未対応のイベントではチェックしない)
+      if (typeof event.buttons === 'number' && event.buttons === 0) {
+        this.endSelection('buttons0');
         return;
       }
       this.gridAutoscroller.setPointer(event.clientX, event.clientY);
@@ -9570,9 +9909,9 @@
       }
     }
 
-    endSelection() {
+    endSelection(reason = 'mouseup') {
       this.dragSelecting = false;
-      this._teardownGridSelectDragWatch();
+      this._teardownGridSelectDragWatch(reason);
     }
 
     isCellSelected(rowIndex, colIndex) {

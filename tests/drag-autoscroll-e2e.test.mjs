@@ -4,7 +4,7 @@
 // controller.js冒頭の共通ヘルパー)がrequestAnimationFrameで毎フレームスクロールを進め、
 // その都度(マウスが動かなくても)選択範囲/フィル範囲の終端セルを再計算することを確認する。
 // mouseup後はスクロールが止まり、rAFがリークしないこと(scrollTopが増え続けないこと)も見る。
-import { openOverlay, cell as mainCell } from './helpers/overlay-page.mjs';
+import { openOverlay, openOverlayContext, cell as mainCell } from './helpers/overlay-page.mjs';
 
 function numRecords(count) {
   return Array.from({ length: count }, (_, i) => ({
@@ -127,6 +127,11 @@ async function maxRenderedRow(page, fieldCode) {
 
 export async function run({ browser, check }) {
   const name = (n) => `drag-autoscroll-e2e: ${n}`;
+  const VIEWPORT_H = 900; // helpers/overlay-page.mjs の既定 viewport 高さ
+  const centerOf = async (locator) => {
+    const b = await locator.boundingBox();
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
 
   // ================================================================
   // (1) 一覧: 範囲選択ドラッグを下端の外へ出して保持→縦方向に自動スクロールする。
@@ -148,7 +153,12 @@ export async function run({ browser, check }) {
       check(name('(1) 前提: 終端行(target)はまだレンダリングされていない(仮想化)'), (await cellExists(target)) === 0);
 
       const box = await getScrollBox(page, '.pb-overlay__cell-scroll');
-      await c(0).dispatchEvent('mousedown', { button: 0 });
+      // 3.4.0(自動スクロール頑丈化): buttons===0でドラッグを終える対策を入れたため、
+      // 以降はdispatchEvent('mousedown')ではなくpage.mouse.down()(実際にボタンを押した
+      // 状態を保つ)でドラッグを開始する
+      const p0 = await centerOf(c(0));
+      await page.mouse.move(p0.x, p0.y);
+      await page.mouse.down();
       await page.mouse.move(box.left + box.width / 2, box.bottom + 15);
       await page.waitForTimeout(1500);
 
@@ -217,7 +227,10 @@ export async function run({ browser, check }) {
       };
 
       const box = await getScrollBox(page, '.pb-overlay__cell-scroll');
-      await c('C0').dispatchEvent('mousedown', { button: 0 });
+      // 3.4.0: buttons===0終了対策のため実際のmouse.down()でドラッグを開始する
+      const p0 = await centerOf(c('C0'));
+      await page.mouse.move(p0.x, p0.y);
+      await page.mouse.down();
       await page.mouse.move(box.right + 15, box.top + box.height / 2);
       await page.waitForTimeout(1500);
 
@@ -251,7 +264,10 @@ export async function run({ browser, check }) {
       const lastRow = SUBTABLE_ROW_COUNT - 1;
 
       const box = await getScrollBox(page, '.pb-subtable-wrap');
-      await subtableCellEl(0, 0).dispatchEvent('mousedown', { button: 0 });
+      // 3.4.0: buttons===0終了対策のため実際のmouse.down()でドラッグを開始する
+      const p0 = await centerOf(subtableCellEl(0, 0));
+      await page.mouse.move(p0.x, p0.y);
+      await page.mouse.down();
       await page.mouse.move(box.left + box.width / 2, box.bottom + 15);
       await page.waitForTimeout(1800);
 
@@ -289,11 +305,6 @@ export async function run({ browser, check }) {
   //   さらにビューポート(ブラウザの表示域)の外まで出し、そこで止めたままスクロールが続くことを見る。
   //   ポインターを動かさなくても続くこと(t1 < t2)・終端が伸びること・mouseup で止まることを確かめる
   // ================================================================
-  const VIEWPORT_H = 900; // helpers/overlay-page.mjs の既定 viewport 高さ
-  const centerOf = async (locator) => {
-    const b = await locator.boundingBox();
-    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-  };
 
   // (6) 一覧: 範囲選択でビューポートの下の外 → 下へスクロールが続く → そのまま上の外へ → 上へ戻る
   {
@@ -408,6 +419,179 @@ export async function run({ browser, check }) {
       await page.waitForTimeout(300);
       const afterWait = await getScroll(page, SCROLL);
       check(name(`${tag}: mouseup後はscrollTopが変わらない`), afterUp.top === afterWait.top);
+    } finally { await ctx.close(); }
+  }
+
+  // ================================================================
+  // (10) 実ページに似せた敵対的な土台(10/22 オケオ実機の指摘を受けた頑丈化)。
+  //   実機のkintoneページはbodyが長くスクロールしていることがあり、content scriptは
+  //   isolated worldで動く(ページ側のイベントハンドラとは独立)。ここではe2eの偽ページでも
+  //   それに近い状況を作る: bodyの高さを4000pxにしてwindow.scrollTo(0,1500)で実際にページを
+  //   スクロールさせておき、さらにbodyにmousemoveのbubbleリスナーを付けてstopPropagationする
+  //   (documentまでbubbleが届かない=既存のdocument mousemove監視だけでは拾えない状態)。
+  //   window captureでのmousemove/pointermove監視(項目3)が効いていれば、この状態でも
+  //   一覧の範囲選択・フィルが画面外まで引いて止めたままスクロールを続けられるはず
+  // ================================================================
+  {
+    const { ctx, page } = await openOverlayContext({ browser, bridgeScript: buildBridge(N_FIELDS, numRecords(120)) });
+    try {
+      await page.evaluate(() => {
+        document.body.style.height = '4000px';
+        window.scrollTo(0, 1500);
+        document.body.addEventListener('mousemove', (e) => { e.stopPropagation(); }, false);
+      });
+      await page.keyboard.press('Control+Shift+KeyE');
+      await page.waitForTimeout(1200);
+
+      const SCROLL = '.pb-overlay__cell-scroll';
+      const cellSelected = async (r) => {
+        const loc = page.locator(`.pb-overlay__cell input[data-field-code="N"][data-row-index="${r}"]`);
+        if ((await loc.count()) === 0) return false;
+        return loc.evaluate((el) => el.parentElement.classList.contains('pb-overlay__cell--selected'));
+      };
+      const initialMax = await maxRenderedRow(page, 'N');
+      const target = initialMax + 10;
+      const box = await getScrollBox(page, SCROLL);
+      const p0 = await centerOf(mainCell(page, 0, 'N'));
+      await page.mouse.move(p0.x, p0.y);
+      await page.mouse.down();
+      await page.mouse.move(box.left + box.width / 2, VIEWPORT_H + 150, { steps: 5 });
+      await page.waitForTimeout(600);
+      const t1 = await getScroll(page, SCROLL);
+      await page.waitForTimeout(900);
+      const t2 = await getScroll(page, SCROLL);
+      check(name('(10) 敵対的な土台: bodyのmousemoveがstopPropagationでもホールド中にscrollTopが増え続ける'), t1.top > 0 && t2.top > t1.top);
+      check(name('(10) 敵対的な土台: 画面外で止めたまま終端行(target)まで選択が伸びる'), await cellSelected(target));
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      const afterUp = await getScroll(page, SCROLL);
+      await page.waitForTimeout(300);
+      const afterWait = await getScroll(page, SCROLL);
+      check(name('(10) 敵対的な土台: mouseup後はscrollTopが変わらない'), afterUp.top === afterWait.top);
+    } finally { await ctx.close(); }
+  }
+
+  // (10続き) フィルハンドルでも同様に、敵対的な土台(body mousemove stopPropagation)で
+  // 画面外まで引いて止めたままスクロールが続き、確定で値が入ること
+  {
+    const { ctx, page } = await openOverlayContext({ browser, bridgeScript: buildBridge(N_FIELDS, numRecords(120)) });
+    try {
+      await page.evaluate(() => {
+        document.body.style.height = '4000px';
+        window.scrollTo(0, 1500);
+        document.body.addEventListener('mousemove', (e) => { e.stopPropagation(); }, false);
+      });
+      await page.keyboard.press('Control+Shift+KeyE');
+      await page.waitForTimeout(1200);
+
+      const SCROLL = '.pb-overlay__cell-scroll';
+      const p0 = await centerOf(mainCell(page, 0, 'N'));
+      await page.mouse.click(p0.x, p0.y);
+      await page.waitForTimeout(80);
+      const initialMax = await maxRenderedRow(page, 'N');
+      const target = initialMax + 8;
+      const h = await centerOf(page.locator('.pb-overlay__fill-handle'));
+      await page.mouse.move(h.x, h.y);
+      await page.mouse.down();
+      const box = await getScrollBox(page, SCROLL);
+      await page.mouse.move(box.left + box.width / 2, VIEWPORT_H + 150, { steps: 5 });
+      await page.waitForTimeout(600);
+      const t1 = await getScroll(page, SCROLL);
+      await page.waitForTimeout(900);
+      const t2 = await getScroll(page, SCROLL);
+      check(name('(10) 敵対的な土台・フィル: ホールド中にscrollTopが増え続ける'), t1.top > 0 && t2.top > t1.top);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      const targetValue = await mainCell(page, target, 'N').inputValue();
+      check(name('(10) 敵対的な土台・フィル: 画面外でmouseup→終端行(target)にソース値"0"が入る'), targetValue === '0');
+    } finally { await ctx.close(); }
+  }
+
+  // ================================================================
+  // (11) スクロール要素の下端が表示域より下にある状態(10/22 オケオ実機の核心的な指摘:
+  //   「見えている矩形」で端判定しないと、実際の画面の一番下にポインターを置いても
+  //   端の28px以内に入らず自動スクロールが起動しない)。.pb-overlay__cell-scrollの高さを
+  //   (viewport高さ+300px)まで強制的に伸ばして表示域からはみ出させ、ポインターを画面の
+  //   一番下(innerHeight-2)で止めたまま、スクロールが進むことを確認する
+  // ================================================================
+  {
+    const { ctx, page } = await openOverlay({ browser, bridgeScript: buildBridge(N_FIELDS, numRecords(120)) });
+    try {
+      const SCROLL = '.pb-overlay__cell-scroll';
+      await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        el.style.height = `${window.innerHeight + 300}px`;
+      }, SCROLL);
+
+      const box = await getScrollBox(page, SCROLL);
+      const p0 = await centerOf(mainCell(page, 0, 'N'));
+      await page.mouse.move(p0.x, p0.y);
+      await page.mouse.down();
+      const bottomX = box.left + box.width / 2;
+      await page.mouse.move(bottomX, VIEWPORT_H - 2, { steps: 5 });
+      await page.waitForTimeout(600);
+      const t1 = await getScroll(page, SCROLL);
+      await page.waitForTimeout(900);
+      const t2 = await getScroll(page, SCROLL);
+      check(name('(11) スクロール要素が表示域より下にはみ出していてもホールド中にscrollTopが増え続ける'), t1.top > 0 && t2.top > t1.top);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      const afterUp = await getScroll(page, SCROLL);
+      await page.waitForTimeout(300);
+      const afterWait = await getScroll(page, SCROLL);
+      check(name('(11) mouseup後はscrollTopが変わらない'), afterUp.top === afterWait.top);
+    } finally { await ctx.close(); }
+  }
+
+  // ================================================================
+  // (13) 診断ログ: localStorage.pbDiag='1' の時だけconsoleに
+  //   `[PB][diag] autoscroll start …` と `stop reason=mouseup …` が出ること
+  //   (既定ではpbDiag未設定なので出ない=ストア版と同じ静かな既定動作であることも併せて見る)
+  // ================================================================
+  {
+    const { ctx, page } = await openOverlayContext({ browser, bridgeScript: buildBridge(N_FIELDS, numRecords(120)) });
+    try {
+      await page.evaluate(() => { try { window.localStorage.setItem('pbDiag', '1'); } catch (_e) { /* noop */ } });
+      // build=3.4.0-as2 の1回ログはattachEvents()(一覧を開く処理)の中で出るため、
+      // 起動キー(Ctrl+Shift+E)を押す前にconsoleリスナーを付けておく
+      const logs = [];
+      page.on('console', (msg) => { logs.push(msg.text()); });
+
+      await page.keyboard.press('Control+Shift+KeyE');
+      await page.waitForTimeout(1200);
+
+      const p0 = await centerOf(mainCell(page, 0, 'N'));
+      await page.mouse.move(p0.x, p0.y);
+      await page.mouse.down();
+      const box = await getScrollBox(page, '.pb-overlay__cell-scroll');
+      await page.mouse.move(box.left + box.width / 2, box.bottom + 15);
+      await page.waitForTimeout(400);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+
+      check(name('(13) 診断ログ: autoscroll startが出る'), logs.some((l) => l.includes('[PB][diag] autoscroll start') && l.includes('kind=grid-select')));
+      // window captureのmouseup(より早い捕捉フェーズ)がdocument captureより先に届くため、
+      // 通常のmouseupでも reason=window-mouseup として記録される(mouseupも許容する)
+      check(name('(13) 診断ログ: stop reason=mouseup系が出る'), logs.some((l) => l.includes('[PB][diag] autoscroll stop') && /reason=(window-)?mouseup\b/.test(l)));
+      check(name('(13) 診断ログ: build版表記が出る'), logs.some((l) => l.includes('[PB][diag] autoscroll build=3.4.0-as2')));
+    } finally { await ctx.close(); }
+  }
+
+  // (13続き) pbDiag未設定(既定)ではconsoleに何も出ないこと(ストア版の既定動作確認)
+  {
+    const { ctx, page } = await openOverlay({ browser, bridgeScript: buildBridge(N_FIELDS, numRecords(120)) });
+    try {
+      const logs = [];
+      page.on('console', (msg) => { logs.push(msg.text()); });
+      const p0 = await centerOf(mainCell(page, 0, 'N'));
+      await page.mouse.move(p0.x, p0.y);
+      await page.mouse.down();
+      const box = await getScrollBox(page, '.pb-overlay__cell-scroll');
+      await page.mouse.move(box.left + box.width / 2, box.bottom + 15);
+      await page.waitForTimeout(400);
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      check(name('(13) pbDiag未設定では[PB][diag]ログが出ない'), !logs.some((l) => l.includes('[PB][diag] autoscroll')));
     } finally { await ctx.close(); }
   }
 }
