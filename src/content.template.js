@@ -20,12 +20,21 @@
     return /^\/(?:g|grn|garoon)(?:\/|$)/.test(path);
   }
 
+  // 通常スペースのアプリは /k/<appId>/..., ゲストスペースのアプリは
+  // /k/guest/<spaceId>/<appId>/... (kintone REST APIのベースURLが
+  // それぞれ /k/v1/... と /k/guest/<spaceId>/v1/... に分かれるのと同じ構造。
+  // 参考: https://cybozu.dev/ja/kintone/docs/rest-api/overview/kintone-rest-api-overview/ )
+  // APP_PATH_CORE は先頭の "/" を含まない「k/(guest/<spaceId>/)?<appId>」部分。
+  // パス全体のマッチには "\/" + APP_PATH_CORE、#以降のハッシュルーティングの
+  // マッチには "#\/?" の直後に APP_PATH_CORE をそのまま続けて使う。
+  const APP_PATH_CORE = 'k\\/(?:guest\\/\\d+\\/)?\\d+';
+
   function getKintoneAppPageType(pathname) {
     const path = String(pathname || '');
-    if (/^\/k\/\d+\/?$/.test(path)) return 'list';
-    if (/^\/k\/\d+\/show(?:\/|$)/.test(path)) return 'detail';
-    if (/^\/k\/\d+\/edit(?:\/|$)/.test(path)) return 'edit';
-    if (/^\/k\/\d+\/create(?:\/|$)/.test(path)) return 'create';
+    if (new RegExp(`^\\/${APP_PATH_CORE}\\/?$`).test(path)) return 'list';
+    if (new RegExp(`^\\/${APP_PATH_CORE}\\/show(?:\\/|$)`).test(path)) return 'detail';
+    if (new RegExp(`^\\/${APP_PATH_CORE}\\/edit(?:\\/|$)`).test(path)) return 'edit';
+    if (new RegExp(`^\\/${APP_PATH_CORE}\\/create(?:\\/|$)`).test(path)) return 'create';
     return 'unsupported';
   }
 
@@ -52,28 +61,12 @@
     const hash = String(url.hash || '');
     const pageType = getKintoneAppPageType(pathname);
     if (pageType !== 'unsupported') return true;
-    if (/\/k\/\d+\/(?:show|edit|create)(?:\/|$)/.test(hash)) return true;
-    if (/^#\/?k\/\d+\/?(?:[?#].*)?$/.test(hash)) return true;
+    if (new RegExp(`\\/${APP_PATH_CORE}\\/(?:show|edit|create)(?:\\/|$)`).test(hash)) return true;
+    if (new RegExp(`^#\\/?${APP_PATH_CORE}\\/?(?:[?#].*)?$`).test(hash)) return true;
     if (/[?&](?:app|appId)=\d+(?:[&#]|$)/i.test(search)) return true;
     if (/(?:^#|[?&])(?:app|appId)=\d+(?:[&#]|$)/i.test(hash)) return true;
-    if (/(?:^#|[?&])record=\d+(?:[&#]|$)/i.test(hash) && /\/k\/\d+\/show(?:\/|$)/.test(pathname)) return true;
+    if (/(?:^#|[?&])record=\d+(?:[&#]|$)/i.test(hash) && new RegExp(`^\\/${APP_PATH_CORE}\\/show(?:\\/|$)`).test(pathname)) return true;
     return false;
-  }
-
-  function hasAppContextDomHint() {
-    try {
-      if (document.querySelector('[data-app-id], [data-view-id]')) {
-        console.debug('PB DOM fallback used: hasAppContextDomHint(data-attr)');
-        return true;
-      }
-      if (document.querySelector('.gaia-argoui-app-index-toolbar, .recordlist-gaia, .record-gaia')) {
-        console.debug('PB DOM fallback used: hasAppContextDomHint(gaia)');
-        return true;
-      }
-      return false;
-    } catch (_err) {
-      return false;
-    }
   }
 
   function hasAppContextApiHint() {
@@ -127,7 +120,6 @@
       const appId = hasGetId ? getKintoneAppIdSafe() : '';
       if (appId) return true;
       if (hasAppContextApiHint()) return true;
-      if (hasAppContextDomHint()) return true;
       return false;
     } catch (_err) {
       return false;
