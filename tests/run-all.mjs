@@ -83,7 +83,11 @@ const SUITES = [
   ['subtable-undo-e2e', './subtable-undo-e2e.test.mjs'],
   // 3.4.0: ドラッグ中(範囲選択/フィルハンドル)の自動スクロール(一覧・サブテーブル編集
   // モーダルの両方・縦横)+モーダルのUndo/Redoが見出し欄にあり、フッターには無いことの確認
-  ['drag-autoscroll-e2e', './drag-autoscroll-e2e.test.mjs']
+  ['drag-autoscroll-e2e', './drag-autoscroll-e2e.test.mjs'],
+  // 3.4.0: 一覧の仮想化を「行の使い回し」に書き換えたことの確認(残る行は同一要素のまま・
+  // 編集中セルのフォーカス/入力中値の保持・ルックアップ候補ピッカーの開閉・削除予定の見た目・
+  // 列幅変更/ソート後の再描画)
+  ['grid-row-recycle-e2e', './grid-row-recycle-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];

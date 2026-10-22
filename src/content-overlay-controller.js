@@ -80,7 +80,42 @@
   // ここではスクロール要素の矩形を (1) window.innerWidth/innerHeight・documentElementの
   // clientWidth/clientHeight (2) overflowがvisibleでない祖先の矩形、の両方で順に交差させ、
   // 「実際にクリック/ポインター判定が成立する範囲」を求めてから端判定に使う
-  function computeVisibleRect(el) {
+  // 3.4.0(行の使い回し・計測後の最適化): overflowでクリップする祖先の一覧(getComputedStyleが
+  // 必要な部分)を1回だけ調べて返す。ドラッグ中は祖先の構造・overflow指定そのものは変わらない
+  // ため、DragAutoscroller.begin()で1回だけ呼び、毎フレームのcomputeVisibleRect呼び出しは
+  // この結果を使い回してgetComputedStyleを省く(矩形自体=getBoundingClientRectは毎フレーム
+  // 取り直す。要素の位置そのものはスクロール等で動くため)
+  function collectClipAncestors(el) {
+    const list = [];
+    let ancestor = el.parentElement;
+    let guard = 0;
+    while (ancestor && ancestor.nodeType === 1 && guard < 50) {
+      guard += 1;
+      let style = null;
+      try { style = window.getComputedStyle(ancestor); } catch (_e) { style = null; }
+      if (style) {
+        const ox = style.overflowX;
+        const oy = style.overflowY;
+        if ((ox && ox !== 'visible') || (oy && oy !== 'visible')) {
+          list.push(ancestor);
+        }
+        // position:fixedな祖先(オーバーレイ自身のルート要素がこれ)に着いたらそこで打ち切る。
+        // fixed要素はさらに上の祖先(ここではbody等)のoverflowクリップの影響を受けない
+        // (bodyがoverflow:hiddenかつ高さ0でも、fixedなオーバーレイ自体は普通に表示される。
+        // ここで打ち切らずに上まで交差させると、空のbody(高さ0)のe2e用フェイクページで
+        // 見えている矩形が潰れてしまい、実機とは違う形で自動スクロールが起動しなくなる)
+        if (style.position === 'fixed') break;
+      }
+      if (ancestor === document.documentElement) break;
+      ancestor = ancestor.parentElement;
+    }
+    return list;
+  }
+
+  // clipAncestorsを渡さない呼び出し(診断ログ等、毎フレームではない経路)はここで
+  // その場で調べる(従来どおりの挙動)。DragAutoscroller._tick()はcollectClipAncestors()を
+  // begin()時に1回呼んだ結果を渡すことでgetComputedStyleを毎フレーム避ける
+  function computeVisibleRect(el, clipAncestors) {
     const base = el.getBoundingClientRect();
     let rect = { left: base.left, top: base.top, right: base.right, bottom: base.bottom };
     const vw = pickViewportDim(
@@ -94,28 +129,10 @@
     if (vw && vh) {
       rect = intersectRect(rect, { left: 0, top: 0, right: vw, bottom: vh });
     }
-    let ancestor = el.parentElement;
-    let guard = 0;
-    while (ancestor && ancestor.nodeType === 1 && guard < 50) {
-      guard += 1;
-      let style = null;
-      try { style = window.getComputedStyle(ancestor); } catch (_e) { style = null; }
-      if (style) {
-        const ox = style.overflowX;
-        const oy = style.overflowY;
-        if ((ox && ox !== 'visible') || (oy && oy !== 'visible')) {
-          const aRect = ancestor.getBoundingClientRect();
-          rect = intersectRect(rect, { left: aRect.left, top: aRect.top, right: aRect.right, bottom: aRect.bottom });
-        }
-        // position:fixedな祖先(オーバーレイ自身のルート要素がこれ)に着いたらそこで打ち切る。
-        // fixed要素はさらに上の祖先(ここではbody等)のoverflowクリップの影響を受けない
-        // (bodyがoverflow:hiddenかつ高さ0でも、fixedなオーバーレイ自体は普通に表示される。
-        // ここで打ち切らずに上まで交差させると、空のbody(高さ0)のe2e用フェイクページで
-        // 見えている矩形が潰れてしまい、実機とは違う形で自動スクロールが起動しなくなる)
-        if (style.position === 'fixed') break;
-      }
-      if (ancestor === document.documentElement) break;
-      ancestor = ancestor.parentElement;
+    const ancestors = clipAncestors || collectClipAncestors(el);
+    for (let i = 0; i < ancestors.length; i += 1) {
+      const aRect = ancestors[i].getBoundingClientRect();
+      rect = intersectRect(rect, { left: aRect.left, top: aRect.top, right: aRect.right, bottom: aRect.bottom });
     }
     return rect;
   }
@@ -133,6 +150,12 @@
       this.kind = '';
       this.totalScrolled = 0;
       this._lastDiagAt = 0;
+      // 3.4.0(行の使い回し・計測後の最適化): computeVisibleRectが毎フレーム祖先の
+      // getComputedStyleを調べ直すと強制レイアウトの比率が上がる(計測で確認)。ドラッグ中は
+      // 祖先の構造・overflow指定自体は変わらない前提で、begin()時に1回だけ調べてここへ
+      // キャッシュし、_tick()では使い回す(矩形=getBoundingClientRectだけは毎フレーム取り直す)
+      this._clipAncestors = null;
+      this._clipAncestorsFor = null;
     }
 
     // ドラッグ開始時に1回呼ぶ: 対象スクロール要素の状態をまとめて診断ログに出す
@@ -143,9 +166,11 @@
       this._lastDiagAt = 0;
       const scrollEl = this.getScrollEl ? this.getScrollEl() : null;
       if (!scrollEl) return;
+      this._clipAncestors = collectClipAncestors(scrollEl);
+      this._clipAncestorsFor = scrollEl;
       try {
         const rawRect = scrollEl.getBoundingClientRect();
-        const visRect = computeVisibleRect(scrollEl);
+        const visRect = computeVisibleRect(scrollEl, this._clipAncestors);
         const cs = window.getComputedStyle(scrollEl);
         const cls = String(scrollEl.className || '').trim().split(/\s+/).join('.');
         this.logFn(`[PB][diag] autoscroll start kind=${kind} el=${scrollEl.tagName}${cls ? '.' + cls : ''} `
@@ -178,7 +203,13 @@
       this.rafId = null;
       const scrollEl = this.getScrollEl ? this.getScrollEl() : null;
       if (scrollEl && this.pointer) {
-        const rect = computeVisibleRect(scrollEl);
+        // scrollElがbegin()時と同じ要素なら、キャッシュ済みのクリップ祖先一覧(overflow調べ済み)
+        // を使い回す。違う場合(通常は起きない)だけその場で調べ直す安全側のフォールバック
+        if (this._clipAncestorsFor !== scrollEl) {
+          this._clipAncestors = collectClipAncestors(scrollEl);
+          this._clipAncestorsFor = scrollEl;
+        }
+        const rect = computeVisibleRect(scrollEl, this._clipAncestors);
         // 整数pxに丸める(小数のscrollTopは描画のにじみ・余計な再計算のもとになる)
         const dx = Math.round(computeAutoscrollAxisDelta(this.pointer.x, rect.left, rect.right));
         const dy = Math.round(computeAutoscrollAxisDelta(this.pointer.y, rect.top, rect.bottom));
@@ -221,6 +252,8 @@
         this.rafId = null;
       }
       this.pointer = null;
+      this._clipAncestors = null;
+      this._clipAncestorsFor = null;
       if (wasRunning && reason) {
         this.logFn(`[PB][diag] autoscroll stop reason=${reason} kind=${this.kind} total=${Math.round(this.totalScrolled)}`);
       }
@@ -5614,24 +5647,79 @@
         this.restorePendingFocus();
         return;
       }
-      // 可視範囲のinputを丸ごと作り直すため、アンカー先を失うルックアップ
-      // 候補ピッカーも一緒に片付ける（同じ座標に別のinput要素が新設される）
-      this.destroyGridLookupPicker();
-      this.virtualStart = start;
-      this.virtualEnd = end;
-      this.inputsByRow.clear();
-      this.rowHeaderContainer.textContent = '';
+
       this.rowHeaderContainer.style.height = `${totalRows * this.rowHeight}px`;
-      this.tableContainer.textContent = '';
       const totalWidth = this.fields.reduce((sum, field) => sum + (field.width || DEFAULT_COLUMN_WIDTH), 0);
       this.tableContainer.style.width = `${totalWidth}px`;
 
+      const prevStart = this.virtualStart;
+      const prevEnd = this.virtualEnd;
       const headerFrag = document.createDocumentFragment();
       const tableFrag = document.createDocumentFragment();
 
-      for (let rowIndex = start; rowIndex < end; rowIndex += 1) {
-        const row = visibleRows[rowIndex];
-        if (!row) continue;
+      if (force) {
+        // 3.4.0(行の使い回し): forceは従来どおり安全側として全部作り直す(ソート/フィルタ/
+        // 列幅/列順/データ再読込/undo・redo/保存トグル・行の削除予定トグル等)。
+        // どのinputも作り直すので、ルックアップ候補ピッカーは無条件で片付ける
+        this.destroyGridLookupPicker();
+        for (let rowIndex = prevStart; rowIndex < prevEnd; rowIndex += 1) {
+          this.removeGridRowElements(rowIndex);
+        }
+        this.virtualStart = start;
+        this.virtualEnd = end;
+        for (let rowIndex = start; rowIndex < end; rowIndex += 1) {
+          const row = visibleRows[rowIndex];
+          if (!row) continue;
+          const built = this.createGridRowElements(rowIndex, row);
+          headerFrag.appendChild(built.header);
+          tableFrag.appendChild(built.rowLine);
+        }
+      } else {
+        // 3.4.0(行の使い回し): 範囲に入った行だけ作って足し、出た行だけ外す。
+        // 両方の範囲に残る行(rowIndexが同じ)の要素は一切触らない
+        // (フォーカス・キャレット位置・IME途中入力をそのまま保つ)。
+        // ルックアップ候補ピッカーは、そのアンカーのinputの行が実際に外れる時だけ
+        // removeGridRowElements の中で片付ける(残るなら開いたままになる)
+        this.virtualStart = start;
+        this.virtualEnd = end;
+        for (let rowIndex = prevStart; rowIndex < prevEnd; rowIndex += 1) {
+          if (rowIndex >= start && rowIndex < end) continue; // 残る行
+          this.removeGridRowElements(rowIndex);
+        }
+        for (let rowIndex = start; rowIndex < end; rowIndex += 1) {
+          if (rowIndex >= prevStart && rowIndex < prevEnd) continue; // 既にある行
+          const row = visibleRows[rowIndex];
+          if (!row) continue;
+          const built = this.createGridRowElements(rowIndex, row);
+          headerFrag.appendChild(built.header);
+          tableFrag.appendChild(built.rowLine);
+        }
+      }
+
+      this.rowHeaderContainer.appendChild(headerFrag);
+      this.tableContainer.appendChild(tableFrag);
+      this.repaintSelection();
+      this.restorePendingFocus();
+    }
+
+    // 3.4.0(行の使い回し): 1行分の要素(ヘッダー・セルinput群)を外す。この行がルックアップ
+    // 候補ピッカーのアンカーだった場合だけ、そのピッカーも片付ける(残る行なら呼ばれないので
+    // 開いたままになる)
+    removeGridRowElements(rowIndex) {
+      const rowInputs = this.inputsByRow.get(rowIndex);
+      if (!rowInputs) return;
+      if (this.gridLookupPicker && rowInputs.includes(this.gridLookupPicker.input)) {
+        this.destroyGridLookupPicker();
+      }
+      if (rowInputs.headerEl?.parentElement) rowInputs.headerEl.remove();
+      if (rowInputs.rowLineEl?.parentElement) rowInputs.rowLineEl.remove();
+      this.inputsByRow.delete(rowIndex);
+    }
+
+    // 3.4.0(行の使い回し): 1行分の要素(ヘッダー・セルinput群)を新規に作る。権限判定・
+    // 削除予定・readonlyの見た目・title・イベント登録は丸ごとここに集約する(以前は
+    // updateVirtualRowsのループ本体だった)。作った行はここでthis.inputsByRowにも登録する
+    createGridRowElements(rowIndex, row) {
         const recordId = String(row.id || '').trim();
         const pendingDelete = this.pendingDeletes.has(recordId);
         const rowEditable = this.isOverlayEditable() && this.permissionService.canEditRecord(recordId);
@@ -5701,7 +5789,6 @@
         permEl.textContent = rowEditableVisual ? '✎' : '👁';
         permEl.title = this.getRowPermissionStatusText(recordId);
         header.appendChild(permEl);
-        headerFrag.appendChild(header);
 
         const rowLine = document.createElement('div');
         rowLine.className = 'pb-overlay__row';
@@ -5794,14 +5881,10 @@
           inputsRow[colIndex] = input;
         });
 
-        tableFrag.appendChild(rowLine);
+        inputsRow.headerEl = header;
+        inputsRow.rowLineEl = rowLine;
         this.inputsByRow.set(rowIndex, inputsRow);
-      }
-
-      this.rowHeaderContainer.appendChild(headerFrag);
-      this.tableContainer.appendChild(tableFrag);
-      this.repaintSelection();
-      this.restorePendingFocus();
+        return { header, rowLine, inputsRow };
     }
 
     createInputBase(field) {
