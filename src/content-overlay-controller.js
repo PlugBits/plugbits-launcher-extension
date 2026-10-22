@@ -4,6 +4,91 @@
 // scripts/build.mjs が content.js 内の @@INCLUDE マーカー位置へビルド時に
 // テキストとしてそのまま埋め込みます(実行時のスコープ・挙動は分割前と完全に同一)。
 // @@BODY_START
+  // 3.4.0: ドラッグ中(範囲選択・フィルハンドル)にポインターがスクロール領域の端に
+  // 近づいたら自動でスクロールする共通ヘルパー。メイングリッド(一覧)とサブテーブル編集
+  // モーダルの両方で使う(どちらもスクロール要素だけが違う)。
+  // 速度はスクロール領域の端からの距離で決める: AUTOSCROLL_EDGE px以内(または領域の外)に
+  // 入ったら、端に近いほど遅く・外に出るほど速く(上限AUTOSCROLL_MAX_SPEED)スクロールする。
+  // 実際のスクロールはrequestAnimationFrameで毎フレーム進め、呼び出し側のonTickで
+  // (スクロール後の最新位置から)選択範囲/フィル範囲の終端セルを計算し直させる。
+  // stop()は必ずcancelAnimationFrameで解除する(mouseup・モーダルを閉じた時・オーバーレイを
+  // 閉じた時の全経路で呼ぶこと。呼び出し側がこのクラスのインスタンスを握ってリークを防ぐ)
+  const AUTOSCROLL_EDGE = 28;
+  const AUTOSCROLL_MIN_SPEED = 2;
+  const AUTOSCROLL_MAX_SPEED = 24;
+
+  function computeAutoscrollAxisDelta(pos, start, end) {
+    const distFromStart = pos - start;
+    if (distFromStart < AUTOSCROLL_EDGE) {
+      const proximity = AUTOSCROLL_EDGE - distFromStart;
+      const speed = Math.max(AUTOSCROLL_MIN_SPEED, Math.min(AUTOSCROLL_MAX_SPEED,
+        AUTOSCROLL_MIN_SPEED + (AUTOSCROLL_MAX_SPEED - AUTOSCROLL_MIN_SPEED) * (proximity / AUTOSCROLL_EDGE)));
+      return -speed;
+    }
+    const distFromEnd = end - pos;
+    if (distFromEnd < AUTOSCROLL_EDGE) {
+      const proximity = AUTOSCROLL_EDGE - distFromEnd;
+      const speed = Math.max(AUTOSCROLL_MIN_SPEED, Math.min(AUTOSCROLL_MAX_SPEED,
+        AUTOSCROLL_MIN_SPEED + (AUTOSCROLL_MAX_SPEED - AUTOSCROLL_MIN_SPEED) * (proximity / AUTOSCROLL_EDGE)));
+      return speed;
+    }
+    return 0;
+  }
+
+  class DragAutoscroller {
+    constructor(getScrollEl, onTick) {
+      this.getScrollEl = getScrollEl;
+      this.onTick = onTick;
+      this.rafId = null;
+      this.pointer = null;
+    }
+
+    // 最新のポインター座標(clientX/clientY)を渡す。ドラッグ中は毎mousemoveで呼ぶ。
+    // ループがまだ無ければここで起動する(無限に呼んでも1本しか走らない)
+    setPointer(clientX, clientY) {
+      this.pointer = { x: clientX, y: clientY };
+      this._ensureLoop();
+    }
+
+    _ensureLoop() {
+      if (this.rafId !== null) return;
+      this.rafId = requestAnimationFrame(() => this._tick());
+    }
+
+    _tick() {
+      this.rafId = null;
+      const scrollEl = this.getScrollEl ? this.getScrollEl() : null;
+      if (!scrollEl || !this.pointer) return;
+      const rect = scrollEl.getBoundingClientRect();
+      const dx = computeAutoscrollAxisDelta(this.pointer.x, rect.left, rect.right);
+      const dy = computeAutoscrollAxisDelta(this.pointer.y, rect.top, rect.bottom);
+      if (!dx && !dy) return; // デッドゾーン内。次のsetPointer(mousemove)が来るまで止めておく
+      const prevLeft = scrollEl.scrollLeft;
+      const prevTop = scrollEl.scrollTop;
+      if (dx) {
+        scrollEl.scrollLeft = Math.max(0, Math.min(scrollEl.scrollWidth - scrollEl.clientWidth, scrollEl.scrollLeft + dx));
+      }
+      if (dy) {
+        scrollEl.scrollTop = Math.max(0, Math.min(scrollEl.scrollHeight - scrollEl.clientHeight, scrollEl.scrollTop + dy));
+      }
+      const moved = scrollEl.scrollLeft !== prevLeft || scrollEl.scrollTop !== prevTop;
+      if (moved) {
+        if (typeof this.onTick === 'function') this.onTick(scrollEl, this.pointer);
+        this.rafId = requestAnimationFrame(() => this._tick());
+      }
+      // 端まで到達して動けなかった(moved===false)場合はここでループを止める。
+      // ポインターがさらに外へ動けば次のsetPointerで再開する
+    }
+
+    stop() {
+      if (this.rafId !== null) {
+        cancelAnimationFrame(this.rafId);
+        this.rafId = null;
+      }
+      this.pointer = null;
+    }
+  }
+
   class ExcelOverlayController {
     // [PB][diag] の診断ログ。ストア版は false(出さない)。診断版は `PB_DIAG=1 npm run build` で
     // scripts/build.mjs が true に書き換える。ストア版でも、その kintone のタブで
@@ -252,6 +337,14 @@
       this.fillDrag = null;
       this._boundFillDragMove = null;
       this._boundFillDragUp = null;
+      // 3.4.0: 範囲選択ドラッグ中の自動スクロール監視用(mousemoveのbind/unbindは
+      // startSelection/endSelectionで行う。フィルドラッグ側はthis.gridAutoscrollerを
+      // そのまま共有し、onFillDragMove/cancelFillDrag/commitFillDragで止める)
+      this._boundGridSelectDragMove = null;
+      this.gridAutoscroller = new DragAutoscroller(
+        () => this.bodyScroll,
+        (_scrollEl, pointer) => this.handleGridAutoscrollTick(pointer)
+      );
       this.subtableActivationTs = 0;
       this.boundRadioPickerScrollHandler = () => { this.repositionRadioPicker(); };
       this.boundRadioPickerResizeHandler = () => { this.repositionRadioPicker(); };
@@ -842,6 +935,10 @@
       if (this.handleBeforeUnload) {
         window.removeEventListener('beforeunload', this.handleBeforeUnload);
       }
+      // 3.4.0: オーバーレイを閉じる時、ドラッグ中のまま残っている自動スクロールのrAFを
+      // 必ず解除する(範囲選択ドラッグ監視用リスナー・フィルドラッグ中なら後者も)
+      this._teardownGridSelectDragWatch();
+      if (this.fillDrag) this.cancelFillDrag();
       this.closeLayoutPresetMenu();
       this.closeToolMenu();
     }
@@ -6781,6 +6878,14 @@
       let boundEditorFillDragMove = null;
       let boundEditorFillDragUp = null;
       let editorFillHandleEl = null;
+      // 3.4.0: 範囲選択ドラッグ中の自動スクロール監視用(mousemoveのbind/unbindは
+      // handleDataCellMouseDown/onEditorGlobalMouseUpで行う)。フィルドラッグ側は
+      // editorAutoscrollerをそのまま共有し、onEditorFillDragMove/cancel・commitEditorFillDragで止める
+      let boundEditorSelectDragMove = null;
+      const editorAutoscroller = new DragAutoscroller(
+        () => tableWrap,
+        (_scrollEl, pointer) => handleEditorAutoscrollTick(pointer)
+      );
       // 3.4.0: モーダル専用のUndo/Redo。メイングリッドのthis.undoStack/this.redoStack
       // (pushHistory/undo/redo)とは完全に別物で、モーダルを開いている間だけ生き、
       // 保存/キャンセル/×/Escで閉じると同時に消える(closeSubtableEditor側では何もせず、
@@ -6963,6 +7068,81 @@
       // 旧バグ=ソース行数の倍数でない範囲で書き過ぎ/書き漏らしする、は引き継がない)。
       // 行を追加しない(最終行より下はtbody上にセルが無いのでonEditorFillDragMoveが
       // target不在のまま終わり、自然にそこで止まる=メイングリッドと同じ挙動)
+      // 3.4.0: ドラッグ中(範囲選択/フィルハンドル)の自動スクロール用。モーダルのサブテーブル行は
+      // (メイングリッドと違い)仮想化されていない=全行・全セルが常にDOMに存在するため、実測の
+      // getBoundingClientRect()で行・列の境界を調べれば済む(スクロールで見えていなくても
+      // 座標は正しく返る)。クリック位置が最初/最後の行・列より外ならそちら側へクランプする
+      const hitTestEditorCell = (clientX, clientY) => {
+        const rowEls = Array.from(tbody.querySelectorAll('tr.pb-subtable__row'));
+        if (!rowEls.length) return null;
+        const firstRowRect = rowEls[0].getBoundingClientRect();
+        const lastRowRect = rowEls[rowEls.length - 1].getBoundingClientRect();
+        let rowIdx;
+        if (clientY <= firstRowRect.top) {
+          rowIdx = 0;
+        } else if (clientY >= lastRowRect.bottom) {
+          rowIdx = rowEls.length - 1;
+        } else {
+          rowIdx = rowEls.findIndex((rowEl) => {
+            const r = rowEl.getBoundingClientRect();
+            return clientY >= r.top && clientY < r.bottom;
+          });
+          if (rowIdx < 0) rowIdx = rowEls.length - 1;
+        }
+        const dataCells = Array.from(rowEls[rowIdx].querySelectorAll('.pb-subtable__cell[data-col-index]'));
+        if (!dataCells.length) return null;
+        const firstCellRect = dataCells[0].getBoundingClientRect();
+        const lastCellRect = dataCells[dataCells.length - 1].getBoundingClientRect();
+        let colIdx;
+        if (clientX <= firstCellRect.left) {
+          colIdx = 0;
+        } else if (clientX >= lastCellRect.right) {
+          colIdx = dataCells.length - 1;
+        } else {
+          colIdx = dataCells.findIndex((cellEl) => {
+            const r = cellEl.getBoundingClientRect();
+            return clientX >= r.left && clientX < r.right;
+          });
+          if (colIdx < 0) colIdx = dataCells.length - 1;
+        }
+        return { row: rowIdx, col: colIdx };
+      };
+
+      // editorAutoscrollerが実際にスクロールを進めた直後に呼ばれる。スクロール後の最新位置+
+      // 最後に覚えたポインター座標から終端セルを計算し直す(フィルハンドルは垂直方向のみ=列は
+      // 選択範囲のまま変えない。これはupdateEditorFillDragの既存仕様に揃えてある)
+      const handleEditorAutoscrollTick = (pointer) => {
+        const hit = hitTestEditorCell(pointer.x, pointer.y);
+        if (!hit) return;
+        if (editorFillDrag) {
+          updateEditorFillDrag(hit.row);
+        } else if (editorIsDragging) {
+          extendEditorSelection(hit.row, hit.col);
+        }
+      };
+
+      const ensureEditorSelectDragWatch = () => {
+        if (boundEditorSelectDragMove) return;
+        boundEditorSelectDragMove = (ev) => onEditorSelectDragMove(ev);
+        document.addEventListener('mousemove', boundEditorSelectDragMove);
+      };
+
+      const teardownEditorSelectDragWatch = () => {
+        if (boundEditorSelectDragMove) {
+          document.removeEventListener('mousemove', boundEditorSelectDragMove);
+          boundEditorSelectDragMove = null;
+        }
+        editorAutoscroller.stop();
+      };
+
+      const onEditorSelectDragMove = (ev) => {
+        if (!editorIsDragging) {
+          teardownEditorSelectDragWatch();
+          return;
+        }
+        editorAutoscroller.setPointer(ev.clientX, ev.clientY);
+      };
+
       const startEditorFillDrag = (e) => {
         if (readOnlyMode || !editorSelection) return; // 無料/view-onlyはno-op(メイングリッドと同じ)
         e.preventDefault();
@@ -6983,6 +7163,7 @@
 
       const onEditorFillDragMove = (ev) => {
         if (!editorFillDrag) return;
+        editorAutoscroller.setPointer(ev.clientX, ev.clientY);
         const el = document.elementFromPoint(ev.clientX, ev.clientY);
         const cell = el?.closest?.('.pb-subtable__cell[data-row-index]');
         if (!cell) return;
@@ -7025,6 +7206,7 @@
         boundEditorFillDragMove = null;
         boundEditorFillDragUp = null;
         editorFillDrag = null;
+        editorAutoscroller.stop();
         repaintEditorSelection();
         return true;
       };
@@ -7034,6 +7216,7 @@
         document.removeEventListener('mouseup', boundEditorFillDragUp);
         boundEditorFillDragMove = null;
         boundEditorFillDragUp = null;
+        editorAutoscroller.stop();
 
         const drag = editorFillDrag;
         editorFillDrag = null;
@@ -7521,6 +7704,7 @@
         } else {
           setEditorSelectionSingle(rowIdx, colIdx);
           editorIsDragging = true;
+          ensureEditorSelectDragWatch();
         }
         // 明示的にフォーカスを移す: 直前の操作でDOMが再構築された直後だと、ブラウザの
         // 既定のmousedownフォーカスだけでは古い(既に外れた)要素にフォーカスが残ることがある
@@ -7564,6 +7748,7 @@
       const onEditorGlobalMouseUp = () => {
         editorIsDragging = false;
         editorRowIsDragging = false;
+        teardownEditorSelectDragWatch();
       };
       document.addEventListener('mouseup', onEditorGlobalMouseUp, true);
 
@@ -8193,6 +8378,7 @@
         cleanup: () => {
           document.removeEventListener('mouseup', onEditorGlobalMouseUp, true);
           cancelEditorFillDrag();
+          teardownEditorSelectDragWatch();
           closeEditorChoicePicker();
         }
       };
@@ -8924,6 +9110,9 @@
 
     onFillDragMove(e) {
       if (!this.fillDrag) return;
+      // 3.4.0: 端に近づいたら自動スクロールさせる(実際の判定・スクロール・終端再計算は
+      // gridAutoscroller/handleGridAutoscrollTick側。ここでは最新座標を渡すだけ)
+      this.gridAutoscroller.setPointer(e.clientX, e.clientY);
       const el = document.elementFromPoint(e.clientX, e.clientY);
       const cell = el?.closest?.('.pb-overlay__cell');
       if (!cell) return;
@@ -8974,6 +9163,7 @@
       this._boundFillDragMove = null;
       this._boundFillDragUp = null;
       this.fillDrag = null;
+      this.gridAutoscroller.stop();
       this.repaintSelection();
       return true;
     }
@@ -8990,6 +9180,7 @@
       document.removeEventListener('mouseup', this._boundFillDragUp);
       this._boundFillDragMove = null;
       this._boundFillDragUp = null;
+      this.gridAutoscroller.stop();
 
       const drag = this.fillDrag;
       this.fillDrag = null;
@@ -9277,9 +9468,73 @@
       }
       this.armedCell = { rowIndex: r, colIndex: c };
       this.dragSelecting = true;
+      this._ensureGridSelectDragWatch();
       this.repaintSelection();
       this.updateStats();
       this.focusCell(r, c);
+    }
+
+    // 3.4.0: 範囲選択ドラッグ中、ポインターがthis.bodyScrollの端に近づいたら自動スクロールする。
+    // mouseenter(handleCellHover)は仮想化で未レンダリングの行には届かないため、documentの
+    // mousemoveを別途見て、座標をthis.gridAutoscrollerへ渡すだけのここは薄い窓口にする
+    // (実際のスクロール・終端再計算はhandleGridAutoscrollTick/computeGridCellAtPointが担う)
+    _ensureGridSelectDragWatch() {
+      if (this._boundGridSelectDragMove) return;
+      this._boundGridSelectDragMove = (event) => this.onGridSelectDragMove(event);
+      document.addEventListener('mousemove', this._boundGridSelectDragMove);
+    }
+
+    _teardownGridSelectDragWatch() {
+      if (this._boundGridSelectDragMove) {
+        document.removeEventListener('mousemove', this._boundGridSelectDragMove);
+        this._boundGridSelectDragMove = null;
+      }
+      this.gridAutoscroller.stop();
+    }
+
+    onGridSelectDragMove(event) {
+      if (!this.dragSelecting || this.editingCell) {
+        this._teardownGridSelectDragWatch();
+        return;
+      }
+      this.gridAutoscroller.setPointer(event.clientX, event.clientY);
+    }
+
+    // 3.4.0: フィルハンドル/範囲選択の自動スクロール共通: ビューポート座標(clientX/clientY)から
+    // 「仮想化されたメイングリッド上のどの行・列にあたるか」をDOM探索なしで計算する
+    // (rowHeight×scrollTop/this.getColumnWidthの累積で求める。elementFromPointは
+    // ポインターがグリッド外や未レンダリング行の上にあると失敗するため使わない)
+    computeGridCellAtPoint(clientX, clientY) {
+      if (!this.bodyScroll) return null;
+      const totalRows = this.getVisibleRowCount();
+      if (!totalRows || !this.fields.length) return null;
+      const rect = this.bodyScroll.getBoundingClientRect();
+      const relY = clientY - rect.top + this.bodyScroll.scrollTop;
+      const relX = clientX - rect.left + this.bodyScroll.scrollLeft;
+      const row = Math.max(0, Math.min(totalRows - 1, Math.floor(relY / this.rowHeight)));
+      let col = this.fields.length - 1;
+      let acc = 0;
+      for (let i = 0; i < this.fields.length; i += 1) {
+        const width = this.getColumnWidth(i);
+        if (relX < acc + width) { col = i; break; }
+        acc += width;
+      }
+      col = Math.max(0, Math.min(this.fields.length - 1, col));
+      return { row, col };
+    }
+
+    // 3.4.0: gridAutoscrollerが実際にスクロールを進めた直後に呼ばれる。スクロール後の
+    // 最新スクロール位置+最後に覚えたポインター座標から終端セルを計算し直し、フィルドラッグ中
+    // ならupdateFillDrag、範囲選択ドラッグ中ならupdateSelectionRangeへ反映する
+    handleGridAutoscrollTick(pointer) {
+      this.updateVirtualRows();
+      const hit = this.computeGridCellAtPoint(pointer.x, pointer.y);
+      if (!hit) return;
+      if (this.fillDrag) {
+        this.updateFillDrag(hit.row, hit.col);
+      } else if (this.dragSelecting && !this.editingCell) {
+        this.updateSelectionRange(hit.row, hit.col);
+      }
     }
 
     updateSelectionRange(rowIndex, colIndex, focus = false) {
@@ -9314,6 +9569,7 @@
 
     endSelection() {
       this.dragSelecting = false;
+      this._teardownGridSelectDragWatch();
     }
 
     isCellSelected(rowIndex, colIndex) {

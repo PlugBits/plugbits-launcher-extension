@@ -80,7 +80,10 @@ const SUITES = [
   // 3.4.0: サブテーブル編集モーダル専用のUndo/Redo(メイングリッドのthis.undoStack/
   // this.redoStackとは別物。Ctrl+Z/Ctrl+Y/Ctrl+Shift+Z・見出し欄ボタン・編集中は
   // ネイティブ入力へ任せる・IME無視・モーダルを開いている間は本体のUndo/Redoに触れない)
-  ['subtable-undo-e2e', './subtable-undo-e2e.test.mjs']
+  ['subtable-undo-e2e', './subtable-undo-e2e.test.mjs'],
+  // 3.4.0: ドラッグ中(範囲選択/フィルハンドル)の自動スクロール(一覧・サブテーブル編集
+  // モーダルの両方・縦横)+モーダルのUndo/Redoが見出し欄にあり、フッターには無いことの確認
+  ['drag-autoscroll-e2e', './drag-autoscroll-e2e.test.mjs']
 ];
 
 const filter = process.argv[2];
