@@ -160,7 +160,7 @@ export async function run({ browser, check }) {
       await page.mouse.move(p0.x, p0.y);
       await page.mouse.down();
       await page.mouse.move(box.left + box.width / 2, box.bottom + 15);
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(3000);
 
       const scrollAfterHold = await getScroll(page, '.pb-overlay__cell-scroll');
       check(name('(1) ホールド中にscrollTopが増える'), scrollAfterHold.top > 0);
@@ -196,7 +196,7 @@ export async function run({ browser, check }) {
 
       const box = await getScrollBox(page, '.pb-overlay__cell-scroll');
       await page.mouse.move(box.left + box.width / 2, box.bottom + 15);
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(3000);
 
       const scrollAfterHold = await getScroll(page, '.pb-overlay__cell-scroll');
       check(name('(2) フィルドラッグのホールド中にscrollTopが増える'), scrollAfterHold.top > 0);

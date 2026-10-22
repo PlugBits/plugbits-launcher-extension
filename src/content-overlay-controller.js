@@ -179,8 +179,9 @@
       const scrollEl = this.getScrollEl ? this.getScrollEl() : null;
       if (scrollEl && this.pointer) {
         const rect = computeVisibleRect(scrollEl);
-        const dx = computeAutoscrollAxisDelta(this.pointer.x, rect.left, rect.right);
-        const dy = computeAutoscrollAxisDelta(this.pointer.y, rect.top, rect.bottom);
+        // 整数pxに丸める(小数のscrollTopは描画のにじみ・余計な再計算のもとになる)
+        const dx = Math.round(computeAutoscrollAxisDelta(this.pointer.x, rect.left, rect.right));
+        const dy = Math.round(computeAutoscrollAxisDelta(this.pointer.y, rect.top, rect.bottom));
         if (dx || dy) {
           const prevLeft = scrollEl.scrollLeft;
           const prevTop = scrollEl.scrollTop;
@@ -5601,8 +5602,14 @@
       const viewportHeight = this.bodyScroll.clientHeight || (10 * this.rowHeight);
       const scrollTop = this.bodyScroll.scrollTop;
       const buffer = 6;
-      const start = Math.max(0, Math.floor(scrollTop / this.rowHeight) - buffer);
-      const end = Math.min(totalRows, Math.ceil((scrollTop + viewportHeight) / this.rowHeight) + buffer);
+      // 3.4.0: 描画範囲をVIRTUAL_CHUNK行単位にそろえる。1行またぐたびに可視範囲を丸ごと作り直すと、
+      // ドラッグ中の自動スクロール(毎フレーム最大24px)でほぼ毎フレーム再構築が走ってもたつくため、
+      // 範囲が変わる(=作り直す)のをVIRTUAL_CHUNK行に1回に減らす。ホイールでのスクロールも同じく軽くなる
+      const VIRTUAL_CHUNK = 8;
+      const rawStart = Math.max(0, Math.floor(scrollTop / this.rowHeight) - buffer);
+      const rawEnd = Math.ceil((scrollTop + viewportHeight) / this.rowHeight) + buffer;
+      const start = Math.floor(rawStart / VIRTUAL_CHUNK) * VIRTUAL_CHUNK;
+      const end = Math.min(totalRows, Math.ceil(rawEnd / VIRTUAL_CHUNK) * VIRTUAL_CHUNK);
       if (!force && start === this.virtualStart && end === this.virtualEnd) {
         this.restorePendingFocus();
         return;
@@ -9872,6 +9879,12 @@
       this.updateVirtualRows();
       const hit = this.computeGridCellAtPoint(pointer.x, pointer.y);
       if (!hit) return;
+      // 終端セルが前のフレームと同じなら、選択の塗り直し・集計(updateStats)を飛ばす。
+      // 同じドラッグ(fillDrag/selectionのオブジェクト)の間だけ比べる
+      const owner = this.fillDrag || this.selection;
+      const last = this._gridAutoscrollLastHit;
+      if (last && last.owner === owner && last.row === hit.row && last.col === hit.col) return;
+      this._gridAutoscrollLastHit = { owner, row: hit.row, col: hit.col };
       if (this.fillDrag) {
         this.updateFillDrag(hit.row, hit.col);
       } else if (this.dragSelecting && !this.editingCell) {
