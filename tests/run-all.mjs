@@ -56,6 +56,9 @@ const SUITES = [
   // でもクライアント側の時間切れで必ず解決することの単体テスト
   ['metadata-bundle-timeout-unit', './metadata-bundle-timeout-unit.test.mjs'],
   ['query-split-unit', './query-split-unit.test.mjs'],
+  // 次版: hasAppContextDomHint(kintone内部のgaiaクラス/data-app-id等を読む予備判定)を撤去。
+  // URL判定にゲストスペース(/k/guest/<spaceId>/<appId>/...)を追加して補ったことの確認
+  ['app-context-hint-unit', './app-context-hint-unit.test.mjs'],
   ['view-column-sync-unit', './view-column-sync-unit.test.mjs'],
   // ビュー列連動 E2E（chrome-stub + fake bridge + chrome.runtime.sendMessage
   // のPB_GET_METADATA_BUNDLE応答で実際のビュー列連動を再現する系）
