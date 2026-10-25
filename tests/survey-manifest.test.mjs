@@ -21,11 +21,11 @@ export async function run({ check }) {
   const head = readHeadManifest();
   const current = readWorkingManifest();
 
-  // 3.4.0: サブテーブル編集モーダルのスプレッドシート風選択機能でバージョンを更新。
-  // (このリポジトリではコミット後にHEAD自体が3.4.0になるため、HEADとの比較ではなく
+  // 3.4.1: 設定画面「キーを紛失した方はこちら」でバージョンを更新。
+  // (このリポジトリではコミット後にHEAD自体が3.4.1になるため、HEADとの比較ではなく
   // 固定の期待バージョン文字列で直接確認する。permissions等が変わっていないことは
   // 後続のcheckでHEADとの比較により検証する)
-  check('survey-manifest: version は 3.4.0 に上がっている', current.version === '3.4.0');
+  check('survey-manifest: version は 3.4.1 に上がっている', current.version === '3.4.1');
 
   const permissionKeys = [
     'permissions',
