@@ -18,6 +18,9 @@ const SUITES = [
   ['palette-settings', './palette-settings.test.mjs'],
   ['trial', './trial.test.mjs'],
   ['options-pro-actions', './options-pro-actions.test.mjs'],
+  // 次版: Pro ライセンスタブのキー入力欄の下に「キーを紛失した方はこちら」リンク
+  // (plugbits.app/pro.html#recover を新規タブで開くだけ。拡張からAPIは叩かない)
+  ['options-pro-recover-link', './options-pro-recover-link.test.mjs'],
   ['options-api-usage', './options-api-usage.test.mjs'],
   ['api-usage-tracking', './api-usage-tracking.test.mjs'],
   // 3.3.0: 利用者アンケート A（onInstalled適格化・設定画面バナー・パレット行・manifest不変の確認）
